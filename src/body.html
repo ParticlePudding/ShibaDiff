@@ -1,0 +1,222 @@
+<header id="top">
+  <div class="brand"><i></i><span class="bt">文書比較ツール</span></div>
+  <nav id="tabs" role="tablist" aria-label="機能の切り替え">
+    <button role="tab" data-tab="text" class="on">テキスト比較</button>
+    <button role="tab" data-tab="page">ページ表示・注釈</button>
+    <button role="tab" data-tab="overlay">重ね合わせ比較</button>
+    <button role="tab" data-tab="folder">フォルダ比較</button>
+  </nav>
+  <div class="right">
+    <button id="btnClear" title="左右のファイルを閉じる">すべて閉じる</button>
+    <button id="btnSettings" title="設定（表示・日付印・保存データ・このツールについて）">設定</button>
+    <button id="btnHelp">ヘルプ</button>
+  </div>
+</header>
+
+<section id="slots">
+  <div class="slot" data-side="0" role="button" tabindex="0" aria-label="左のファイルを選択（Enter）">
+    <div class="slot-main"><span class="badge">左</span><span class="fname">ファイルをドロップ、またはクリックして選択</span></div>
+    <div class="slot-info"><span class="meta"></span></div>
+    <input type="file" hidden>
+  </div>
+  <button id="btnSwap" title="左右を入れ替え">⇄</button>
+  <div class="slot" data-side="1" role="button" tabindex="0" aria-label="右のファイルを選択（Enter）">
+    <div class="slot-main"><span class="badge">右</span><span class="fname">ファイルをドロップ、またはクリックして選択</span></div>
+    <div class="slot-info"><span class="meta"></span></div>
+    <input type="file" hidden>
+  </div>
+</section>
+
+<main>
+  <!-- テキスト比較 -->
+  <section id="tab-text" class="tab on">
+    <div class="toolbar">
+      <button id="tLayout" title="1列にまとめて表示">一列表示</button>
+      <div class="sep"></div>
+      <div class="grp">
+        <button id="tFirst" title="最初の差分">⤒</button>
+        <button id="tPrev" title="前の差分 (Alt+↑)">▲ 前</button>
+        <button id="tNext" title="次の差分 (Alt+↓)">▼ 次</button>
+        <button id="tLast" title="最後の差分">⤓</button>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <button id="tToR" title="現在の差分を右へコピー (Alt+→)">左 → 右</button>
+        <button id="tToL" title="現在の差分を左へコピー (Alt+←)">左 ← 右</button>
+        <button id="tAllToR" title="すべての差分を右へコピー">全て →</button>
+        <button id="tAllToL" title="すべての差分を左へコピー">全て ←</button>
+        <button id="tUndo" title="元に戻す (Ctrl+Z)">↶</button>
+        <button id="tRedo" title="やり直し (Ctrl+Y)">↷</button>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <select id="oWs" title="空白（スペース・タブ）の扱い"><option value="none">空白も比較</option><option value="change">空白の量を無視</option><option value="all">空白を無視</option></select>
+        <label><input type="checkbox" id="oCase">大小文字無視</label>
+        <label><input type="checkbox" id="oBlank">空行無視</label>
+        <label><input type="checkbox" id="oZen">全角半角無視</label>
+        <label><input type="checkbox" id="oFold">差分のみ表示</label>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <input type="text" id="searchBox" placeholder="検索 (Ctrl+F)">
+        <button id="tFind" title="次を検索 (Enter)">検索</button>
+      </div>
+      <div class="grow"></div>
+      <div class="grp">
+        <button id="tPatch" title="unified diff 形式で保存">パッチ</button>
+        <button id="tReport" title="比較結果をHTMLレポートとして保存">レポート</button>
+      </div>
+    </div>
+    <div class="diffwrap" id="diffwrap">
+      <canvas id="locmap" title="差分の位置（クリックで移動）"></canvas>
+      <div class="pane side0" id="paneL" tabindex="0"><div class="spacer"><div class="rows"></div></div></div>
+      <div class="pane side1" id="paneR" tabindex="0"><div class="spacer"><div class="rows"></div></div></div>
+      <div class="wrapv" id="wrapView" tabindex="0" aria-label="比較結果（折り返し表示）"></div>
+      <div class="empty-hint" id="textHint"><div class="big">⇆</div>
+        比較したいファイルを2つドロップしてください<br>
+        <span style="font-size:12.5px">テキスト / ソースコード / PDF / Word / Excel / PowerPoint / 画像 に対応<br>上のファイル欄の「編集」から直接貼り付けもできます</span></div>
+    </div>
+    <div class="statusbar" id="textStatus" role="status" aria-live="polite"></div>
+  </section>
+
+  <!-- ページ表示・注釈 -->
+  <section id="tab-page" class="tab">
+    <div class="toolbar">
+      <div class="grp" id="toolGrp">
+        <button class="toolbtn on" data-tool="select" title="選択・移動／ドラッグでスクロール (Esc)">✋ 選択</button>
+        <button class="toolbtn" data-tool="pen" title="ペン">✏ ペン</button>
+        <button class="toolbtn" data-tool="marker" title="蛍光マーカー">🖍 マーカー</button>
+        <button class="toolbtn" data-tool="rect" title="四角枠">▭ 枠</button>
+        <button class="toolbtn" data-tool="note" title="付箋（クリックした位置に貼る）">📝 付箋</button>
+        <button class="toolbtn" data-tool="stamp" title="日付印">㊞ 日付印</button>
+        <button class="toolbtn" data-tool="eraser" title="消しゴム（クリックした注釈を削除）">⌫ 消去</button>
+      </div>
+      <div class="grp swatches" id="swatches"></div>
+      <select id="annWidth" title="線の太さ"><option value="1">細</option><option value="2" selected>中</option><option value="4">太</option></select>
+      <button id="stampCfg" title="日付印の設定">印設定</button>
+      <div class="sep"></div>
+      <div class="grp">
+        <button id="zOut">－</button>
+        <select id="zSel">
+          <option value="fitw">幅に合わせる</option><option value="fitp">ページ全体</option>
+          <option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
+          <option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
+        </select>
+        <button id="zIn">＋</button>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <label><input type="checkbox" id="pvSync" checked>スクロール連動</label>
+        <select id="pvShow"><option value="both">左右に並べる</option><option value="0">左のみ</option><option value="1">右のみ</option></select>
+      </div>
+      <div class="grow"></div>
+      <div class="grp">
+        <button id="annExport" title="注釈をファイルに保存">注釈を保存</button>
+        <button id="annImport" title="保存した注釈を読み込む">注釈を読込</button>
+        <button id="pvPrint" title="注釈込みで印刷（PDFとして保存も可）">印刷 / PDF</button>
+      </div>
+    </div>
+    <div class="pv-wrap" id="pvWrap" data-tool="select">
+      <div class="pv-col" data-side="0">
+        <div class="pv-head"><span class="nm">左</span>
+          <button class="pvPrev">‹</button><input type="text" class="pvPage" value="1"><span class="pvTotal">/ 0</span><button class="pvNext">›</button>
+          <button class="pvRot" title="右に90°回転">⟳</button><button class="pvClearAnn" title="この文書の注釈をすべて削除">注釈消去</button>
+        </div>
+        <div class="pv-scroll"></div>
+      </div>
+      <div class="pv-col" data-side="1">
+        <div class="pv-head"><span class="nm">右</span>
+          <button class="pvPrev">‹</button><input type="text" class="pvPage" value="1"><span class="pvTotal">/ 0</span><button class="pvNext">›</button>
+          <button class="pvRot" title="右に90°回転">⟳</button><button class="pvClearAnn" title="この文書の注釈をすべて削除">注釈消去</button>
+        </div>
+        <div class="pv-scroll"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 重ね合わせ比較 -->
+  <section id="tab-overlay" class="tab">
+    <div class="toolbar">
+      <div class="grp">
+        <span class="badge-l">左</span><button id="ovLPrev">‹</button><select id="ovLPage"></select><button id="ovLNext">›</button>
+        <span style="margin-left:8px">右</span><button id="ovRPrev">‹</button><select id="ovRPage"></select><button id="ovRNext">›</button>
+        <label title="左右のページを一緒に送る"><input type="checkbox" id="ovLink" checked>連動</label>
+      </div>
+      <div class="sep"></div>
+      <div class="grp" id="ovModes">
+        <button data-mode="diff" class="on">差分ハイライト</button>
+        <button data-mode="overlay">透かし重ね</button>
+        <button data-mode="swipe">スワイプ</button>
+        <button data-mode="blink">点滅</button>
+        <button data-mode="side">並べて表示</button>
+      </div>
+      <div class="sep"></div>
+      <div class="grp">
+        <button id="ovZOut">－</button><select id="ovZoom"><option value="fit">幅に合わせる</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option></select><button id="ovZIn">＋</button>
+      </div>
+    </div>
+    <div class="ov-wrap">
+      <div class="ov-view" id="ovView"><div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します</div></div>
+      <div class="ov-side">
+        <h4>表示の調整</h4>
+        <div class="ov-ctl">
+          <div id="ovOpacityRow" style="display:none">右の濃さ <input type="range" id="ovOpacity" min="0" max="100" value="50"></div>
+          <div id="ovSwipeRow" style="display:none">境界位置 <input type="range" id="ovSwipe" min="0" max="100" value="50"></div>
+          <div>差分の感度 <input type="range" id="ovThr" min="5" max="160" value="60"></div>
+          <label><input type="checkbox" id="ovBoxes" checked>変更箇所を枠で囲む</label>
+          <label><input type="checkbox" id="ovFaint" checked>共通部分を薄く表示</label>
+          <div title="スキャンなどの細かなずれを差分として扱わない幅">ずれの許容 <b id="ovTolVal">0</b> px <input type="range" id="ovTolPx" min="0" max="5" step="1" value="0" aria-label="ずれの許容（ピクセル）"></div>
+        </div>
+        <h4>位置合わせ（右をずらす・回す）</h4>
+        <div class="ov-ctl">
+          <div>X <input type="number" id="ovDx" value="0" step="1"> Y <input type="number" id="ovDy" value="0" step="1"> px</div>
+          <div>回転 <input type="number" id="ovRot" value="0" step="0.05"> °</div>
+          <div style="display:flex;gap:4px"><button id="ovAuto">自動位置合わせ</button><button id="ovReset">リセット</button></div>
+        </div>
+        <h4>結果</h4>
+        <div id="ovStats" class="muted">—</div>
+        <div style="display:flex;gap:4px;margin-top:6px"><button id="ovRegPrev">‹ 前の変更</button><button id="ovRegNext">次の変更 ›</button></div>
+        <h4>凡例</h4>
+        <div class="legend">
+          <span><i style="background:#e5322d"></i>左にだけある（削除・変更前）</span>
+          <span><i style="background:#1a73e8"></i>右にだけある（追加・変更後）</span>
+          <span><i style="background:#bfc5cc"></i>共通部分</span>
+        </div>
+        <h4>全ページ一括チェック</h4>
+        <button id="ovScan">全ページの差分を調べる</button>
+        <div id="ovScanRes" style="margin-top:6px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- フォルダ比較 -->
+  <section id="tab-folder" class="tab">
+    <div class="fd-pick">
+      <div class="fd-slot" data-side="0"><span class="badge" style="background:#c0504d;color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:700">左</span><span class="nm muted">フォルダをドロップ、または</span><button class="fdPick">フォルダを選択</button><input type="file" webkitdirectory multiple hidden></div>
+      <div class="fd-slot" data-side="1"><span class="badge" style="background:#3a8f4a;color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:700">右</span><span class="nm muted">フォルダをドロップ、または</span><button class="fdPick">フォルダを選択</button><input type="file" webkitdirectory multiple hidden></div>
+    </div>
+    <div class="toolbar">
+      <label><input type="checkbox" class="fdFilter" value="same" checked>同一</label>
+      <label><input type="checkbox" class="fdFilter" value="diff" checked>相違</label>
+      <label><input type="checkbox" class="fdFilter" value="left" checked>左のみ</label>
+      <label><input type="checkbox" class="fdFilter" value="right" checked>右のみ</label>
+      <div class="sep"></div>
+      <label title="オフにするとサイズだけで判定（高速）"><input type="checkbox" id="fdContent" checked>内容まで比較</label>
+      <button id="fdRun" class="primary">比較</button>
+      <div class="grow"></div>
+      <span class="muted">行をダブルクリックで中身を比較</span>
+    </div>
+    <div class="fd-table-wrap"><table class="fd-table" id="fdTable">
+      <thead><tr><th data-k="path">ファイル</th><th data-k="st">状態</th><th data-k="ls" class="num">左サイズ</th><th data-k="rs" class="num">右サイズ</th><th data-k="lm">左 更新日時</th><th data-k="rm">右 更新日時</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="statusbar" id="fdStatus">左右にフォルダを指定して「比較」を押してください</div>
+  </section>
+</main>
+
+<div id="modal"><div class="dlg"><h3></h3><div class="body"></div><div class="foot"></div></div></div>
+<div id="busy"><div id="busyMsg">処理中…</div></div>
+<div id="toast"></div>
+<div id="dropOverlay"></div>
+<div id="printArea"></div>
+<input type="file" id="annFile" accept=".json,application/json" hidden>
