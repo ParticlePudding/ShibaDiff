@@ -15,6 +15,11 @@ WinMerge のテキスト比較と DocuWorks Viewer のページ表示・注釈�
 
 対応形式：テキスト（Shift_JIS / EUC-JP / JIS / UTF-8 / UTF-16）、PDF、Word (.docx)、Excel (.xlsx)、PowerPoint (.pptx)、PNG / JPEG / GIF / BMP / WebP
 
+## ドキュメント
+- [要件定義書](docs/01_要件定義書.md)
+- [基本設計書](docs/02_基本設計書.md)
+- [詳細設計書](docs/03_詳細設計書.md)
+
 ## ビルド
 ```
 npm ci              # pdf.js を取得
