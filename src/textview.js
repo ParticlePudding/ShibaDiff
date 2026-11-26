@@ -62,6 +62,7 @@ const TV = (() => {
     if (!o.blank) ({ rows, blocks } = Diff.buildRows(Diff.seq(ia, ib), A, B, {}));
     else ({ rows, blocks } = diffIgnoringBlank(A, B, ia, ib));
     st.rows = rows; st.blocks = blocks; st.hit = -1;
+    st.noteIds = S[0] && S[1] ? Notes.textIds(blocks, A, B) : []; noteClasses();
     if (!keepPos) st.expanded.clear();
     let mx = 0;
     for (const arr of [A, B]) for (const s of arr) if (s.length * 2 > mx) { const w = dispWidth(s); if (w > mx) mx = w; }
@@ -81,6 +82,7 @@ const TV = (() => {
     }
     status();
     $('#textHint').style.display = (S[0] || S[1]) ? 'none' : '';
+    renderNotes();
   }
 
   /* 空行を取り除いてから比較し、空行は「無視した差」として戻す */
@@ -209,6 +211,7 @@ const TV = (() => {
       if (e === b.r1 - 1) cls += ' last';
     }
     if (e === st.hit) cls += ' hit';
+    if (r.blk >= 0 && st.noteCls[r.blk]) cls += st.noteCls[r.blk];
     let tx = '';
     if (li >= 0) tx = (r.t === 'c' ? inlineHtml(r, side) : txt(L(side)[li])) + eolMark(side, li);
     const mk = li >= 0 && MK[r.t] ? MK[r.t][side] : '';
@@ -222,6 +225,7 @@ const TV = (() => {
     let cls = 'row ' + (u.k === 'a' ? 't-d' : u.k === 'b' ? 't-i' : 't-' + r.t);
     if (d >= fd && d <= ld) { cls += ' cur'; if (d === fd) cls += ' first'; if (d === ld) cls += ' last'; }
     if (e === st.hit) cls += ' hit';
+    if (r && r.blk >= 0 && st.noteCls[r.blk]) cls += st.noteCls[r.blk];
     const side = u.k === 'b' ? 1 : 0;
     const tx = u.k === 'e' ? txt(A[r.a]) + eolMark(0, r.a) : (r.t === 'c' ? inlineHtml(r, side) : txt((side ? B : A)[side ? r.b : r.a])) + eolMark(side, side ? r.b : r.a);
     const na = u.k !== 'b' && r.a >= 0 ? r.a + 1 : '', nb = u.k !== 'a' && r.b >= 0 ? r.b + 1 : '';
@@ -289,6 +293,7 @@ const TV = (() => {
     if (wrapOn()) { if (st.wrapDirty) renderWrap(); markWrap(); }
     else { renderPane(0); renderPane(1); }
     drawMap();
+    if (notesOn() && st.noteCur !== st.cur) notesCur();
   }
   function renderSoon() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (wrapOn()) drawMap(); else { renderPane(0); renderPane(1); drawMap(); } }); }
   wrapEl.addEventListener('scroll', renderSoon, { passive: true });
@@ -519,6 +524,92 @@ const TV = (() => {
     toast(`「${q}」 ${k + 1} / ${hits.length} 件${wrapped ? '（先頭に戻りました）' : ''}`, false, 1800);
   }
 
+  /* ---- 変更点一覧：差分のまとまりごとに「確認の状態」と「ひとこと」を付ける（Notes） ---- */
+  st.noteIds = []; st.noteCls = []; st.noteCur = -2;
+  const ntPanel = $('#tvNotes');
+  const notesOn = () => $('#diffwrap').classList.contains('notes-on');
+  function noteClasses() {
+    st.noteCls = st.noteIds.map(id => { const v = Notes.get(id); return !v ? '' : v.st === 'ok' ? ' nt-ok' : v.st === 'ask' ? ' nt-ask' : ' nt-c'; });
+  }
+  function blockKind(b) {
+    let d = 0, i = 0, c = 0; for (let k = b.r0; k < b.r1; k++) { const t = st.rows[k].t; if (t === 'd') d++; else if (t === 'i') i++; else if (t === 'c') c++; }
+    return c || (d && i) ? '変更' : d ? '左のみ' : i ? '右のみ' : '空白・空行';
+  }
+  const lineRange = (a0, a1) => a1 <= a0 ? '—' : a1 - a0 === 1 ? `${a0 + 1}行` : `${a0 + 1}–${a1}行`;
+  function blockLabel(i) { const b = st.blocks[i]; return `#${i + 1} ${blockKind(b)} 左${lineRange(b.a0, b.a1)}・右${lineRange(b.b0, b.b1)}`; }
+  const short = (s, n = 70) => s.length > n ? s.slice(0, n) + '…' : s;
+  function noteItemHtml(i) {
+    const b = st.blocks[i], A = L(0), B = L(1), id = st.noteIds[i];
+    const a = b.a1 > b.a0 ? A[b.a0] : '', bb = b.b1 > b.b0 ? B[b.b0] : '';
+    return `<div class="nt-item${i === st.cur ? ' cur' : ''}${st.noteCls[i] || ''}" data-b="${i}" tabindex="-1">` +
+      `<div class="nt-h"><b>#${i + 1}</b> ${blockKind(b)} <span class="muted">左${lineRange(b.a0, b.a1)}・右${lineRange(b.b0, b.b1)}</span></div>` +
+      `<div class="nt-pv">${b.a1 > b.a0 ? `<div class="del">− ${esc(short(a))}</div>` : ''}${b.b1 > b.b0 ? `<div class="add">＋ ${esc(short(bb))}</div>` : ''}</div>` +
+      `<div class="nt-sum">${Notes.chip(id)}</div></div>`;
+  }
+  function noteCounts() {
+    const o = Notes.all(), ids = st.noteIds; let ok = 0, ask = 0, c = 0;
+    for (const id of ids) { const v = o[id]; if (!v) continue; if (v.st === 'ok') ok++; else if (v.st === 'ask') ask++; if (v.text) c++; }
+    return `<b>変更点 ${ids.length} 箇所</b><span class="nt-chip st-ok">確認済 ${ok}</span><span class="nt-chip st-ask">要確認 ${ask}</span><span class="muted">コメント ${c}</span>`;
+  }
+  function notesHead() {
+    return `<div class="nt-top"><span class="nt-counts">${noteCounts()}</span>` +
+      `<span class="grow"></span><button type="button" id="ntCsv" title="変更点の一覧（確認・コメント付き）をCSVに出力"><i data-i="sheet"></i>CSV</button></div>` +
+      `<div class="nt-hint muted">差分を選ぶと、ここで「確認済・要確認」とひとことを付けられます。レポートにも載ります。</div>`;
+  }
+  function renderNotes() {
+    if (!notesOn()) return;
+    if (!S[0] || !S[1]) { ntPanel.innerHTML = '<div class="nt-empty muted">左右にファイルを読み込むと、差分ごとにコメントを付けられます</div>'; return; }
+    const n = st.blocks.length;
+    ntPanel.innerHTML = notesHead() + `<div class="nt-list">${n ? Array.from({ length: n }, (_, i) => noteItemHtml(i)).join('') : '<div class="nt-empty muted">差分はありません</div>'}</div>`;
+    $('#ntCsv', ntPanel).onclick = exportNotesCsv;
+    st.noteCur = -2; notesCur();
+  }
+  // 選んでいる差分の行に入力欄を出す
+  function notesCur() {
+    st.noteCur = st.cur;
+    const list = $('.nt-list', ntPanel); if (!list) return;
+    $$('.nt-item.cur', list).forEach(el => { el.classList.remove('cur'); const ed = $('.nt-ed', el); if (ed) ed.remove(); });
+    const it = $(`.nt-item[data-b="${st.cur}"]`, list); if (!it) return;
+    it.classList.add('cur');
+    it.appendChild(Notes.editor(st.noteIds[st.cur], blockLabel(st.cur)));
+    const lr = list.getBoundingClientRect(), ir = it.getBoundingClientRect();
+    if (ir.top < lr.top || ir.bottom > lr.bottom) it.scrollIntoView({ block: 'nearest' });
+  }
+  ntPanel.addEventListener('click', e => {
+    const it = e.target.closest('.nt-item'); if (!it || e.target.closest('.nt-ed')) return;
+    go(+it.dataset.b);
+  });
+  Notes.on(id => {
+    noteClasses();
+    if (notesOn()) {
+      const cnt = $('.nt-counts', ntPanel); if (cnt) cnt.innerHTML = noteCounts(); // ボタンは作り直さない（入力欄から移るクリックを失わないように）
+      const i = id ? st.noteIds.indexOf(id) : -1;
+      if (i >= 0) { const it = $(`.nt-item[data-b="${i}"]`, ntPanel); if (it) { it.className = `nt-item${i === st.cur ? ' cur' : ''}${st.noteCls[i] || ''}`; $('.nt-sum', it).innerHTML = Notes.chip(id); } }
+      else if (!id) renderNotes();
+    }
+    if (App.tab === 'text') { st.wrapDirty = true; render(); }
+  });
+  function setNotes(on) {
+    $('#diffwrap').classList.toggle('notes-on', on); store.set('tvNotes', on);
+    $('#tNotes').classList.toggle('on', on); $('#tNotes').setAttribute('aria-pressed', on);
+    if (on) renderNotes();
+    measureChar(); sizeSpacers(); render();
+  }
+  $('#tNotes').onclick = () => setNotes(!notesOn());
+  function noteRows() {
+    const A = L(0), B = L(1), o = Notes.all();
+    return st.blocks.map((b, i) => {
+      const v = o[st.noteIds[i]] || {};
+      return { no: i + 1, kind: blockKind(b), left: lineRange(b.a0, b.a1), right: lineRange(b.b0, b.b1), before: A.slice(b.a0, b.a1).join('\n'), after: B.slice(b.b0, b.b1).join('\n'), st: v.st || '', text: v.text || '', by: v.by || '', at: v.at || 0 };
+    });
+  }
+  function exportNotesCsv() {
+    if (!S[0] || !S[1]) return toast('左右にファイルを読み込んでください');
+    const cut = t => t.length > 2000 ? t.slice(0, 2000) + '…' : t;
+    Notes.downloadCsv(`変更点一覧_${baseName(S[0].name)}.csv`, ['番号', '種類', '左の行', '右の行', '変更前（左）', '変更後（右）', '確認', 'コメント', '記入者', '記入日時'],
+      noteRows().map(r => [r.no, r.kind, r.left, r.right, cut(r.before), cut(r.after), Notes.stateName(r.st), r.text, r.by, r.at ? fmtDate(r.at) : '']));
+  }
+
   /* ---- status ---- */
   // 最初に違うバイトの位置（同一なら -1。長さが違えば短い方の長さ以下のどこか）
   function firstByteDiff(a, b) {
@@ -636,10 +727,14 @@ const TV = (() => {
       [{ k: 'range', label: '載せる行', type: 'radio', def: 'view', choices: [['view', '画面と同じ（差分のみ表示の設定に従う）'], ['all', 'すべての行'], ['ctx', '差分と前後3行だけ']] },
         { k: 'layout', label: '並べ方', type: 'radio', def: 'side', choices: [['side', '左右に並べる'], ['unified', '一列（変更前→変更後の順）']] },
         { k: 'files', label: 'ファイル情報（SHA-256）', type: 'check', def: true },
-        { k: 'cond', label: '比較条件と凡例', type: 'check', def: true }],
+        { k: 'cond', label: '比較条件と凡例', type: 'check', def: true },
+        { k: 'notes', label: '変更点の一覧（確認・コメント）', type: 'check', def: true }],
       [{ label: '出力', value: 'ok', primary: true }]);
     if (!o) return;
     const A = L(0), B = L(1);
+    // 差分のまとまりの最初の行に、変更点の番号（#3）を付ける（変更点の一覧と見比べられるように）
+    const firstRow = new Map(st.blocks.map((b, i) => [b.r0, i]));
+    const bno = e => o.notes && firstRow.has(e) ? `<span class="bn">#${firstRow.get(e) + 1}</span>` : '';
     const MARK = { c: '＊', d: '−', i: '＋', w: '' };
     // 載せる行：画面の表示上の行／すべての行／差分と前後3行（それ以外は「n 行省略」にまとめる）
     let items;
@@ -662,13 +757,13 @@ const TV = (() => {
       const r = st.rows[e];
       if (uni) {
         // 一列：一致は1行、変更は変更前（−）と変更後（＋）の2行
-        const line = (side, li, mk, cls) => `<tr><td class="ln">${side === 0 || mk === '' ? li + 1 : ''}</td><td class="ln">${side === 1 || mk === '' ? (mk === '' ? r.b : li) + 1 : ''}</td><td class="mk">${mk}</td><td class="${cls}">${r.t === 'c' ? inlineHtml(r, side) : esc((side ? B : A)[li])}</td></tr>`;
+        const line = (side, li, mk, cls) => `<tr><td class="ln">${side === 0 ? bno(e) : ''}${side === 0 || mk === '' ? li + 1 : ''}</td><td class="ln">${side === 1 || mk === '' ? (mk === '' ? r.b : li) + 1 : ''}</td><td class="mk">${mk}</td><td class="${cls}">${r.t === 'c' ? inlineHtml(r, side) : esc((side ? B : A)[li])}</td></tr>`;
         if (r.t === 'e') body += line(0, r.a, '', '');
         else { if (r.a >= 0) body += line(0, r.a, '−', `t-${r.t === 'w' ? 'w' : r.t === 'c' ? 'c' : 'd'} s0`); if (r.b >= 0) body += line(1, r.b, '＋', `t-${r.t === 'w' ? 'w' : r.t === 'c' ? 'c' : 'i'} s1`); }
         continue;
       }
-      const cell = (side, li) => li < 0 ? `<td class="ln"></td><td class="pad"></td>` :
-        `<td class="ln">${r.t !== 'e' ? `<b>${MARK[r.t]}</b>` : ''}${li + 1}</td><td class="t-${r.t} s${side}">${r.t === 'c' ? inlineHtml(r, side) : esc((side ? B : A)[li])}</td>`;
+      const cell = (side, li) => li < 0 ? `<td class="ln">${side ? '' : bno(e)}</td><td class="pad"></td>` :
+        `<td class="ln">${side ? '' : bno(e)}${r.t !== 'e' ? `<b>${MARK[r.t]}</b>` : ''}${li + 1}</td><td class="t-${r.t} s${side}">${r.t === 'c' ? inlineHtml(r, side) : esc((side ? B : A)[li])}</td>`;
       body += `<tr>${cell(0, r.a)}${cell(1, r.b)}</tr>`;
     }
     let cl = 0, dl = 0, il = 0; for (const r of st.rows) { if (r.t === 'c') cl++; else if (r.t === 'd') dl++; else if (r.t === 'i') il++; }
@@ -687,15 +782,29 @@ th .sub{font-weight:400;color:#666;font-size:11px;word-break:break-all}
 .ipt{display:inline-block;width:0;height:1em;border-left:2px solid #0550ae;margin:0 1px;vertical-align:-.15em}.s1 .ipt{border-left-color:#b3261e}
 .dnum{font-family:sans-serif;font-size:10.5px;color:#0550ae;border:1px solid #a8d4ff;border-radius:8px;padding:0 4px;margin:0 3px}
 .wsc,.weol{color:#9aa5b1}
-td.mk{text-align:center;color:#444;font-weight:700}table.files{font-family:"BIZ UDPGothic","Meiryo",sans-serif;margin-bottom:10px}table.files th{width:40px}table.files td{white-space:normal}
+td.mk{text-align:center;color:#444;font-weight:700}
+h2{font-family:"BIZ UDPGothic","Meiryo",sans-serif;font-size:15px;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #d0d7de}
+table.nt{font-family:"BIZ UDPGothic","Meiryo",sans-serif;font-size:12px;margin-bottom:8px}table.nt td{white-space:normal;border-bottom:1px solid #e3e6ea;padding:3px 6px}
+table.nt td.b{background:#fff3f2;font-family:"BIZ UDGothic","MS Gothic",monospace}table.nt td.a{background:#f0f7ff;font-family:"BIZ UDGothic","MS Gothic",monospace}
+table.nt .ok{color:#1b5e20;font-weight:700}table.nt .ask{color:#c2410c;font-weight:700}table.nt .none{color:#888}table.nt .by{color:#777;font-size:10.5px;margin-top:2px}
+.bn{display:inline-block;background:#5b3cc4;color:#fff;border-radius:3px;padding:0 3px;font-size:10px;margin-right:3px;font-family:sans-serif}table.files{font-family:"BIZ UDPGothic","Meiryo",sans-serif;margin-bottom:10px}table.files th{width:40px}table.files td{white-space:normal}
 tr.fold td{background:#eef3fb;color:#4c6a96;text-align:center;font-family:sans-serif}
 .meta{color:#444;font-size:12.5px;margin-bottom:12px;line-height:1.7}.meta b{color:#222}
 .legend span{display:inline-block;margin-right:14px}
 @media print{body{margin:8mm}thead{display:table-header-group}tr{break-inside:avoid}}`;
+    // 変更点の一覧（番号・場所・変更前→後・確認・コメント）
+    const nrows = o.notes ? noteRows() : [];
+    const nst = { ok: '<span class="ok">確認済</span>', ask: '<span class="ask">要確認</span>', '': '<span class="none">未確認</span>' };
+    const cut = (t, n = 160) => esc(t.length > n ? t.slice(0, n) + '…' : t).replace(/\n/g, '<br>');
+    const nOk = nrows.filter(x => x.st === 'ok').length, nAsk = nrows.filter(x => x.st === 'ask').length;
+    const noteTable = !nrows.length ? '' : `<h2>変更点の一覧</h2><div class="meta">確認済 ${nOk}・要確認 ${nAsk}・未確認 ${nrows.length - nOk - nAsk}（全 ${nrows.length} 箇所）</div>` +
+      `<table class="nt"><colgroup><col style="width:42px"><col style="width:64px"><col style="width:110px"><col><col><col style="width:62px"><col style="width:24%"></colgroup><thead><tr><th>番号</th><th>種類</th><th>行（左・右）</th><th>変更前（左）</th><th>変更後（右）</th><th>確認</th><th>コメント</th></tr></thead><tbody>` +
+      nrows.map(x => `<tr><td>#${x.no}</td><td>${x.kind}</td><td>${x.left}<br>${x.right}</td><td class="b">${cut(x.before)}</td><td class="a">${cut(x.after)}</td><td>${nst[x.st]}</td><td>${esc(x.text).replace(/\n/g, '<br>')}${x.text && (x.by || x.at) ? `<div class="by">${esc(x.by)}${x.by ? '・' : ''}${x.at ? fmtDate(x.at) : ''}</div>` : ''}</td></tr>`).join('') + '</tbody></table><h2>比較結果</h2>';
     const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>比較レポート - ${esc(S[0].name)} / ${esc(S[1].name)}</title><style>${css}</style></head><body>
 <h1>比較レポート</h1>
 <div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）${o.cond ? `　比較条件: ${esc(cond)}<br>
 <span class="legend">${uni ? '<span>− 変更前・左だけにある行（赤）</span><span>＋ 変更後・右だけにある行（青）</span><span>変わった文字：変更前＝取り消し線、変更後＝下線</span>' : '<span>＊ 変更（変更前＝赤・取り消し線、変更後＝青・下線）</span><span>− 左だけにある行（赤）</span><span>＋ 右だけにある行（青）</span>'}</span>` : ''}</div>
+${noteTable}
 ${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr><th>右</th><td>${info(S[1], h1)}</td></tr></table>
 <table><colgroup><col style="width:52px"><col style="width:52px"><col style="width:22px"><col></colgroup><thead><tr><th>左</th><th>右</th><th></th><th>内容</th></tr></thead><tbody>${body}</tbody></table>`
 : `<table><colgroup><col style="width:62px"><col><col style="width:62px"><col></colgroup>
@@ -703,7 +812,11 @@ ${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr
     download(`比較レポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');
   }
 
-  function activate() { measureChar(); applyLayout(); if (st.dirty) compare(); else { sizeSpacers(); render(); } }
+  function activate() {
+    if (store.get('tvNotes', false) !== notesOn()) setNotes(!!store.get('tvNotes', false));
+    measureChar(); applyLayout(); if (st.dirty) compare(); else { sizeSpacers(); render(); }
+    renderNotes();
+  }
   function invalidate() { st.dirty = true; if (App.tab === 'text') compare(); }
 
   /* ---- toolbar ---- */
@@ -737,5 +850,5 @@ ${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr
     if (['unit', 'showWs', 'numDelta', 'wrap', 'fontSize'].includes(k)) { st.wrapDirty = true; if (App.tab === 'text') render(); }
   });
 
-  return { compare, activate, invalidate, next, prev, go, copyCur, copyAll, undo, redo, find, resetHistory, pushUndo, status, render, st };
+  return { compare, activate, invalidate, next, prev, go, copyCur, copyAll, undo, redo, find, resetHistory, pushUndo, status, render, st, noteRows, renderNotes };
 })();

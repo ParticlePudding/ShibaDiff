@@ -265,12 +265,15 @@ const OV = (() => {
     const z = Math.max(0.1, Math.min(8, effZoom() * f));
     rezoom(String(Math.round(z * 1000) / 1000), ax, ay);
   }
-  function drawBoxesOn(c, regions, sel = -1) {
+  // 枠の色：確認済＝緑、要確認＝赤橙、それ以外＝橙。コメントがあれば番号に ✎ を付ける
+  const NOTE_COL = { ok: ['#2f9e44', 'rgba(47,158,68,.9)'], ask: ['#d9480f', 'rgba(232,89,12,.95)'], '': ['#ff6d00', 'rgba(255,152,0,.9)'] };
+  function drawBoxesOn(c, regions, sel = -1, ids = null) {
     regions.forEach((r, i) => {
-      c.lineWidth = i === sel ? 6 : 3; c.strokeStyle = i === sel ? '#ff6d00' : 'rgba(255,152,0,.9)';
+      const nv = ids && ids[i] ? Notes.get(ids[i]) : null, col = NOTE_COL[nv ? nv.st : ''];
+      c.lineWidth = i === sel ? 6 : 3; c.strokeStyle = i === sel ? col[0] : col[1];
       c.strokeRect(r.x, r.y, r.w, r.h);
-      c.fillStyle = i === sel ? '#ff6d00' : 'rgba(255,152,0,.95)'; c.font = 'bold 20px sans-serif';
-      const label = String(i + 1), tw = c.measureText(label).width + 10;
+      c.fillStyle = i === sel ? col[0] : col[1]; c.font = 'bold 20px sans-serif';
+      const label = String(i + 1) + (nv && nv.st === 'ok' ? ' ✓' : nv && nv.st === 'ask' ? ' !' : '') + (nv && nv.text ? ' ✎' : ''), tw = c.measureText(label).width + 10;
       c.fillRect(r.x, r.y - 24, tw, 24); c.fillStyle = '#fff'; c.fillText(label, r.x + 5, r.y - 5);
     });
   }
@@ -280,7 +283,7 @@ const OV = (() => {
     if (!v.out || !v.base || st.mode !== 'diff') return;
     const c = v.out.getContext('2d');
     c.putImageData(v.base.img, 0, 0);
-    if ($('#ovBoxes').checked) drawBoxesOn(c, v.regions, v.regIdx);
+    if ($('#ovBoxes').checked) drawBoxesOn(c, v.regions, v.regIdx, v.noteIds);
   }
   // 色付け：濃い部分（線・文字）を指定の色にした画像（白はそのまま）
   const tintCache = new WeakMap();
@@ -307,7 +310,7 @@ const OV = (() => {
         for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
         c.putImageData(im, 0, 0);
       }
-      if (boxes) drawBoxesOn(c, v.regions, v.regIdx);
+      if (boxes) drawBoxesOn(c, v.regions, v.regIdx, v.noteIds);
     });
   }
   function resultHtml(res, autoMsg) {
@@ -344,7 +347,7 @@ const OV = (() => {
   }
   // 表示用の要素を組み立てる（v.el）。差分の枠・点滅・スワイプはページごとの v に持たせる
   function compose(d) {
-    const v = { ...d, regions: [], regIdx: -1, out: null, base: null, side: null, frame: null, drawSwipe: null, stats: '' };
+    const v = { ...d, regions: [], regIdx: -1, out: null, base: null, side: null, frame: null, drawSwipe: null, stats: '', noteIds: [] };
     const { cl, cr, dx, dy, ang } = d;
     if (!cl || !cr) {
       const pair = document.createElement('div'); pair.className = 'pair';
@@ -358,6 +361,8 @@ const OV = (() => {
       const pair = document.createElement('div'); pair.className = 'pair';
       const canvases = [0, 1].map(() => { const x = mkCanvas(W2, H2, d.scale); placeCanvas(x, true); pair.appendChild(x); return x; });
       v.side = { canvases, res: d.res }; v.regions = d.res ? d.res.regions : []; v.out = canvases[0]; v.el = pair;
+      v.noteIds = d.res ? v.regions.map(g => Notes.ovId(d.l, d.r, g, d.res.W, d.res.H)) : [];
+      canvases.forEach(cv => cv.addEventListener('click', e => pickRegion(v, cv, e)));
       drawSide(v);
       v.stats = d.res ? resultHtml(d.res, d.autoMsg) : '並べて表示中';
       return v;
@@ -367,6 +372,8 @@ const OV = (() => {
     const tint = $('#ovTint').checked, colL = $('#ovColL').value, colR = $('#ovColR').value;
     if (st.mode === 'diff') {
       v.base = d.res; v.regions = d.res.regions;
+      v.noteIds = v.regions.map(g => Notes.ovId(d.l, d.r, g, d.res.W, d.res.H));
+      out.addEventListener('click', e => pickRegion(v, out, e));
       drawBoxes(v);
       v.stats = resultHtml(d.res, d.autoMsg);
     } else if (st.mode === 'overlay') {
@@ -431,6 +438,7 @@ const OV = (() => {
     st.cl = v.cl; st.cr = v.cr; st.out = v.out; st.base = v.base; st.side = v.side; st.regions = v.regions; st.regIdx = v.regIdx;
     showOffset();
     $('#ovStats').innerHTML = v.stats;
+    renderOvNotes();
   }
   function selectPages(pl, pr) {
     fillSelect($('#ovLPage'), pl ? pl.length : 0, st.l); fillSelect($('#ovRPage'), pr ? pr.length : 0, st.r);
@@ -621,17 +629,55 @@ const OV = (() => {
     if (Math.abs(e.clientX - pan.x) + Math.abs(e.clientY - pan.y) > 3) pan.moved = true;
     view.scrollLeft = pan.sl - (e.clientX - pan.x); view.scrollTop = pan.st - (e.clientY - pan.y);
   });
-  const endPan = () => { pan = null; view.classList.remove('panning'); };
+  const endPan = () => { if (pan && pan.moved) st.panAt = Date.now(); pan = null; view.classList.remove('panning'); };
   view.addEventListener('pointerup', endPan); view.addEventListener('pointercancel', endPan);
 
   function gotoRegion(d) {
     const v = st.cur;
     if ((st.mode !== 'diff' && st.mode !== 'side') || !v || !v.regions.length) return toast('このページに変更箇所はありません');
-    v.regIdx = (v.regIdx + d + v.regions.length) % v.regions.length; st.regIdx = v.regIdx;
+    selectRegion(v, (v.regIdx + d + v.regions.length) % v.regions.length, true);
+  }
+
+  // 変更箇所を選ぶ（枠を太くし、右のパネルの入力欄をその箇所にする）。scroll なら表示位置も合わせる
+  function selectRegion(v, i, scroll) {
+    v.regIdx = i; if (v === st.cur) st.regIdx = i;
     drawBoxes(v);
-    const r = v.regions[v.regIdx], o = v.out.getBoundingClientRect(), vr = view.getBoundingClientRect(), k = o.width / v.out.width;
+    if (v !== st.cur && st.slots) { const s = st.slots.find(q => q.v === v); if (s) markCurrent(s); }
+    renderOvNotes();
+    if (!scroll) return;
+    const r = v.regions[i], o = v.out.getBoundingClientRect(), vr = view.getBoundingClientRect(), k = o.width / v.out.width;
     view.scrollTo({ top: view.scrollTop + o.top - vr.top + r.y * k - view.clientHeight / 3, left: view.scrollLeft + o.left - vr.left + r.x * k - view.clientWidth / 3, behavior: 'smooth' });
   }
+  // 画像のクリックで、その位置の変更箇所を選ぶ（手のひらツールのとき・ドラッグのあとは選ばない）
+  function pickRegion(v, cv, e) {
+    if (st.hand || Date.now() - (st.panAt || 0) < 300) return;
+    const rc = cv.getBoundingClientRect(), k = cv.width / rc.width, x = (e.clientX - rc.left) * k, y = (e.clientY - rc.top) * k, m = 10 * k;
+    const i = v.regions.findIndex(g => x >= g.x - m && x <= g.x + g.w + m && y >= g.y - 24 * k - m && y <= g.y + g.h + m);
+    if (i >= 0) selectRegion(v, i, false);
+  }
+  /* ---- 変更箇所の一覧とコメント（右のパネル） ---- */
+  function regionPos(g, res) { return `横 ${Math.round((g.x + g.w / 2) / res.W * 100)}%・縦 ${Math.round((g.y + g.h / 2) / res.H * 100)}%`; }
+  function renderOvNotes() {
+    const box = $('#ovNotes'); if (!box) return;
+    const v = st.cur;
+    if (!v || !v.noteIds || !v.noteIds.length || !(v.base || (v.side && v.side.res))) { box.innerHTML = ''; return; }
+    const res = v.base || v.side.res;
+    box.innerHTML = `<div class="ov-nt-h muted">変更箇所を選ぶと、確認の状態とひとことを付けられます（画像の枠のクリックでも選べます）</div>` +
+      v.regions.map((g, i) => `<div class="nt-item${i === v.regIdx ? ' cur' : ''}${noteCls(v.noteIds[i])}" data-i="${i}"><div class="nt-h"><b>${i + 1}</b><span class="muted">${regionPos(g, res)}</span></div><div class="nt-sum">${Notes.chip(v.noteIds[i])}</div></div>`).join('');
+    const cur = $(`.nt-item[data-i="${v.regIdx}"]`, box);
+    if (cur) cur.appendChild(Notes.editor(v.noteIds[v.regIdx], `左 ${v.l + 1} ページ ／ 右 ${v.r + 1} ページ　変更箇所 ${v.regIdx + 1}（${regionPos(v.regions[v.regIdx], res)}）`));
+    $$('.nt-item', box).forEach(el => el.addEventListener('click', e => { if (!e.target.closest('.nt-ed')) selectRegion(v, +el.dataset.i, true); }));
+  }
+  const noteCls = id => { const nv = Notes.get(id); return !nv ? '' : nv.st === 'ok' ? ' nt-ok' : nv.st === 'ask' ? ' nt-ask' : ' nt-c'; };
+  Notes.on(id => {
+    if (App.tab !== 'overlay') return;
+    drawBoxes();
+    const v = st.cur, box = $('#ovNotes');
+    if (!v || !box) return;
+    const i = id ? v.noteIds.indexOf(id) : -1;
+    if (i >= 0) { const it = $(`.nt-item[data-i="${i}"]`, box); if (it) { it.className = `nt-item${i === v.regIdx ? ' cur' : ''}${noteCls(id)}`; $('.nt-sum', it).innerHTML = Notes.chip(id); } }
+    else if (!id) renderOvNotes();
+  });
 
   // 比べるページの組（対応付けが有効ならその結果、なければ同じページ番号どうし）
   async function pagePairs(pl, pr) {
@@ -649,6 +695,35 @@ const OV = (() => {
     if (!off) { off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null; if (scanMode()) st.align.set(key, off); }
     const res = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]), tolF: tolFactor(pl[p.l], pr[p.r]) });
     return { ...p, kind: 'pair', regs: res.regions.length, pct: res.ink ? res.changed / res.ink * 100 : 0, res, off };
+  }
+  /* ---- ページ表示・注釈タブ用：ページの組の変更箇所を、各ページの座標（pt）で返す ---- */
+  // 結果は、ファイル・感度・許容・解像度が同じあいだ覚えておく。同じ組を同時に頼まれたら同じ計算を待つ
+  const rcache = new Map();
+  function regionsFor(l, r) {
+    const key = `${st.gen0}:${l}:${r}:${$('#ovThr').value}:${$('#ovTolPx').value}:${Settings.get('ovRes')}`;
+    if (!rcache.has(key)) {
+      if (rcache.size > 200) rcache.clear();
+      rcache.set(key, (async () => {
+        const pl = await pages(0), pr = await pages(1);
+        if (!pl || !pr || !pl[l] || !pr[r]) return null;
+        const a = await analyzePair(pl, pr, { l, r }, () => false);
+        const res = a.res, off = a.off || [0, 0, 0], W = renderWidth(pl[l], pr[r]);
+        const sL = W / pl[l].w, sR = W / pr[r].w, cw = W, ch = Math.round(pr[r].h * sR);
+        const ids = res.regions.map(g => Notes.ovId(l, r, g, res.W, res.H));
+        // 左：描画の画素 → pt。右：位置合わせ（回転→平行移動）を逆にたどってから pt
+        const cos = Math.cos(-off[2] * Math.PI / 180), sin = Math.sin(-off[2] * Math.PI / 180);
+        const back = (x, y) => { const px = x - off[0] - cw / 2, py = y - off[1] - ch / 2; return [cos * px - sin * py + cw / 2, sin * px + cos * py + ch / 2]; };
+        const toPt = (side, g) => {
+          if (!side) return { x: g.x / sL, y: g.y / sL, w: g.w / sL, h: g.h / sL };
+          const c = [back(g.x, g.y), back(g.x + g.w, g.y), back(g.x, g.y + g.h), back(g.x + g.w, g.y + g.h)];
+          const xs = c.map(q => q[0]), ys = c.map(q => q[1]), x0 = Math.min(...xs), y0 = Math.min(...ys);
+          return { x: x0 / sR, y: y0 / sR, w: (Math.max(...xs) - x0) / sR, h: (Math.max(...ys) - y0) / sR };
+        };
+        const W2 = res.W, H2 = res.H;
+        return { l, r, regions: res.regions.map(({ x, y, w, h }) => ({ x, y, w, h })), ids, toPt, pos: g => `横 ${Math.round((g.x + g.w / 2) / W2 * 100)}%・縦 ${Math.round((g.y + g.h / 2) / H2 * 100)}%` };
+      })().catch(e => { console.warn('regionsFor', e); return null; }));
+    }
+    return rcache.get(key);
   }
   async function scan() {
     if (st.scanning) { st.scanning = false; return; }
@@ -678,7 +753,7 @@ const OV = (() => {
 
   /* ---- レポート：全ページの差分画像（枠と番号付き）と変更箇所の一覧 ---- */
   // 左右に並べるときの画像：左はそのまま、右は位置合わせした状態にし、変更箇所に色と枠を付ける
-  function sideImages(a, b, off, res) {
+  function sideImages(a, b, off, res, ids) {
     const W2 = Math.max(a.width, b.width + Math.max(0, off[0])), H2 = Math.max(a.height, b.height + Math.max(0, off[1]));
     return [0, 1].map(k => {
       const cv = document.createElement('canvas'); cv.width = W2; cv.height = H2;
@@ -687,7 +762,7 @@ const OV = (() => {
       if (res) {
         const im = c.getImageData(0, 0, W2, H2), d = im.data, m = res.mask, want = k + 1, col = k ? [26, 115, 232] : [229, 50, 45];
         for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
-        c.putImageData(im, 0, 0); drawBoxesOn(c, res.regions, -1);
+        c.putImageData(im, 0, 0); drawBoxesOn(c, res.regions, -1, ids);
       }
       return cv;
     });
@@ -724,25 +799,27 @@ const OV = (() => {
           const body = o.layout === 'diff' ? fig : `<div class="pair">${side ? '<div class="none">（対応するページなし）</div>' + fig : fig + '<div class="none">（対応するページなし）</div>'}</div>`;
           secs.push(`<h2 id="p${k}">${title}　<span class="tag ${r.kind}">${r.kind === 'add' ? '右で追加' : '左から削除'}</span></h2>${body}`);
         } else if (scope === 'all' || r.regs) {
-          const res = r.res, parts = [];
+          const res = r.res, parts = [], ids = res.regions.map(g => Notes.ovId(r.l, r.r, g, res.W, res.H));
           const offTxt = r.off && (r.off[0] || r.off[1] || r.off[2]) ? `。右の位置合わせ：X ${r.off[0]} / Y ${r.off[1]}px${r.off[2] ? ` / 回転 ${r.off[2]}°` : ''}` : '';
           if (o.layout !== 'side') {
             const cv = document.createElement('canvas'); cv.width = res.W; cv.height = res.H;
-            const c = cv.getContext('2d'); c.putImageData(res.img, 0, 0); drawBoxesOn(c, res.regions, -1);
+            const c = cv.getContext('2d'); c.putImageData(res.img, 0, 0); drawBoxesOn(c, res.regions, -1, ids);
             parts.push(`<figure><img src="${Report.jpeg(cv, maxW)}" alt=""><figcaption>差分画像：赤＝左にだけある（削除・変更前）、青＝右にだけある（追加・変更後）、橙の枠＝変更箇所。変化量 ${r.pct.toFixed(2)}%${offTxt}</figcaption></figure>`);
             cv.width = cv.height = 0;
           }
           if (o.layout !== 'diff') {
             const W = renderWidth(pl[r.l], pr[r.r]);
             const [a, b] = await Promise.all([renderAt(0, r.l, W), renderAt(1, r.r, W)]);
-            const [ca, cb] = sideImages(a, b, r.off || [0, 0, 0], res);
+            const [ca, cb] = sideImages(a, b, r.off || [0, 0, 0], res, ids);
             parts.push(`<div class="pair"><figure><img src="${Report.jpeg(ca, sideW)}" alt=""><figcaption>左：${nm(0)}　${r.l + 1} ページ（赤＝左にだけある部分）</figcaption></figure>` +
               `<figure><img src="${Report.jpeg(cb, sideW)}" alt=""><figcaption>右：${nm(1)}　${r.r + 1} ページ（青＝右にだけある部分）${o.layout === 'side' ? `。変化量 ${r.pct.toFixed(2)}%${offTxt}` : ''}</figcaption></figure></div>`);
             ca.width = ca.height = cb.width = cb.height = 0;
           }
-          const list = o.regions ? res.regions.map((g, i) => `<tr><td class="num">${i + 1}</td><td>横 ${Math.round(g.x / res.W * 100)}%・縦 ${Math.round(g.y / res.H * 100)}%</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td></tr>`).join('') : '';
+          const nst = v => !v || !v.st ? '<span class="nst none">未確認</span>' : v.st === 'ok' ? '<span class="nst ok">確認済</span>' : '<span class="nst ask">要確認</span>';
+          const list = o.regions ? res.regions.map((g, i) => { const v = Notes.get(ids[i]); return `<tr><td class="num">${i + 1}</td><td>横 ${Math.round(g.x / res.W * 100)}%・縦 ${Math.round(g.y / res.H * 100)}%</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td><td>${nst(v)}</td><td>${v && v.text ? esc(v.text).replace(/\n/g, '<br>') + (v.by || v.at ? `<div class="by">${esc(v.by)}${v.by ? '・' : ''}${v.at ? fmtDate(v.at) : ''}</div>` : '') : ''}</td></tr>`; }).join('') : '';
+          r.nOk = ids.filter(id => (Notes.get(id) || {}).st === 'ok').length; r.nAsk = ids.filter(id => (Notes.get(id) || {}).st === 'ask').length;
           secs.push(`<h2 id="p${k}">${title}　${r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</h2>` + parts.join('') +
-            (list ? `<table class="list"><thead><tr><th style="width:50px">番号</th><th>位置（ページの左上から）</th><th>大きさ（ページに対する割合）</th></tr></thead><tbody>${list}</tbody></table>` : ''));
+            (list ? `<table class="list"><thead><tr><th style="width:50px">番号</th><th style="width:22%">位置（ページの左上から）</th><th style="width:18%">大きさ</th><th style="width:70px">確認</th><th>コメント</th></tr></thead><tbody>${list}</tbody></table>` : ''));
         }
         delete r.res;
         await sleep(0);
@@ -750,14 +827,14 @@ const OV = (() => {
       const nPair = rows.filter(r => r.kind === 'pair').length, nChg = rows.filter(r => r.regs).length;
       const nAdd = rows.filter(r => r.kind === 'add').length, nDel = rows.filter(r => r.kind === 'del').length;
       const summary = !o.summary ? '' : `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
-        rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
+        rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}${r.nOk ? ` <span class="nst ok">確認済 ${r.nOk}</span>` : ''}${r.nAsk ? ` <span class="nst ask">要確認 ${r.nAsk}</span>` : ''}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
       const cond = [`差分の感度 ${$('#ovThr').value}`, `ずれの許容 ${$('#ovTolPx').value}px`, `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
       html = Report.page({
         title: `重ね合わせレポート - ${S[0].name} / ${S[1].name}`, heading: '重ね合わせ比較レポート',
         meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}` + (o.cond ? `<br>比較条件: ${esc(cond)}` : '') +
           (o.files ? '' : `<br>左: ${nm(0)}　右: ${nm(1)}`),
         body: (o.files ? await Report.bothInfo() : '') + summary + secs.join(''),
-        css: '.pair figure{margin:4px 0 14px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
+        css: '.pair figure{margin:4px 0 14px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}.nst{font-weight:700;font-size:11.5px}.nst.ok{color:#1b5e20}.nst.ask{color:#c2410c}.nst.none{color:#999;font-weight:400}.by{color:#777;font-size:10.5px}'
       });
     });
     if (html) download(`重ね合わせレポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');
@@ -845,7 +922,7 @@ const OV = (() => {
     // 解像度が変わると画素単位の位置合わせ量も変わるので、描画と位置合わせをやり直す。
     // 実行中の描画・位置合わせは世代番号を進めて捨てる（古い解像度の位置合わせ量を保存しないように）
     st.gen++; st.scanning = false;
-    st.cache.clear(); st.align.clear(); $('#ovScanRes').innerHTML = ''; st.dirty = true;
+    st.cache.clear(); st.align.clear(); rcache.clear(); $('#ovScanRes').innerHTML = ''; st.dirty = true;
     if (App.tab === 'overlay') update();
   });
   const zs = $('#ovZoom');
@@ -873,8 +950,9 @@ const OV = (() => {
     refreshMatch();
   }
   function deactivate() { stopBlink(); }
+  st.gen0 = 0;
   function invalidate() {
-    dropSlots(); st.cur = null;
+    dropSlots(); st.cur = null; st.gen0++; rcache.clear();
     st.gen++; st.scanning = false; // 実行中の描画・位置合わせ・一括チェックは捨てる（前のファイルの結果を残さないように）
     st.l = 0; st.r = 0; st.cache.clear(); st.dirty = true; $('#ovScanRes').innerHTML = '';
     // ファイルが変わったら位置合わせ量を必ず0に戻す
@@ -897,5 +975,5 @@ const OV = (() => {
     if (e.key === ' ' && st.mode === 'blink' && st.blinkFrame) { st.blinkFrame(); return true; }
     return false;
   }
-  return { activate, deactivate, invalidate, onKey, st, setPages: (l, r) => { st.l = l; st.r = r; } };
+  return { activate, deactivate, invalidate, onKey, st, regionsFor, setPages: (l, r) => { st.l = l; st.r = r; } };
 })();

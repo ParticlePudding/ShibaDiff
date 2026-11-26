@@ -4,8 +4,11 @@ const PV = (() => {
   const wrap = $('#pvWrap'), cols = $$('.pv-col', wrap);
   const COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#212121', '#fdd835'];
   const st = {
-    tool: 'select', color: store.get('pv:color', '#e53935'), width: +store.get('pv:width', 2), zoom: store.get('pv:zoom', 'fitw'),
-    rot: [0, 0], sides: [null, null], ann: [{}, {}], sel: null, dirty: [true, true], expect: [null, null]
+    tool: 'select', color: '#e53935', width: +store.get('pv:width', 2), zoom: store.get('pv:zoom', 'fitw'),
+    rot: [0, 0], sides: [null, null], ann: [{}, {}], sel: null, dirty: [true, true], expect: [null, null],
+    // 道具ごとの色（マーカーは黄色の蛍光ペン、枠は印影の赤と見分けやすい青、付箋は黄色）
+    toolColor: Object.assign({ pen: '#e53935', marker: '#fdd835', rect: '#1e88e5', note: '#fdd835' }, store.get('pv:toolColor', {})),
+    undo: [], redo: []
   };
   const scrollEl = side => $('.pv-scroll', cols[side]);
 
@@ -32,7 +35,8 @@ const PV = (() => {
     }
     if (t === 'note') {
       const x = num(a.x), y = num(a.y); if (x === null || y === null) return null;
-      return { t, x, y, text: str(a.text), bg: col(a.bg, '#fff59d') };
+      const fs = num(a.fs, 6, 200);
+      return Object.assign({ t, x, y, text: str(a.text), bg: col(a.bg, '#fff59d') }, fs ? { fs } : {});
     }
     // 日付印（stamp）は v1.2.0 で廃止。古い注釈に残っていても読み込まない
     return null;
@@ -69,15 +73,23 @@ const PV = (() => {
 
   /* ---------- SVG for annotations ---------- */
   function textW(s, fs) { let w = 0; for (const ch of s) w += ch.charCodeAt(0) > 0x2E7F ? fs : fs * 0.58; return w; }
+  // 付箋は全角20文字ほどの幅で折り返す（本文を横に長く隠さない・ページからはみ出さない）
   function noteDims(a) {
-    const lines = (a.text || '').split('\n'), fs = a.fs || 11;
-    return { lines, fs, w: Math.max(40, Math.max(...lines.map(l => textW(l, fs))) + 14), h: lines.length * fs * 1.35 + 10 };
+    const fs = a.fs || 11, maxW = fs * 20, lines = [];
+    for (const raw of (a.text || '').split('\n')) {
+      let cur = '', w = 0;
+      for (const ch of raw) { const cw = textW(ch, fs); if (w + cw > maxW && cur) { lines.push(cur); cur = ''; w = 0; } cur += ch; w += cw; }
+      lines.push(cur);
+    }
+    return { lines, fs, w: Math.max(fs * 4, Math.max(...lines.map(l => textW(l, fs))) + fs * 1.3), h: lines.length * fs * 1.35 + fs * 0.9 };
   }
+  // 付箋の文字の大きさ：ページの大きさに合わせる（A4 で 11pt、A1 の図面でも読める大きさ）
+  const noteFs = pg => Math.round(Math.max(11, Math.min(60, pg.w / 54)) * 10) / 10;
   function bbox(a) {
     if (a.t === 'pen' || a.t === 'marker') {
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       for (const [x, y] of a.p) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
-      const m = (a.t === 'marker' ? a.w * 3 : a.w) / 2 + 2; return { x: x0 - m, y: y0 - m, w: x1 - x0 + m * 2, h: y1 - y0 + m * 2 };
+      const m = (a.t === 'marker' ? a.w * 5 : a.w) / 2 + 2; return { x: x0 - m, y: y0 - m, w: x1 - x0 + m * 2, h: y1 - y0 + m * 2 };
     }
     if (a.t === 'rect') return { x: a.x - 2, y: a.y - 2, w: a.w + 4, h: a.h + 4 };
     if (a.t === 'note') { const d = noteDims(a); return { x: a.x - 2, y: a.y - 2, w: d.w + 4, h: d.h + 4 }; }
@@ -92,7 +104,7 @@ const PV = (() => {
       s = `<g data-i="${i}"><polyline points="${pts}" fill="none" stroke="transparent" stroke-width="${a.w + 8}" pointer-events="stroke"/>` +
         `<polyline points="${pts}" fill="none" stroke="${a.c}" stroke-width="${a.w}" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/></g>`;
     } else if (a.t === 'marker') {
-      s = `<g data-i="${i}" style="mix-blend-mode:multiply"><polyline points="${pts}" fill="none" stroke="${a.c}" stroke-opacity=".38" stroke-width="${a.w * 3}" stroke-linecap="butt" stroke-linejoin="round" pointer-events="stroke"/></g>`;
+      s = `<g data-i="${i}" style="mix-blend-mode:multiply"><polyline points="${pts}" fill="none" stroke="${a.c}" stroke-opacity=".38" stroke-width="${a.w * 5}" stroke-linecap="butt" stroke-linejoin="round" pointer-events="stroke"/></g>`;
     } else if (a.t === 'rect') {
       s = `<g data-i="${i}"><rect x="${a.x}" y="${a.y}" width="${a.w}" height="${a.h}" fill="none" stroke="transparent" stroke-width="${a.lw + 8}" pointer-events="stroke"/>` +
         `<rect x="${a.x}" y="${a.y}" width="${a.w}" height="${a.h}" fill="none" stroke="${a.c}" stroke-width="${a.lw}" pointer-events="none"/></g>`;
@@ -100,8 +112,8 @@ const PV = (() => {
       const d = noteDims(a);
       s = `<g data-i="${i}"><rect x="${a.x + 1.5}" y="${a.y + 1.5}" width="${d.w}" height="${d.h}" fill="rgba(0,0,0,.15)"/>` +
         `<rect x="${a.x}" y="${a.y}" width="${d.w}" height="${d.h}" fill="${a.bg || '#fff59d'}" stroke="#c9ad00" stroke-width=".6"/>` +
-        `<text x="${a.x + 7}" y="${a.y + 5 + d.fs}" font-size="${d.fs}" fill="#222" font-family="BIZ UDPGothic,Meiryo,sans-serif">` +
-        d.lines.map((l, k) => `<tspan x="${a.x + 7}" dy="${k ? d.fs * 1.35 : 0}">${esc(l) || ' '}</tspan>`).join('') + `</text></g>`;
+        `<text x="${a.x + d.fs * 0.6}" y="${a.y + d.fs * 0.35 + d.fs}" font-size="${d.fs}" fill="#222" font-family="BIZ UDPGothic,Meiryo,sans-serif">` +
+        d.lines.map((l, k) => `<tspan x="${a.x + d.fs * 0.6}" dy="${k ? d.fs * 1.35 : 0}">${esc(l) || ' '}</tspan>`).join('') + `</text></g>`;
     }
     if (selected) { const b = bbox(a); s += `<rect class="selbox" x="${b.x - 2}" y="${b.y - 2}" width="${b.w + 4}" height="${b.h + 4}" pointer-events="none"/>`; }
     return s;
@@ -154,8 +166,10 @@ const PV = (() => {
       const svg = document.createElementNS(SVGNS, 'svg');
       svg.setAttribute('viewBox', `0 0 ${pg.w} ${pg.h}`); svg.setAttribute('preserveAspectRatio', 'none');
       const num = document.createElement('div'); num.className = 'pv-num'; num.textContent = `${i + 1} / ${pages.length}`;
-      page.append(cv, svg); slot.append(page, num); frag.append(slot);
-      sd.slots.push({ slot, page, cv, svg, pg, rendered: 0, busy: false, pending: false, visible: false });
+      const chg = document.createElementNS(SVGNS, 'svg'); chg.setAttribute('class', 'pv-chg');
+      chg.setAttribute('viewBox', `0 0 ${pg.w} ${pg.h}`); chg.setAttribute('preserveAspectRatio', 'none');
+      page.append(cv, svg, chg); slot.append(page, num); frag.append(slot);
+      sd.slots.push({ slot, page, cv, svg, chg, pg, rendered: 0, busy: false, pending: false, visible: false });
       attachPointer(side, i, svg);
     });
     sc.append(frag);
@@ -165,7 +179,7 @@ const PV = (() => {
     observers[side] = new IntersectionObserver(ents => {
       for (const en of ents) {
         const s = sd.slots[+en.target.dataset.i]; s.visible = en.isIntersecting;
-        if (en.isIntersecting) renderSlot(side, +en.target.dataset.i);
+        if (en.isIntersecting) { renderSlot(side, +en.target.dataset.i); drawChanges(side, +en.target.dataset.i); }
         else if (s.rendered) { s.cv.width = 0; s.cv.height = 0; s.rendered = 0; }
       }
     }, { root: sc, rootMargin: '600px 0px' });
@@ -180,7 +194,7 @@ const PV = (() => {
       s.slot.style.width = sw + 'px'; s.slot.style.height = sh + 'px';
       s.page.style.width = w + 'px'; s.page.style.height = h + 'px';
       s.page.style.transform = `translate(-50%,-50%) rotate(${rot}deg)`;
-      if (s.visible) renderSlot(side, +s.slot.dataset.i);
+      if (s.visible) { renderSlot(side, +s.slot.dataset.i); drawChanges(side, +s.slot.dataset.i); }
     }
   }
   async function renderSlot(side, i) {
@@ -196,6 +210,104 @@ const PV = (() => {
     finally { s.busy = false; }
     if (s.pending) { s.pending = false; if (st.sides[side] === sd && s.visible) renderSlot(side, i); }
   }
+
+  /* ---------- 変更箇所の表示（重ね合わせの結果）とコメント ---------- */
+  st.showChg = !!store.get('pvChanges', true);
+  const chgBtn = $('#pvChanges');
+  const syncChgBtn = () => { chgBtn.classList.toggle('on', st.showChg); chgBtn.setAttribute('aria-pressed', st.showChg); };
+  syncChgBtn();
+  chgBtn.onclick = () => { st.showChg = !st.showChg; store.set('pvChanges', st.showChg); syncChgBtn(); redrawChanges(); };
+  const pagePairs = () => {
+    const nl = st.sides[0] ? st.sides[0].pages.length : 0, nr = st.sides[1] ? st.sides[1].pages.length : 0;
+    return PageMatch.ready() || Array.from({ length: Math.max(nl, nr) }, (_, i) => ({ l: i < nl ? i : -1, r: i < nr ? i : -1 }));
+  };
+  // そのページの組（左右とも読み込み、反対側に対応するページがあるとき）
+  function pairOf(side, i) { const p = pagePairs().find(q => (side ? q.r : q.l) === i); return p && p.l >= 0 && p.r >= 0 ? p : null; }
+  const NCOL = { ok: '#2f9e44', ask: '#d9480f', '': '#f08c00' };
+  function chgSvg(info, side, z) {
+    const fs = 12 / z, sw = 2 / z, pad = 3 / z;
+    return info.regions.map((g, k) => {
+      const b = info.toPt(side, g), id = info.ids[k], nv = Notes.get(id), col = NCOL[nv ? nv.st : ''];
+      const lab = `${k + 1}${nv && nv.st === 'ok' ? ' ✓' : nv && nv.st === 'ask' ? ' !' : ''}${nv && nv.text ? '  ' + (nv.text.length > 40 ? nv.text.slice(0, 40) + '…' : nv.text) : ''}`;
+      const lw = Math.max(fs * 1.4, Array.from(lab).reduce((w, c) => w + (c.charCodeAt(0) > 255 ? fs : fs * 0.6), 0) + pad * 2), lh = fs * 1.45;
+      return `<g class="cb" data-k="${k}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-dasharray="${4 / z} ${2 / z}"/>` +
+        `<rect class="cb-lab" x="${b.x}" y="${b.y - lh}" width="${lw}" height="${lh}" rx="${pad}" fill="${col}"/>` +
+        `<text x="${b.x + pad}" y="${b.y - lh + fs * 1.1}" font-size="${fs}" fill="#fff" font-weight="700" font-family="BIZ UDPGothic,Meiryo,sans-serif">${esc(lab)}</text></g>`;
+    }).join('');
+  }
+  async function drawChanges(side, i) {
+    const sd = st.sides[side]; if (!sd || !sd.slots[i]) return;
+    const s = sd.slots[i];
+    if (!st.showChg || !st.sides[0] || !st.sides[1] || !s.visible) { if (!st.showChg) s.chg.innerHTML = ''; return; }
+    const p = pairOf(side, i); if (!p) { s.chg.innerHTML = ''; return; }
+    const info = await OV.regionsFor(p.l, p.r);
+    if (!info || st.sides[side] !== sd || !st.showChg) return;
+    s.chg.innerHTML = chgSvg(info, side, sd.z);
+    s.chgInfo = info;
+  }
+  function redrawChanges() {
+    for (const side of [0, 1]) { const sd = st.sides[side]; if (!sd) continue; sd.slots.forEach((s, i) => { if (!st.showChg) s.chg.innerHTML = ''; else if (s.visible) drawChanges(side, i); }); }
+  }
+  Notes.on(() => { if (App.tab === 'page' && st.showChg) redrawChanges(); });
+  // 枠の番号をクリック → コメントの入力欄を、その枠の近くに出す
+  const pop = document.createElement('div'); pop.id = 'pvNotePop'; pop.hidden = true; document.body.appendChild(pop);
+  function openNotePop(side, i, k, x, y) {
+    const s = st.sides[side].slots[i], info = s.chgInfo; if (!info) return;
+    const g = info.regions[k];
+    pop.innerHTML = `<div class="pop-h"><b>変更箇所 ${k + 1}</b><span class="muted">左 ${info.l + 1} ／ 右 ${info.r + 1} ページ</span><button type="button" class="x" aria-label="閉じる"><i data-i="x"></i></button></div>`;
+    pop.querySelector('.x').onclick = () => { pop.hidden = true; };
+    pop.appendChild(Notes.editor(info.ids[k], `左 ${info.l + 1} ページ ／ 右 ${info.r + 1} ページ　変更箇所 ${k + 1}（${info.pos(g)}）`, { onEscape: () => { pop.hidden = true; } }));
+    pop.hidden = false;
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, x - 20)) + 'px';
+    pop.style.top = Math.max(8, Math.min(innerHeight - h - 8, y + 14)) + 'px';
+    setTimeout(() => { const ta = $('textarea', pop); if (ta) ta.focus(); }, 0);
+  }
+  document.addEventListener('pointerdown', e => { if (!pop.hidden && !pop.contains(e.target) && !e.target.closest('.pv-chg .cb')) pop.hidden = true; }, true);
+  pop.addEventListener('keydown', e => { if (e.key === 'Escape') { pop.hidden = true; e.stopPropagation(); } });
+  [0, 1].forEach(side => scrollEl(side).addEventListener('click', e => {
+    const cb = e.target.closest('.pv-chg .cb'); if (!cb) return;
+    const slot = cb.closest('.pv-slot'); openNotePop(side, +slot.dataset.i, +cb.dataset.k, e.clientX, e.clientY);
+  }));
+
+  /* ---------- 注釈の取り消し・やり直し（Ctrl+Z／Ctrl+Y） ---------- */
+  const snap = side => JSON.stringify(st.ann[side]);
+  function pushHist(side, before) {
+    st.undo.push({ side, s: before == null ? snap(side) : before }); if (st.undo.length > 200) st.undo.shift();
+    st.redo = []; histBtns();
+  }
+  function redrawSide(side) { const sd = st.sides[side]; if (sd) sd.slots.forEach((_, i) => drawAnn(side, i)); }
+  function stepHist(from, to) {
+    const h = from.pop(); if (!h) { toast(from === st.undo ? '元に戻す操作はありません' : 'やり直す操作はありません'); return; }
+    to.push({ side: h.side, s: snap(h.side) });
+    st.ann[h.side] = cleanAnnMap(JSON.parse(h.s)); st.sel = null; saveAnn(h.side); redrawSide(h.side); histBtns();
+  }
+  const undoAnn = () => stepHist(st.undo, st.redo), redoAnn = () => stepHist(st.redo, st.undo);
+  function histBtns() { $('#annUndo').disabled = !st.undo.length; $('#annRedo').disabled = !st.redo.length; }
+  $('#annUndo').onclick = undoAnn; $('#annRedo').onclick = redoAnn;
+  // 付箋の入力欄：クリックした位置にその場で出す（画面の中央に出すと、貼る位置が隠れるため）
+  function inlineNote(x, y, initial = '') {
+    return new Promise(res => {
+      const box = document.createElement('div'); box.className = 'pv-noteinput';
+      box.innerHTML = `<textarea rows="3" maxlength="2000" placeholder="付箋の内容（Ctrl+Enter で貼る、Esc でやめる）" aria-label="付箋の内容"></textarea><div class="row2"><span class="muted">改行できます</span><button type="button" class="c">キャンセル</button><button type="button" class="primary ok">${initial ? '直す' : '貼る'}</button></div>`;
+      document.body.appendChild(box);
+      const ta = $('textarea', box); ta.value = initial;
+      box.style.left = Math.max(8, Math.min(innerWidth - box.offsetWidth - 8, x)) + 'px';
+      box.style.top = Math.max(8, Math.min(innerHeight - box.offsetHeight - 8, y)) + 'px';
+      const done = v => { box.remove(); document.removeEventListener('pointerdown', outside, true); res(v); };
+      const outside = e => { if (!box.contains(e.target)) done(ta.value.trim() ? ta.value : null); };
+      setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+      $('.ok', box).onclick = () => done(ta.value);
+      $('.c', box).onclick = () => done(null);
+      ta.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Escape') done(null);
+        else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(ta.value); }
+      });
+      ta.focus();
+    });
+  }
+  const PASTEL = { '#fdd835': '#fff59d', '#e53935': '#ffcdd2', '#1e88e5': '#bbdefb', '#43a047': '#c8e6c9', '#fb8c00': '#ffe0b2', '#8e24aa': '#e1bee7', '#212121': '#eeeeee' };
 
   /* ---------- pointer / tools ---------- */
   function pt(svg, e) {
@@ -213,29 +325,36 @@ const PV = (() => {
           const k = +target.dataset.i;
           if (!arr[k]) return;
           select({ side, page: i, i: k });
-          drag = { mode: 'move', k, start: p, orig: JSON.parse(JSON.stringify(arr[k])) };
+          // ダブルクリック（付箋の編集）：ドラッグのためにポインタを捕まえると click・dblclick が届かないので、押した間隔で判定する
+          const ld = st.lastDown, now = Date.now();
+          st.lastDown = { side, i, k, at: now };
+          if (ld && ld.side === side && ld.i === i && ld.k === k && now - ld.at < 450 && arr[k].t === 'note') { st.lastDown = null; editNote(side, i, k, e.clientX, e.clientY); return; }
+          drag = { mode: 'move', k, start: p, orig: JSON.parse(JSON.stringify(arr[k])), before: snap(side) };
         } else {
           select(null);
           const sc = scrollEl(side);
           drag = { mode: 'pan', x: e.clientX, y: e.clientY, sl: sc.scrollLeft, st: sc.scrollTop };
         }
       } else if (tool === 'eraser') {
-        if (target) { arr.splice(+target.dataset.i, 1); st.sel = null; drawAnn(side, i); saveAnn(side); }
+        if (target) { pushHist(side); arr.splice(+target.dataset.i, 1); st.sel = null; drawAnn(side, i); saveAnn(side); }
         return;
       } else if (tool === 'pen' || tool === 'marker') {
-        arr.push({ t: tool, c: tool === 'marker' && st.color === '#212121' ? '#fdd835' : st.color, w: st.width, p: [[p.x, p.y]] });
-        drag = { mode: 'draw', k: arr.length - 1 };
+        const before = snap(side);
+        arr.push({ t: tool, c: st.color, w: st.width, p: [[p.x, p.y]] });
+        drag = { mode: 'draw', k: arr.length - 1, before };
       } else if (tool === 'rect') {
+        const before = snap(side);
         arr.push({ t: 'rect', c: st.color, lw: st.width, x: p.x, y: p.y, w: 0, h: 0 });
-        drag = { mode: 'rect', k: arr.length - 1, start: p };
+        drag = { mode: 'rect', k: arr.length - 1, start: p, before };
       } else if (tool === 'note') {
         e.preventDefault();
-        const text = await askText('付箋の内容を入力', '', { label: 'クリックした位置に付箋を貼ります（改行可）' });
+        const text = await inlineNote(e.clientX, e.clientY);
         if (text && text.trim()) {
-          const a = { t: 'note', x: p.x, y: p.y, text, bg: '#fff59d' }, pg = st.sides[side].pages[i], d = noteDims(a);
+          const pg = st.sides[side].pages[i], a = { t: 'note', x: p.x, y: p.y, text, bg: PASTEL[st.color] || '#fff59d', fs: noteFs(pg) }, d = noteDims(a);
           a.x = Math.max(2, Math.min(a.x, pg.w - d.w - 4)); a.y = Math.max(2, Math.min(a.y, pg.h - d.h - 4)); // ページからはみ出さないように
-          arr.push(a); drawAnn(side, i); saveAnn(side);
+          pushHist(side); arr.push(a); drawAnn(side, i); saveAnn(side);
         }
+        setTool('select'); // 1枚貼ったら選択に戻す（続けてクリックしても、次の入力欄が出ないように）
         return;
       }
       if (drag) { svg.setPointerCapture(e.pointerId); e.preventDefault(); }
@@ -262,25 +381,23 @@ const PV = (() => {
       const arr = list(side, i), a = arr[drag.k];
       if (drag.mode === 'rect' && a && (a.w < 2 || a.h < 2)) arr.splice(drag.k, 1);
       if (drag.mode === 'draw' && a && a.p.length === 1) a.p.push([a.p[0][0] + 0.5, a.p[0][1] + 0.5]);
-      if (drag.mode !== 'pan') { drawAnn(side, i); saveAnn(side); }
+      if (drag.mode !== 'pan') { if (drag.before != null && drag.before !== snap(side)) pushHist(side, drag.before); drawAnn(side, i); saveAnn(side); }
       drag = null;
     };
     svg.addEventListener('pointerup', end);
     svg.addEventListener('pointercancel', end);
-    svg.addEventListener('dblclick', async e => {
-      const target = e.target.closest('[data-i]'); if (!target || st.tool !== 'select') return;
-      const a = list(side, i)[+target.dataset.i]; if (!a) return;
-      if (a.t === 'note') {
-        const t = await askText('付箋を編集', a.text); if (t == null) return;
-        if (!t.trim()) list(side, i).splice(+target.dataset.i, 1); else a.text = t;
-      } else return;
-      st.sel = null; drawAnn(side, i); saveAnn(side);
-    });
+  }
+  async function editNote(side, i, k, x, y) {
+    const a = list(side, i)[k]; if (!a || a.t !== 'note') return;
+    const t = await inlineNote(x, y, a.text); if (t == null) return;
+    pushHist(side);
+    if (!t.trim()) list(side, i).splice(k, 1); else a.text = t;
+    st.sel = null; drawAnn(side, i); saveAnn(side);
   }
   function deleteSelected() {
     if (!st.sel) return false;
     const { side, page, i } = st.sel;
-    list(side, page).splice(i, 1); st.sel = null; drawAnn(side, page); saveAnn(side); return true;
+    pushHist(side); list(side, page).splice(i, 1); st.sel = null; drawAnn(side, page); saveAnn(side); return true;
   }
 
   /* ---------- scroll / page indicator / sync ---------- */
@@ -337,7 +454,7 @@ const PV = (() => {
       if (!n) return toast('注釈はありません');
       const ok = await modal({ title: '注釈の削除', html: `「${esc(S[side].name)}」の注釈 ${n} 件をすべて削除しますか？`, buttons: [{ label: 'キャンセル', value: false }, { label: '削除する', primary: true, value: true }] });
       if (!ok) return;
-      st.ann[side] = {}; st.sel = null; saveAnn(side); st.sides[side] && st.sides[side].slots.forEach((_, i) => drawAnn(side, i));
+      pushHist(side); st.ann[side] = {}; st.sel = null; saveAnn(side); st.sides[side] && st.sides[side].slots.forEach((_, i) => drawAnn(side, i));
     };
   });
   let resizeTimer = 0;
@@ -355,6 +472,7 @@ const PV = (() => {
   function setTool(t) {
     st.tool = t; wrap.dataset.tool = t;
     $$('#toolGrp .toolbtn').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    if (st.toolColor[t]) { st.color = st.toolColor[t]; markSw(); }
     if (t !== 'select') select(null);
   }
   $$('#toolGrp .toolbtn').forEach(b => b.onclick = () => setTool(b.dataset.tool));
@@ -365,8 +483,12 @@ const PV = (() => {
   const markSw = () => $$('button', sw).forEach(s => { s.classList.toggle('on', s.dataset.c === st.color); s.setAttribute('aria-pressed', s.dataset.c === st.color); });
   sw.onclick = e => {
     const c = e.target.dataset && e.target.dataset.c; if (!c) return;
-    st.color = c; store.set('pv:color', c); markSw();
-    if (st.sel) { const a = list(st.sel.side, st.sel.page)[st.sel.i]; if (a && a.t !== 'note') { a.c = c; drawAnn(st.sel.side, st.sel.page); saveAnn(st.sel.side); } }
+    st.color = c; markSw();
+    if (st.toolColor[st.tool]) { st.toolColor[st.tool] = c; store.set('pv:toolColor', st.toolColor); }
+    if (st.sel) {
+      const a = list(st.sel.side, st.sel.page)[st.sel.i];
+      if (a) { pushHist(st.sel.side); if (a.t === 'note') a.bg = PASTEL[c] || a.bg; else a.c = c; drawAnn(st.sel.side, st.sel.page); saveAnn(st.sel.side); }
+    }
   };
   markSw();
   $('#annWidth').value = String(st.width);
@@ -395,19 +517,26 @@ const PV = (() => {
   }, { passive: false });
 
   /* ---------- export / import / print ---------- */
-  $('#annExport').onclick = () => {
+  $('#annExport').onclick = async () => {
     const files = [0, 1].filter(s => S[s]).map(s => ({ side: s, name: S[s].name, size: S[s].size, rot: st.rot[s], annotations: st.ann[s] }));
     if (!files.length) return toast('ファイルが読み込まれていません');
     const n = files.reduce((t, f) => t + Object.values(f.annotations).reduce((s, x) => s + (x ? x.length : 0), 0), 0);
-    if (!n) return toast('保存する注釈がありません');
+    if (!n && !(S[0] && S[1] && Object.keys(Notes.all()).length)) return toast('保存する注釈・コメントがありません');
     const withAnn = files.filter(f => Object.values(f.annotations).some(x => x && x.length));
-    download(`注釈_${withAnn.map(f => baseName(f.name)).join('_')}.json`, JSON.stringify({ app: 'shibadiff', version: 1, files }, null, 1), 'application/json');
+    // 変更点のコメント（確認の状態・ひとこと）も一緒に保存する。記入者・保存日時・対象ファイルの SHA-256 も入れる（取り違えの確認用）
+    const notes = S[0] && S[1] ? Notes.all() : {};
+    const hashes = await Promise.all([0, 1].map(s2 => S[s2] ? Report.sha256(S[s2].bytes) : ''));
+    files.forEach(f => { f.sha256 = hashes[f.side] || ''; });
+    const nn = Object.keys(notes).length;
+    download(`注釈_${(withAnn.length ? withAnn : files).map(f => baseName(f.name)).join('_')}.json`, JSON.stringify({ app: 'shibadiff', version: 2, savedAt: new Date().toISOString(), author: Settings.get('author') || '', files, notes }, null, 1), 'application/json');
+    if (nn) toast(`注釈と、変更点のコメント ${nn} 件を保存しました`);
   };
   $('#annImport').onclick = () => $('#annFile').click();
   $('#annFile').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     try {
       const data = JSON.parse(await f.text());
+      if (!data || !Array.isArray(data.files)) throw new Error('ShibaDiff の注釈ファイルの形式ではありません');
       let applied = 0;
       for (const fe of data.files || []) {
         if (!fe || typeof fe !== 'object') continue;
@@ -418,10 +547,14 @@ const PV = (() => {
           if (ok) side = fe.side;
         }
         if (side === undefined) continue;
-        st.ann[side] = cleanAnnMap(fe.annotations); st.rot[side] = [0, 90, 180, 270].includes(fe.rot) ? fe.rot : 0; saveAnn(side); saveRot(side);
+        pushHist(side); st.ann[side] = cleanAnnMap(fe.annotations); st.rot[side] = [0, 90, 180, 270].includes(fe.rot) ? fe.rot : 0; saveAnn(side); saveRot(side);
         applied++; await build(side);
       }
-      toast(applied ? `注釈を読み込みました（${applied} ファイル）` : '対応するファイルが見つかりませんでした', !applied);
+      // 変更点のコメント：左右とも読み込んでいて、どちらも注釈ファイルの文書と同じとき（名前で照合）に読み込む
+      let nn = 0;
+      if (data.notes && S[0] && S[1] && (data.files || []).length >= 1) nn = Notes.merge(data.notes);
+      const withAnn = (data.files || []).filter(fe => fe && fe.annotations && Object.values(fe.annotations).some(x => Array.isArray(x) && x.length)).length;
+      toast(applied || nn ? `読み込みました：注釈 ${withAnn} ファイル分${nn ? `・変更点のコメント ${nn} 件` : ''}` : '対応するファイルが見つかりませんでした（注釈ファイルの文書と、開いている文書が違います）', !(applied || nn));
     } catch (err) { toast('注釈ファイルを読み込めません: ' + err.message, true); }
   };
 
@@ -457,11 +590,15 @@ const PV = (() => {
         Report.qualityField,
         { k: 'files', label: 'ファイル情報（SHA-256）', type: 'check', def: true },
         { k: 'list', label: '注釈の一覧表', type: 'check', def: true },
-        { k: 'notes', label: '各ページの付箋の内容', type: 'check', def: true }],
+        { k: 'notes', label: '各ページの付箋の内容', type: 'check', def: true },
+        ...(both ? [{ k: 'chg', label: '変更箇所の枠とコメント（重ね合わせの結果）', type: 'check', def: true }] : [])],
       [{ label: 'すべてのページ', value: 'all' }, { label: '注釈のあるページだけ', value: 'ann', primary: true }]);
     if (!o) return;
     const scope = o.scope, side2 = both && o.layout === 'side', maxW = Report.width(o.quality), w = side2 ? Math.round(maxW * 0.7) : maxW;
-    const has = (side, i) => i >= 0 && (st.ann[side][i] || []).length > 0;
+    // 変更点のコメントがあるページも「注釈のあるページ」に含める
+    const notedPair = (l, r) => Object.keys(Notes.all()).some(id => id.startsWith(`o:${l}:${r}:`));
+    const hasNote = (side, i) => { if (!both || !o.chg) return false; const p = pairOf(side, i); return !!p && notedPair(p.l, p.r); };
+    const has = (side, i) => i >= 0 && ((st.ann[side][i] || []).length > 0 || hasNote(side, i));
     let html;
     await withBusy('レポートを作成しています…', async () => {
       const secs = [], rows = [];
@@ -469,10 +606,29 @@ const PV = (() => {
       const one = async (side, i) => {
         const sd = st.sides[side], arr = st.ann[side][i] || [], pg = sd.pages[i];
         const cv = await renderWithAnn(side, i, Math.min(3, w * 1.2 / Math.max(pg.w, pg.h)));
+        // 変更箇所の枠と番号（コメントの状態の色）を重ね、コメントを一覧にする
+        let chgList = '';
+        const pr = both && o.chg && !st.rot[side] ? pairOf(side, i) : null;
+        if (pr) {
+          const info = await OV.regionsFor(pr.l, pr.r);
+          if (info) {
+            const c = cv.getContext('2d'), k = cv.width / pg.w, fs = Math.max(12, cv.width / 70);
+            const items = [];
+            info.regions.forEach((g, n) => {
+              const b = info.toPt(side, g), nv = Notes.get(info.ids[n]), colr = NCOL[nv ? nv.st : ''];
+              c.save(); c.strokeStyle = colr; c.lineWidth = Math.max(2, fs / 6); c.setLineDash([fs / 2, fs / 4]); c.strokeRect(b.x * k, b.y * k, b.w * k, b.h * k); c.restore();
+              const lab = String(n + 1) + (nv && nv.st === 'ok' ? ' ✓' : nv && nv.st === 'ask' ? ' !' : '');
+              c.font = `bold ${fs}px sans-serif`; const tw = c.measureText(lab).width + fs * 0.6;
+              c.fillStyle = colr; c.fillRect(b.x * k, b.y * k - fs * 1.4, tw, fs * 1.4); c.fillStyle = '#fff'; c.fillText(lab, b.x * k + fs * 0.3, b.y * k - fs * 0.35);
+              if (nv) items.push(`<li><b>${n + 1}</b> ${nv.st === 'ok' ? '<span class="nst ok">確認済</span>' : nv.st === 'ask' ? '<span class="nst ask">要確認</span>' : ''} ${esc(nv.text || '').replace(/\n/g, '<br>')}${nv.by ? `<span class="by">（${esc(nv.by)}）</span>` : ''}</li>`);
+            });
+            if (items.length && side === 1) chgList = `<div class="notes"><b>変更箇所のコメント</b><ul class="chg">${items.join('')}</ul></div>`;
+          }
+        }
         const cnt = Object.entries(arr.reduce((m, a) => (m[a.t] = (m[a.t] || 0) + 1, m), {})).map(([t, n]) => `${TNAME[t] || t} ${n}`).join('・');
         const notes = o.notes ? arr.filter(a => a.t === 'note').map(a => `<li>${esc(a.text).replace(/\n/g, '<br>')}</li>`).join('') : '';
         const nm = side ? '右' : '左';
-        const fig = `<figure><img src="${Report.jpeg(cv, w)}" alt=""><figcaption>${nm}：${esc(S[side].name)}　${i + 1} / ${sd.pages.length} ページ　${cnt ? '注釈：' + cnt : '注釈なし'}</figcaption></figure>` + (notes ? `<div class="notes"><b>付箋</b><ol>${notes}</ol></div>` : '');
+        const fig = `<figure><img src="${Report.jpeg(cv, w)}" alt=""><figcaption>${nm}：${esc(S[side].name)}　${i + 1} / ${sd.pages.length} ページ　${cnt ? '注釈：' + cnt : '注釈なし'}</figcaption></figure>` + (notes ? `<div class="notes"><b>付箋</b><ol>${notes}</ol></div>` : '') + chgList;
         cv.width = cv.height = 0;
         if (arr.length) rows.push(`<tr><td>${nm}</td><td class="num">${i + 1}</td><td>${cnt}</td><td>${arr.filter(a => a.t === 'note').map(a => esc(a.text).replace(/\n/g, ' ')).join('<br>')}</td></tr>`);
         return { fig, n: arr.length };
@@ -509,7 +665,7 @@ const PV = (() => {
         title: `注釈レポート - ${avail.map(s => S[s].name).join(' / ')}`, heading: 'ページ表示・注釈レポート',
         meta: `<b>注釈 ${total} 件</b>（${avail.map(s => s ? '右' : '左').join('・')}の文書）` + (o.files ? '' : '<br>' + avail.map(s => `${s ? '右' : '左'}: ${esc(S[s].name)}`).join('　')),
         body: (o.files ? await Report.bothInfo() : '') + list + (secs.length ? secs.join('') : '<p>載せるページはありません。</p>'),
-        css: '.pair figure{margin:4px 0 6px}.notes{font-size:12.5px;margin-bottom:12px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
+        css: '.pair figure{margin:4px 0 6px}.notes{font-size:12.5px;margin-bottom:12px}ul.chg{list-style:none;padding-left:4px;margin:4px 0}ul.chg b{display:inline-block;min-width:20px}.nst{font-weight:700}.nst.ok{color:#1b5e20}.nst.ask{color:#c2410c}.by{color:#777;font-size:11px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
       });
     });
     if (html) download(`注釈レポート_${baseName(S[avail[0]].name)}.html`, html, 'text/html;charset=utf-8');
@@ -544,7 +700,7 @@ const PV = (() => {
 
   function activate() {
     // 左右の連動で、挿入・削除されたページを飛ばして対応するページに合わせられるよう、裏で対応付けを調べておく
-    if (S[0] && S[1] && PageMatch.enabled()) PageMatch.compute().catch(() => { });
+    if (S[0] && S[1] && PageMatch.enabled() && !PageMatch.ready()) PageMatch.compute().then(() => { if (App.tab === 'page') redrawChanges(); }).catch(() => { });
     if (window.innerWidth < 760 && $('#pvShow').value === 'both') {
       // 狭い画面では片側ずつ表示
       $('#pvShow').value = S[0] || !S[1] ? '0' : '1';
@@ -558,6 +714,8 @@ const PV = (() => {
     if (App.tab === 'page') build(side);
   }
   function onKey(e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); undoAnn(); return true; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redoAnn(); return true; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && deleteSelected()) { e.preventDefault(); return true; }
     if (e.key === 'Escape') { setTool('select'); select(null); return true; }
     return false;

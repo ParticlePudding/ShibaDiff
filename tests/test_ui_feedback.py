@@ -169,7 +169,7 @@ async def main():
         await t.js("document.querySelectorAll('.pv-scroll')[1].scrollTop = 0"); await t.page.wait_for_timeout(300)
         svg = t.page.locator('.pv-col[data-side="1"] svg').first; bb = await svg.bounding_box()
         await t.click('[data-tool=note]'); await t.page.mouse.click(bb['x'] + 80, bb['y'] + 80); await t.page.wait_for_timeout(300)
-        await t.page.fill('#modal input, #modal textarea', '要確認<script>x</script>'); await t.page.click('#modal .foot button.primary'); await t.page.wait_for_timeout(300)
+        await t.page.fill('.pv-noteinput textarea', '要確認<script>x</script>'); await t.page.click('.pv-noteinput .ok'); await t.page.wait_for_timeout(300)
         await t.click('#pvReport'); p = await t.download('#modal .foot button:has-text("注釈のあるページだけ")'); h = open(p, encoding='utf-8').read()
         ck('注釈のレポート（付箋の内容・画像・文字はエスケープ。既定は左右の対応ページを並べる）', '注釈レポート' in h and '要確認&lt;script&gt;' in h and h.count('<img') == 2 and h.count('class="pair"') == 1, h.count('<img'))
         t.finish()

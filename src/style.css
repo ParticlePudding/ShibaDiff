@@ -404,3 +404,55 @@ button:has(>.ic),summary:has(>.ic){display:inline-flex;align-items:center;justif
   #tabs button{padding:9px 11px 10px}
   #tabs button .ic,#top .seg .ic,#top .right .ic{width:18px;height:18px}
 }
+/* 変更点一覧（変更点へのコメント） */
+.nt-panel{display:none;width:340px;flex:none;border-left:1px solid var(--line);background:#fafbfc;flex-direction:column;min-height:0}
+.diffwrap.notes-on .nt-panel{display:flex}
+.nt-top{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;padding:8px 10px 4px;font-size:12.5px}
+.nt-top .grow{flex:1}
+.nt-counts{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px}
+.nt-hint{padding:0 10px 6px;font-size:11.5px;border-bottom:1px solid var(--line)}
+.nt-list{flex:1;overflow:auto;padding:4px 0}
+.nt-empty{padding:16px 12px}
+.nt-item{padding:6px 10px 7px 12px;border-bottom:1px solid #eceff3;cursor:pointer;font-size:12.5px;border-left:4px solid transparent}
+.nt-item:hover{background:#f1f5fb}
+.nt-item.cur{background:#eef3ff;border-left-color:var(--cur)}
+.nt-item.nt-ok{border-left-color:#2f9e44}.nt-item.nt-ask{border-left-color:#e8590c}.nt-item.nt-c{border-left-color:#868e96}
+.nt-item.cur.nt-ok,.nt-item.cur.nt-ask,.nt-item.cur.nt-c{background:#eef3ff}
+.nt-h{display:flex;gap:6px;align-items:baseline}
+.nt-pv{font-family:var(--mono,monospace);font-size:11.5px;color:#444;margin-top:2px;overflow:hidden}
+.nt-pv div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nt-pv .del{color:#9b2c2c}.nt-pv .add{color:#1a4f9c}
+.nt-sum{display:flex;gap:6px;align-items:center;margin-top:3px;min-height:0}
+.nt-sum:empty{display:none}
+.nt-chip{display:inline-block;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700;line-height:18px;white-space:nowrap}
+.nt-chip.st-ok{background:#d3f9d8;color:#1b5e20}.nt-chip.st-ask{background:#ffe8cc;color:#9a3412}
+.nt-txt{color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nt-ed{margin-top:6px;cursor:default}
+.nt-st{display:flex;gap:0;margin-bottom:5px}
+.nt-st button{border-radius:0;padding:3px 10px;font-size:12px}
+.nt-st button:first-child{border-radius:5px 0 0 5px}.nt-st button:last-child{border-radius:0 5px 5px 0}
+.nt-st button+button{margin-left:-1px}
+.nt-st button.on.st-none{background:#e9ecef;border-color:#868e96;font-weight:700}
+.nt-st button.on.st-ok{background:#2f9e44;border-color:#2f9e44;color:#fff;font-weight:700}
+.nt-st button.on.st-ask{background:#e8590c;border-color:#e8590c;color:#fff;font-weight:700}
+.nt-ed textarea{width:100%;box-sizing:border-box;font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid var(--line2);border-radius:5px;resize:vertical;min-height:44px}
+.nt-meta{font-size:11px;margin-top:2px}
+.nt-meta:empty{display:none}
+/* 比較欄：コメントのある差分の行番号の左に印 */
+.row.nt-ok .ln{box-shadow:inset 4px 0 #2f9e44}.row.nt-ask .ln{box-shadow:inset 4px 0 #e8590c}.row.nt-c .ln{box-shadow:inset 4px 0 #868e96}
+@media (max-width:1180px){.nt-panel{width:280px}}
+@media (max-width:760px){.diffwrap.notes-on .nt-panel{position:absolute;right:0;top:0;bottom:0;z-index:5;box-shadow:-4px 0 12px rgba(0,0,0,.15);width:min(320px,90vw)}}
+.ov-notes{margin-top:8px;border-top:1px solid var(--line);max-height:46vh;overflow:auto}
+.ov-notes:empty{display:none}
+.ov-nt-h{font-size:11.5px;padding:6px 2px}
+.ov-notes .nt-item{padding:5px 8px 6px 10px}
+/* ページ表示：変更箇所の枠（重ね合わせの結果）。番号の札だけがクリックできる */
+.pv-page svg.pv-chg{pointer-events:none}
+.pv-chg .cb-lab{pointer-events:all;cursor:pointer}
+.pv-chg .cb text{pointer-events:none}
+#pvNotePop{position:fixed;z-index:60;width:300px;background:#fff;border:1px solid var(--line2);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.22);padding:8px 10px 10px}
+#pvNotePop .pop-h{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+#pvNotePop .pop-h .x{margin-left:auto;padding:2px 5px;border:none;background:transparent}
+.pv-noteinput{position:fixed;z-index:60;width:280px;background:#fffde7;border:1px solid #c9ad00;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.25);padding:8px}
+.pv-noteinput textarea{width:100%;box-sizing:border-box;font:inherit;font-size:13px;border:1px solid #d4c26a;border-radius:4px;padding:5px;background:#fff}
+.pv-noteinput .row2{display:flex;align-items:center;gap:6px;margin-top:6px}.pv-noteinput .row2 .muted{flex:1;font-size:11.5px}

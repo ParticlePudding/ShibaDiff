@@ -27,6 +27,9 @@ async def main():
         t.check('文字の大きさ（大）が反映される', await t.js("document.documentElement.dataset.fs") == 'l')
         await t.click('#btnSettings'); await t.page.select_option('[data-k=fontSize]','m'); await t.page.keyboard.press('Escape')
         # 注釈（日付印は廃止。付箋と枠を付けて保存データに出ることを確認する）
+        # 注釈のブラウザ保存は既定でオフ（2回目のレビューで変更）。保存データの画面を確かめるためにオンにする
+        t.check('注釈のブラウザ保存は既定でオフ', await t.js("Settings.get('persist') === false"))
+        await t.js("Settings.set('persist', true)")
         await t.load(C+'10_PDF_テキスト/見積書_初回.pdf', C+'10_PDF_テキスト/見積書_再提出.pdf')
         await t.tab('page')
         t.check('日付印のツールがない', await t.js("!document.querySelector('[data-tool=stamp]') && !document.querySelector('#stampCfg')"))

@@ -76,7 +76,8 @@
       </div>
       <div class="grow"></div>
       <div class="grp">
-        <button id="tPatch" title="unified diff 形式で保存"><i data-i="file-code"></i>パッチ</button>
+        <button id="tNotes" class="toolbtn" aria-pressed="false" title="変更点の一覧：差分ごとに「確認済・要確認」とコメントを付ける"><i data-i="list-checks"></i>変更点</button>
+        <button id="tPatch" title="パッチ（git 形式の差分。unified diff）を保存" aria-label="パッチを保存"><i data-i="file-code"></i></button>
         <button id="tReport" title="比較結果をHTMLレポートとして保存"><i data-i="clipboard-list"></i>レポート</button>
       </div>
     </div>
@@ -85,6 +86,7 @@
       <div class="pane side0" id="paneL" tabindex="0"><div class="spacer"><div class="rows"></div></div></div>
       <div class="pane side1" id="paneR" tabindex="0"><div class="spacer"><div class="rows"></div></div></div>
       <div class="wrapv" id="wrapView" tabindex="0" aria-label="比較結果（折り返し表示）"></div>
+      <aside class="nt-panel" id="tvNotes" aria-label="変更点の一覧"></aside>
       <div class="empty-hint" id="textHint"><div class="big">⇆</div>
         比較したいファイルを2つドロップしてください<br>
         <span style="font-size:12.5px">テキスト / ソースコード / PDF / Word / Excel / PowerPoint / 画像 に対応<br>上のファイル欄の「テキストを入力」から、直接貼り付けて比べることもできます</span></div>
@@ -103,7 +105,9 @@
         <button class="toolbtn" data-tool="note" title="付箋（クリックした位置に貼る）"><i data-i="sticky-note"></i>付箋</button>
         <button class="toolbtn" data-tool="eraser" title="消しゴム（クリックした注釈を削除）"><i data-i="eraser"></i>消去</button>
       </div>
+      <button id="pvChanges" class="toolbtn" aria-pressed="false" title="重ね合わせで見つけた変更箇所を、番号付きの枠で表示（枠の番号をクリックすると、確認の状態とひとことを付けられます）"><i data-i="scan-search"></i>変更箇所</button>
       <div class="grp swatches" id="swatches"></div>
+      <button id="annUndo" title="注釈を元に戻す (Ctrl+Z)" aria-label="注釈を元に戻す" disabled><i data-i="undo-2"></i></button><button id="annRedo" title="注釈をやり直す (Ctrl+Y)" aria-label="注釈をやり直す" disabled><i data-i="redo-2"></i></button>
       <select id="annWidth" title="線の太さ"><option value="1">細</option><option value="2" selected>中</option><option value="4">太</option></select>
       <div class="sep"></div>
       <div class="grp">
@@ -178,6 +182,10 @@
     <div class="ov-wrap">
       <div class="ov-view" id="ovView" tabindex="0" aria-label="重ね合わせの表示領域"><div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します</div></div>
       <div class="ov-side">
+        <h4>結果</h4>
+        <div id="ovStats" class="muted">—</div>
+        <div data-modes="diff side" style="display:flex;gap:4px;margin-top:6px"><button id="ovRegPrev"><i data-i="chevron-left"></i>前の変更</button><button id="ovRegNext">次の変更<i data-i="chevron-right"></i></button></div>
+        <div id="ovNotes" class="ov-notes" data-modes="diff side" aria-label="このページの変更箇所とコメント"></div>
         <h4 id="ovCtlTitle">表示の調整</h4>
         <div class="ov-ctl">
           <div data-modes="overlay">右の濃さ <input type="range" id="ovOpacity" min="0" max="100" value="50"></div>
@@ -200,9 +208,6 @@
           <div>回転 <input type="number" id="ovRot" value="0" step="0.05"> °</div>
           <div style="display:flex;gap:4px"><button id="ovAuto"><i data-i="crosshair"></i>自動位置合わせ</button><button id="ovReset"><i data-i="rotate-ccw"></i>リセット</button></div>
         </div>
-        <h4>結果</h4>
-        <div id="ovStats" class="muted">—</div>
-        <div data-modes="diff side" style="display:flex;gap:4px;margin-top:6px"><button id="ovRegPrev"><i data-i="chevron-left"></i>前の変更</button><button id="ovRegNext">次の変更<i data-i="chevron-right"></i></button></div>
         <h4 data-modes="diff side">凡例</h4>
         <div class="legend" data-modes="diff side">
           <span><i style="background:#e5322d"></i>左にだけある（削除・変更前）</span>
