@@ -365,7 +365,8 @@ const TV = (() => {
     const tv = topV();
     st.unified = u; st.wrapDirty = true;
     $('#diffwrap').classList.toggle('unified', u);
-    $('#tLayout').textContent = u ? '左右表示' : '一列表示';
+    $('#tLayout .lbl').textContent = u ? '左右表示' : '一列表示';
+    $('#tLayout').querySelector('svg').outerHTML = u ? '<i data-i="columns-2"></i>' : '<i data-i="rows-2"></i>';
     $('#tLayout').title = u ? '左右に並べて表示' : '1列にまとめて表示';
     sizeSpacers(); render();
     setTopV(Math.min(tv, Math.max(0, st.view.length - 1)));

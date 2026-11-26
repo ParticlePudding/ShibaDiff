@@ -166,7 +166,7 @@ const App = (() => {
     $('.fname', el).innerHTML = s ? `${s.dirty ? '<span class="dirty" title="未保存の変更があります">● </span>' : ''}${esc(s.name)}` : 'ファイルをドロップ、またはクリックして選択';
     $('.fname', el).title = s ? s.name : '';
     const info = $('.slot-info', el);
-    if (!s) { info.innerHTML = `<span class="meta"></span><button data-act="edit" title="テキストを直接入力・貼り付け">テキストを入力</button>`; return; }
+    if (!s) { info.innerHTML = `<span class="meta"></span><button data-act="edit" title="テキストを直接入力・貼り付け"><i data-i="type"></i>テキストを入力</button>`; return; }
     let meta = `${KIND[s.kind] || s.kind}`;
     if (s.size) meta += `・${fmtSize(s.size)}`;
     if (s.mtime && s.bytes) meta += `・${fmtDate(s.mtime)}`;
@@ -179,8 +179,8 @@ const App = (() => {
       html += `<select data-act="eol" title="保存時の改行コード">${['\r\n', '\n', '\r'].map(e => `<option value="${encodeURIComponent(e)}"${e === s.eol ? ' selected' : ''}>${Enc.EOLNAME[e]}</option>`).join('')}</select>`;
     }
     html += `<span class="meta" title="${esc(meta)}">${esc(meta)}</span><span class="grow"></span>`;
-    if (!s.noText) html += `<button data-act="edit" title="テキストを編集（行をダブルクリックでも開きます）">編集</button><button data-act="save" title="${s.kind === 'text' ? '保存' : 'テキストとして保存'}">保存</button>`;
-    html += `<button data-act="close" title="閉じる">✕</button>`;
+    if (!s.noText) html += `<button data-act="edit" title="テキストを編集（行をダブルクリックでも開きます）"><i data-i="pencil"></i>編集</button><button data-act="save" title="${s.kind === 'text' ? '保存' : 'テキストとして保存'}"><i data-i="save"></i>保存</button>`;
+    html += `<button data-act="close" title="閉じる"><i data-i="x"></i></button>`;
     info.innerHTML = html;
   }
   slots.forEach((el, side) => {
@@ -447,7 +447,7 @@ const App = (() => {
     html: `
 <h4 style="margin-top:0">ファイルの読み込み</h4>
 画面の左半分にドロップすると左、右半分にドロップすると右に入ります（ドラッグ中に、入る側を強調して示します。2つまとめてドロップすると左右に入ります）。上のファイル名をクリックしても選択できます。<br>
-左右とも読み込むと、文字コード・保存・閉じるなどのファイル欄は自動でたたまれます（<b>▾</b> で開く）。「⛶ 全画面」でヘッダも隠せます（<kbd>Esc</kbd> で戻る）。<br>
+左右とも読み込むと、文字コード・保存・閉じるなどのファイル欄は自動でたたまれます（ヘッダ右のボタンで開く）。「全画面」でヘッダも隠せます（<kbd>Esc</kbd> で戻る）。<br>
 対応形式: テキスト・ソースコード・CSV など（Shift_JIS / EUC-JP / JIS / UTF-8 / UTF-16 を自動判定）、PDF、Word(.docx)、Excel(.xlsx)、PowerPoint(.pptx)、画像（PNG / JPEG / GIF / BMP / WebP）。<br>
 <span class="muted">DocuWorks文書(.xdw)・旧Office形式(.doc/.xls/.ppt)・TIFFは中身を読めないため、PDFや新しい形式に変換してから読み込んでください。</span>
 <h4>テキスト比較（WinMerge相当）</h4>
@@ -471,7 +471,7 @@ const App = (() => {
 PDF・画像のページを重ねて、変わった部分を色分けします（赤＝左にだけある、青＝右にだけある）。変更箇所はオレンジの枠と番号で示します。右側のパネルには、選んだ表示方法で使う項目だけが出ます。<br>
 スキャン画像は開いたときに自動で位置と傾きを合わせます（「自動位置合わせ」で再実行）。細かなずれを差分にしたくないときは「ずれの許容」を増やしてください。A1・A0 などの大きな図面は「解像度」で軽量／精細を選べます。<br>
 途中でページが挿入・削除されていても、似ているページどうしを自動で組にします（ページ送り・一括チェック・ページ表示の連動に使います）。「全ページの差分を調べる」で、どのページに変更があるか、追加・削除されたページを一覧できます。「レポート」で差分画像と一覧を HTML に出力できます。<br>
-操作：ホイール＝縦スクロール、<kbd>Shift</kbd>+ホイール＝横スクロール、<kbd>Ctrl</kbd>+ホイール＝拡大・縮小。「✋ 移動」（<kbd>H</kbd>）ではドラッグで表示位置を動かし、ホイールで拡大・縮小します。<kbd>PageUp</kbd><kbd>PageDown</kbd>（<kbd>←</kbd><kbd>→</kbd>）でページ送り、<kbd>N</kbd>で次の変更箇所、点滅の手動切り替えは画像のクリックか <kbd>Space</kbd>。
+操作：ホイール＝縦スクロール、<kbd>Shift</kbd>+ホイール＝横スクロール、<kbd>Ctrl</kbd>+ホイール＝拡大・縮小。「移動」（<kbd>H</kbd>）ではドラッグで表示位置を動かし、ホイールで拡大・縮小します。<kbd>PageUp</kbd><kbd>PageDown</kbd>（<kbd>←</kbd><kbd>→</kbd>）でページ送り、<kbd>N</kbd>で次の変更箇所、点滅の手動切り替えは画像のクリックか <kbd>Space</kbd>。<br>表示方法：ツールバーの「1ページ」ボタンは1組ずつ、「全ページ」ボタンは全ページを縦に並べてスクロールで見られます（見えているページだけを描くので、ページ数が多くても軽く動きます。全ページ表示でも <kbd>PageUp</kbd><kbd>PageDown</kbd> で前後のページへ移動し、右のパネルの結果・位置合わせは画面の上のほうにあるページが対象です）。
 <h4>フォルダ比較</h4>
 ヘッダ左の「フォルダ比較」に切り替えて使います。2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリック（または <kbd>Enter</kbd>）すると中身の比較に移り、「← フォルダ一覧」で一覧に戻れます。一覧は CSV・HTMLレポートに出力できます。
 <h4>プライバシー</h4>

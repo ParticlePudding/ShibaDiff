@@ -1,7 +1,7 @@
 /* 設定（頻繁には切り替えない項目）とブラウザ保存データの管理 */
 const Settings = (() => {
   const DEF = {
-    wrap: false, showWs: false, unit: 'auto', numDelta: true, fontSize: 'm', persist: true, ovRes: 'std', pageMatch: true
+    wrap: false, showWs: false, unit: 'auto', numDelta: true, fontSize: 'm', persist: true, ovRes: 'std', pageMatch: true, ovScroll: false
   };
   const cur = Object.assign({}, DEF, store.get('settings', {}));
   const subs = [];
@@ -34,13 +34,13 @@ ${chk('numDelta', '数字が変わったとき、差と増減率を表示する�
 <h4 id="set-data">このブラウザに保存するデータ</h4>
 ${chk('persist', '注釈とページの回転を、このブラウザに自動で保存する')}
 <div class="muted" style="margin:2px 0 6px 22px">オフにすると、ファイルを閉じたときに注釈は消えます（必要なら「注釈を保存」でファイルにしてください）。</div>
-<button type="button" id="setData">保存されているデータを確認・削除…</button>
+<button type="button" id="setData"><i data-i="database"></i>保存されているデータを確認・削除…</button>
 <h4 id="set-about">このツールについて</h4>
 <table class="about">
 <tr><td>版</td><td>${esc(APP.version)}（${esc(APP.build)}）</td></tr>
 <tr><td>ライセンス</td><td>MIT License</td></tr>
 <tr><td>同梱ライブラリ</td><td>pdf.js ${esc(APP.pdfjs)}（Apache License 2.0）<br>core-js（MIT License。pdf.js に同梱）</td></tr>
-<tr><td></td><td><button type="button" id="setLicenses">ライセンス全文を表示…</button></td></tr>
+<tr><td></td><td><button type="button" id="setLicenses"><i data-i="scale"></i>ライセンス全文を表示…</button></td></tr>
 <tr><td>通信</td><td>外部との通信は行いません（Content-Security-Policy で禁止しています）</td></tr>
 </table></div>`,
       buttons: [{ label: '閉じる', primary: true, value: null }],

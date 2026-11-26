@@ -174,4 +174,5 @@ async def main():
         ck('注釈のレポート（付箋の内容・画像・文字はエスケープ）', '注釈レポート' in h and '要確認&lt;script&gt;' in h and h.count('<img') == 1)
         t.finish()
 
-asyncio.run(main())
+if __name__ == '__main__':
+    asyncio.run(main())

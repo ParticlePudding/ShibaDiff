@@ -56,6 +56,23 @@ ver = json.load(open(os.path.join(HERE, "package.json")))["version"]
 pdfjs_ver = json.load(open(os.path.join(PDFJS, "package.json")))["version"]
 app_head = f"const APP = {{ version: {json.dumps(ver)}, build: {json.dumps(datetime.date.today().isoformat())}, pdfjs: {json.dumps(pdfjs_ver)} }};\n"
 app = app_head + "\n".join(f"// ---- {n} ----\n" + read(os.path.join(SRC, n)) for n in js_files)
+
+# アイコン（Lucide）：画面の HTML と JS の中の <i data-i="名前"></i> を、その SVG に置き換えて埋め込む。
+# 使っているアイコンだけを入れる。名前の誤りはビルドを止める
+LUCIDE = os.path.join(HERE, "node_modules", "lucide-static")
+lucide_ver = json.load(open(os.path.join(LUCIDE, "package.json")))["version"]
+ICON_RE = re.compile(r'<i data-i="([a-z0-9-]+)"></i>')
+def icon_svg(name):
+    path = os.path.join(LUCIDE, "icons", name + ".svg")
+    if not os.path.exists(path): raise SystemExit(f"アイコンがありません: {name}")
+    inner = re.search(r"<svg[^>]*>(.*)</svg>", read(path), re.S).group(1)
+    inner = re.sub(r"\s*\n\s*", "", inner).replace(" />", "/>")
+    return f'<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{inner}</svg>'
+used_icons = sorted(set(ICON_RE.findall(body)) | set(ICON_RE.findall(app)))
+icons = {n: icon_svg(n) for n in used_icons}
+body = ICON_RE.sub(lambda m: icons[m.group(1)], body)
+app = ICON_RE.sub(lambda m: icons[m.group(1)], app)
+app = app_head.replace("pdfjs:", f"lucide: {json.dumps(lucide_ver)}, pdfjs:") + app[len(app_head):]
 check_script_safe("app", app)
 
 # ライセンス表記（ShibaDiff 本体と、同梱する pdf.js・core-js）。設定の「このツールについて」から表示する
@@ -65,6 +82,7 @@ licenses = "\n\n".join([
     notice("ShibaDiff (MIT License)", os.path.join(HERE, "LICENSE")),
     notice(f"pdf.js {pdfjs_ver} (Apache License 2.0) https://github.com/mozilla/pdf.js", os.path.join(PDFJS, "LICENSE")),
     notice("core-js 3.39.0 (MIT License, bundled in pdf.js legacy build) https://github.com/zloirock/core-js", os.path.join(HERE, "third_party", "core-js-LICENSE")),
+    notice(f"Lucide icons {lucide_ver} (ISC License; some icons MIT License, Feather) https://lucide.dev", os.path.join(LUCIDE, "LICENSE")),
 ])
 check_script_safe("licenses", licenses)
 

@@ -23,7 +23,7 @@ WinMerge のテキスト比較と DocuWorks Viewer のページ表示・注釈�
 
 ## ビルド
 ```
-npm ci              # pdf.js を取得
+npm ci              # pdf.js と Lucide アイコンを取得
 python3 build.py    # ShibaDiff.html を生成
 ```
 ソースは `src/` にあり、`build.py` が CSS・JavaScript・pdf.js（ワーカー・日本語CMap込み）を1つのHTMLにまとめます。
@@ -44,6 +44,7 @@ ShibaDiff は [MIT License](LICENSE) で公開しています。
 同梱しているライブラリとそのライセンスは次のとおりです。全文は、アプリの「設定」→「このツールについて」→「ライセンス全文を表示」で確認できます。
 - [pdf.js](https://github.com/mozilla/pdf.js) 4.10.38（Apache License 2.0）
 - [core-js](https://github.com/zloirock/core-js) 3.39.0（MIT License、pdf.js の legacy ビルドに同梱）
+- [Lucide](https://lucide.dev) 1.81.0 のアイコン（ISC License。Feather 由来の一部は MIT License。使っているアイコンだけを SVG として埋め込み）
 
 ## 業務で使うときの注意
 GitHub Pages 版は main ブランチの最新がそのまま反映されます。業務では、版を固定するために `ShibaDiff.html` をダウンロードして使うことをおすすめします。

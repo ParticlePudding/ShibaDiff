@@ -21,8 +21,8 @@ const OV = (() => {
     st.cache.set(key, cv);
     // 描画結果は10件まで、かつ合計 6000万画素（約240MB）までに抑える（大きな図面でメモリを使いすぎないように）
     const px = () => { let n = 0; for (const c of st.cache.values()) n += c.width * c.height; return n; };
-    while (st.cache.size > 10 || (st.cache.size > 2 && px() > 60e6)) {
-      const k = st.cache.keys().next().value, c = st.cache.get(k); st.cache.delete(k); c.width = c.height = 0;
+    while (st.cache.size > 12 || (st.cache.size > 2 && px() > 60e6)) {
+      const k = st.cache.keys().next().value, c = st.cache.get(k); st.cache.delete(k); // 表示中のページが使っていることがあるので、消さずに参照を外すだけにする
     }
     return cv;
   }
@@ -207,27 +207,36 @@ const OV = (() => {
   }
 
   /* ---- drawing ---- */
+  // 表示中のページ（1ページ表示なら今のページ、全ページ表示なら描画済みのページ）
+  const liveViews = () => st.slots ? st.slots.filter(s => s.v).map(s => s.v) : (st.cur ? [st.cur] : []);
+  st.blinkFrame = () => { st.blinkOn = !st.blinkOn; liveViews().forEach(v => v.frame && v.frame(st.blinkOn)); };
   function stopBlink() { clearInterval(st.blink); st.blink = 0; }
   function startBlink() {
     stopBlink();
-    if (st.mode === 'blink' && st.blinkFrame && !$('#ovBlinkManual').checked) st.blink = setInterval(st.blinkFrame, +$('#ovBlinkMs').value);
+    if (st.mode === 'blink' && !$('#ovBlinkManual').checked) st.blink = setInterval(st.blinkFrame, +$('#ovBlinkMs').value);
   }
   /* ---- 表示の大きさ：幅に合わせる（fit）／縦に合わせる（fith）／倍率 ---- */
-  function cssWidth(cv, half) {
-    const vw = view.clientWidth - 30, vh = view.clientHeight - 30;
+  // 描画の画素数（全ページ表示のまだ描いていないページは、仮の枠に入れた大きさ）
+  const dims = el => el.tagName === 'CANVAS' ? [el.width, el.height] : [+el.dataset.w, +el.dataset.h];
+  const scaleOf = el => +el.dataset.scale || st.scale || 2;
+  function cssWidth(el, half) {
+    const [w, h] = dims(el);
+    const vw = view.clientWidth - 30, vh = view.clientHeight - 30 - (st.slots ? 24 : 0);
     if (st.zoom === 'fit') return half ? Math.max(150, (view.clientWidth - 50) / 2) : Math.max(200, vw);
-    if (st.zoom === 'fith') return Math.max(100, vh) * cv.width / cv.height;
-    return cv.width * (+st.zoom) * (96 / 72) / (st.scale || 2);
+    if (st.zoom === 'fith') return Math.max(100, vh) * w / h;
+    return w * (+st.zoom) * (96 / 72) / scaleOf(el);
   }
-  function placeCanvas(cv, half = false) {
-    cv.dataset.half = half ? '1' : '';
-    const w = cssWidth(cv, half);
-    cv.style.width = w + 'px'; cv.style.height = (cv.height / cv.width * w) + 'px';
+  function placeCanvas(el, half = false) {
+    el.dataset.half = half ? '1' : '';
+    const [w, h] = dims(el), cw = cssWidth(el, half);
+    el.style.width = cw + 'px'; el.style.height = (h / w * cw) + 'px';
   }
+  const sized = () => $$('canvas, .ov-ph', view);
+  function mkCanvas(w, h, scale) { const d = document.createElement('canvas'); d.width = w; d.height = h; d.dataset.scale = scale; return d; }
   // 今の表示倍率（幅・縦に合わせているときも数値にする）
   function effZoom() {
-    const cv = $('canvas', view); if (!cv || !cv.width) return 1;
-    return cv.getBoundingClientRect().width / (cv.width * (96 / 72) / (st.scale || 2));
+    const cv = sized()[0]; if (!cv || !dims(cv)[0]) return 1;
+    return cv.getBoundingClientRect().width / (dims(cv)[0] * (96 / 72) / scaleOf(cv));
   }
   function syncZoomSel() {
     const zs = $('#ovZoom'), custom = $('option[value=custom]', zs);
@@ -236,20 +245,24 @@ const OV = (() => {
   }
   // 描き直さずに大きさだけ変える。ax, ay（表示領域の中の位置）を中心に拡大・縮小する
   function rezoom(z, ax, ay) {
-    const cvs = $$('canvas', view);
+    const cvs = sized();
     st.zoom = z; syncZoomSel();
     if (!cvs.length) return;
     if (ax == null) { ax = view.clientWidth / 2; ay = view.clientHeight / 2; }
-    const before = cvs[0].getBoundingClientRect().width, px = view.scrollLeft + ax, py = view.scrollTop + ay;
+    // 全ページ表示では、指した位置のページを基準にする（ページの間のすき間は拡大しないため）
+    const anchor = st.slots ? (cvs.find(c => { const r = c.getBoundingClientRect(), v = view.getBoundingClientRect(); return r.bottom >= v.top + ay; }) || cvs[0]) : cvs[0];
+    const vr = view.getBoundingClientRect(), r0 = anchor.getBoundingClientRect();
+    const fx = (vr.left + ax - r0.left) / (r0.width || 1), fy = (vr.top + ay - r0.top) / (r0.height || 1);
     cvs.forEach(c => placeCanvas(c, c.dataset.half === '1'));
-    const k = cvs[0].getBoundingClientRect().width / (before || 1);
-    view.scrollLeft = px * k - ax; view.scrollTop = py * k - ay;
+    const r1 = anchor.getBoundingClientRect();
+    view.scrollLeft += r1.left + fx * r1.width - (vr.left + ax);
+    view.scrollTop += r1.top + fy * r1.height - (vr.top + ay);
   }
   function zoomBy(f, ax, ay) {
     const z = Math.max(0.1, Math.min(8, effZoom() * f));
     rezoom(String(Math.round(z * 1000) / 1000), ax, ay);
   }
-  function drawBoxesOn(c, regions, sel = st.regIdx) {
+  function drawBoxesOn(c, regions, sel = -1) {
     regions.forEach((r, i) => {
       c.lineWidth = i === sel ? 6 : 3; c.strokeStyle = i === sel ? '#ff6d00' : 'rgba(255,152,0,.9)';
       c.strokeRect(r.x, r.y, r.w, r.h);
@@ -258,12 +271,13 @@ const OV = (() => {
       c.fillRect(r.x, r.y - 24, tw, 24); c.fillStyle = '#fff'; c.fillText(label, r.x + 5, r.y - 5);
     });
   }
-  function drawBoxes() {
-    if (st.mode === 'side') return drawSide();
-    if (!st.out || st.mode !== 'diff') return;
-    const c = st.out.getContext('2d');
-    c.putImageData(st.base.img, 0, 0);
-    if ($('#ovBoxes').checked) drawBoxesOn(c, st.regions);
+  function drawBoxes(v) {
+    if (!v) return liveViews().forEach(drawBoxes);
+    if (v.side) return drawSide(v);
+    if (!v.out || !v.base || st.mode !== 'diff') return;
+    const c = v.out.getContext('2d');
+    c.putImageData(v.base.img, 0, 0);
+    if ($('#ovBoxes').checked) drawBoxesOn(c, v.regions, v.regIdx);
   }
   // 色付け：濃い部分（線・文字）を指定の色にした画像（白はそのまま）
   const tintCache = new WeakMap();
@@ -276,20 +290,21 @@ const OV = (() => {
     m.set(color, t); return t;
   }
   // 並べて表示：左はそのまま、右は位置合わせした状態で並べ、変更箇所に色と枠を付ける
-  function drawSide() {
-    const sd = st.side; if (!sd) return;
+  function drawSide(v) {
+    if (!v) return liveViews().forEach(drawSide);
+    const sd = v.side; if (!sd) return;
     const hl = $('#ovSideHl').checked && sd.res, boxes = $('#ovBoxes').checked && sd.res;
     sd.canvases.forEach((cv, k) => {
       const c = cv.getContext('2d');
       c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height);
-      if (k === 0) c.drawImage(st.cl, 0, 0); else drawR(c, st.cr, st.dx, st.dy, st.ang);
+      if (k === 0) c.drawImage(v.cl, 0, 0); else drawR(c, v.cr, v.dx, v.dy, v.ang);
       if (hl) {
         const im = c.getImageData(0, 0, cv.width, cv.height), d = im.data, m = sd.res.mask, want = k + 1;
         const col = k ? [26, 115, 232] : [229, 50, 45];
         for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
         c.putImageData(im, 0, 0);
       }
-      if (boxes) drawBoxesOn(c, st.regions);
+      if (boxes) drawBoxesOn(c, v.regions, v.regIdx);
     });
   }
   function resultHtml(res, autoMsg) {
@@ -299,103 +314,266 @@ const OV = (() => {
       : (res.changed ? `<b>目立った変更はありません</b><br><span class="muted">わずかな差 ${pct.toFixed(3)}%（位置ずれや描画の違い）</span>` : '<b style="color:#21752f">✓ 差異は見つかりませんでした</b>')) + autoMsg;
   }
 
+  /* ---- 1組のページを描く（1ページ表示・全ページ表示で共通） ---- */
+  // 描画・位置合わせ・差分の計算。途中で状態が変わったら（世代番号が進んだら）null を返す
+  async function prepare(pl, pr, l, r, gen) {
+    const pgL = pl && l >= 0 ? pl[l] : null, pgR = pr && r >= 0 ? pr[r] : null;
+    const W = renderWidth(pgL, pgR), scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0), resF = resFactor(pgL, pgR);
+    const [cl, cr] = await Promise.all([pgL ? renderAt(0, l, W) : null, pgR ? renderAt(1, r, W) : null]);
+    if (gen !== st.gen) return null;
+    // 位置合わせ：手動・自動で決めた量をページの組ごとに覚える。スキャンは初回に自動で合わせる
+    const key = `${l}:${r}`;
+    let off = [0, 0, 0], autoMsg = '';
+    if (st.align.has(key)) off = st.align.get(key);
+    else if (cl && cr && scanMode()) {
+      off = st.slots ? await autoAlign(cl, cr) : await withBusy('スキャン画像の位置を合わせています…', () => autoAlign(cl, cr));
+      if (gen !== st.gen) return null;
+      st.align.set(key, off);
+      autoMsg = `<br><span class="muted">スキャン画像のため自動で位置合わせしました（X ${off[0]} / Y ${off[1]}px${off[2] ? ` / 回転 ${off[2]}°` : ''}）</span>`;
+    }
+    const [dx, dy, ang] = off;
+    let res = null;
+    if (cl && cr && (st.mode === 'diff' || (st.mode === 'side' && ($('#ovSideHl').checked || $('#ovBoxes').checked)))) {
+      res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx, dy, ang, resF });
+      if (gen !== st.gen) return null;
+    }
+    return { l, r, cl, cr, dx, dy, ang, res, autoMsg, scale, resF, both: !!(pl && pr) };
+  }
+  // 表示用の要素を組み立てる（v.el）。差分の枠・点滅・スワイプはページごとの v に持たせる
+  function compose(d) {
+    const v = { ...d, regions: [], regIdx: -1, out: null, base: null, side: null, frame: null, drawSwipe: null, stats: '' };
+    const { cl, cr, dx, dy, ang } = d;
+    if (!cl || !cr) {
+      const pair = document.createElement('div'); pair.className = 'pair';
+      for (const c of [cl, cr]) if (c) { const x = mkCanvas(c.width, c.height, d.scale); x.getContext('2d').drawImage(c, 0, 0); placeCanvas(x, false); pair.appendChild(x); }
+      v.el = pair;
+      v.stats = d.both ? (cl ? '<b>左だけにあるページです</b><br><span class="muted">右では削除されています</span>' : '<b>右だけにあるページです</b><br><span class="muted">右で追加されたページです</span>') : '片側のみ読み込まれています';
+      return v;
+    }
+    const W2 = Math.max(cl.width, cr.width + Math.max(0, dx)), H2 = Math.max(cl.height, cr.height + Math.max(0, dy));
+    if (st.mode === 'side') {
+      const pair = document.createElement('div'); pair.className = 'pair';
+      const canvases = [0, 1].map(() => { const x = mkCanvas(W2, H2, d.scale); placeCanvas(x, true); pair.appendChild(x); return x; });
+      v.side = { canvases, res: d.res }; v.regions = d.res ? d.res.regions : []; v.out = canvases[0]; v.el = pair;
+      drawSide(v);
+      v.stats = d.res ? resultHtml(d.res, d.autoMsg) : '並べて表示中';
+      return v;
+    }
+    const out = mkCanvas(W2, H2, d.scale), c = out.getContext('2d');
+    v.out = out; v.el = out;
+    const tint = $('#ovTint').checked, colL = $('#ovColL').value, colR = $('#ovColR').value;
+    if (st.mode === 'diff') {
+      v.base = d.res; v.regions = d.res.regions;
+      drawBoxes(v);
+      v.stats = resultHtml(d.res, d.autoMsg);
+    } else if (st.mode === 'overlay') {
+      // 色付け：左右の線をそれぞれの色にして乗算で重ねる（重なった線は濃く、片側だけの線はその色で見える）
+      c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(tint ? tinted(cl, colL) : cl, 0, 0);
+      c.globalAlpha = +$('#ovOpacity').value / 100; if (tint) c.globalCompositeOperation = 'multiply';
+      drawR(c, tint ? tinted(cr, colR) : cr, dx, dy, ang);
+      c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+      v.stats = '左の上に右を半透明で重ねています' + (tint ? '<br><span class="muted">色：左＝左の色、右＝右の色、重なった線は濃く表示</span>' : '');
+    } else if (st.mode === 'swipe') {
+      const L = tint ? tinted(cl, colL) : cl, R = tint ? tinted(cr, colR) : cr;
+      v.drawSwipe = () => {
+        const x = Math.round(W2 * +$('#ovSwipe').value / 100);
+        c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(L, 0, 0);
+        c.save(); c.beginPath(); c.rect(x, 0, W2 - x, H2); c.clip(); c.fillStyle = '#fff'; c.fillRect(x, 0, W2 - x, H2); drawR(c, R, dx, dy, ang); c.restore();
+        c.fillStyle = '#1f6feb'; c.fillRect(x - 2, 0, 4, H2);
+        c.font = 'bold 22px sans-serif'; c.fillStyle = 'rgba(192,80,77,.9)'; c.fillText('◀ 左', Math.max(8, x - 80), 30); c.fillStyle = 'rgba(58,143,74,.9)'; c.fillText('右 ▶', Math.min(W2 - 70, x + 12), 30);
+      };
+      v.drawSwipe();
+      // 境界は全ページ共通（どのページで動かしても、表示中のページすべてに反映）
+      const move = e => { const rc = out.getBoundingClientRect(); $('#ovSwipe').value = Math.max(0, Math.min(100, (e.clientX - rc.left) / rc.width * 100)); drawSwipes(); };
+      out.addEventListener('pointerdown', e => { if (st.hand || e.button !== 0) return; out.setPointerCapture(e.pointerId); move(e); });
+      out.addEventListener('pointermove', e => { if (!st.hand && (e.buttons & 1)) move(e); });
+      out.classList.add('swipe');
+      v.stats = '画像上をドラッグして境界を動かせます';
+    } else if (st.mode === 'blink') {
+      v.frame = on => {
+        c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2);
+        if (on) drawR(c, cr, dx, dy, ang); else c.drawImage(cl, 0, 0);
+        c.font = 'bold 26px sans-serif'; c.fillStyle = on ? 'rgba(58,143,74,.95)' : 'rgba(192,80,77,.95)';
+        c.fillText(on ? '右' : '左', 14, 34);
+      };
+      v.frame(st.blinkOn);
+      out.addEventListener('click', () => { if (!st.hand) st.blinkFrame(); });
+      v.stats = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます';
+    }
+    placeCanvas(out);
+    return v;
+  }
+  const drawSwipes = () => liveViews().forEach(v => v.drawSwipe && v.drawSwipe());
+  // 今のページ（右パネルの結果・位置合わせ・前後の変更の対象）を切り替える
+  function setCurrent(v) {
+    st.cur = v;
+    st.l = v.l; st.r = v.r; st.dx = v.dx; st.dy = v.dy; st.ang = v.ang; st.scale = v.scale; st.resF = v.resF;
+    st.cl = v.cl; st.cr = v.cr; st.out = v.out; st.base = v.base; st.side = v.side; st.regions = v.regions; st.regIdx = v.regIdx;
+    showOffset();
+    $('#ovStats').innerHTML = v.stats;
+  }
+  function selectPages(pl, pr) {
+    fillSelect($('#ovLPage'), pl ? pl.length : 0, st.l); fillSelect($('#ovRPage'), pr ? pr.length : 0, st.r);
+  }
+  const EMPTY = '<div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します<br><span style="font-size:12.5px">スキャン画像（PNG/JPEG）同士や、PDFとスキャン画像の比較にも使えます</span></div>';
+
   async function update() {
     st.dirty = false; stopBlink();
     const gen = ++st.gen;
     const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
     if (gen !== st.gen) return;
-    fillSelect($('#ovLPage'), pl ? pl.length : 0, st.l); fillSelect($('#ovRPage'), pr ? pr.length : 0, st.r);
-    if (!pl && !pr) { view.innerHTML = '<div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します<br><span style="font-size:12.5px">スキャン画像（PNG/JPEG）同士や、PDFとスキャン画像の比較にも使えます</span></div>'; $('#ovStats').textContent = '—'; return; }
-    const pgL = pl && st.l >= 0 ? pl[st.l] : null, pgR = pr && st.r >= 0 ? pr[st.r] : null;
-    const W = renderWidth(pgL, pgR); st.scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0); st.resF = resFactor(pgL, pgR);
-    let cl, cr;
-    try {
-      [cl, cr] = await Promise.all([pgL ? renderAt(0, st.l, W) : null, pgR ? renderAt(1, st.r, W) : null]);
-    } catch (e) { view.innerHTML = `<div class="pv-empty">描画に失敗しました: ${esc(e.message || '')}</div>`; return; }
-    if (gen !== st.gen) return;
-    st.cl = cl; st.cr = cr;
-    // 位置合わせ：手動・自動で決めた量をページの組ごとに覚える。スキャンは初回に自動で合わせる
-    let autoMsg = '';
-    if (st.align.has(pairKey())) [st.dx, st.dy, st.ang] = st.align.get(pairKey());
-    else if (cl && cr && scanMode()) {
-      $('#ovStats').innerHTML = '<span class="muted">位置を合わせています…</span>';
-      const off = await withBusy('スキャン画像の位置を合わせています…', () => autoAlign(cl, cr));
-      if (gen !== st.gen) return;
-      [st.dx, st.dy, st.ang] = off; st.align.set(pairKey(), [st.dx, st.dy, st.ang]); autoMsg = `<br><span class="muted">スキャン画像のため自動で位置合わせしました（X ${st.dx} / Y ${st.dy}px${st.ang ? ` / 回転 ${st.ang}°` : ''}）</span>`; }
-    else { st.dx = 0; st.dy = 0; st.ang = 0; }
-    showOffset();
-    if (gen !== st.gen) return;
+    selectPages(pl, pr);
+    if (!pl && !pr) { dropSlots(); st.cur = null; view.innerHTML = EMPTY; $('#ovStats').textContent = '—'; return; }
+    if (st.scroll) return buildScroll(pl, pr, gen);
+    if (st.mode === 'blink') st.blinkOn = false; // 左から表示する
+    let d;
+    try { d = await prepare(pl, pr, st.l, st.r, gen); }
+    catch (e) { if (gen === st.gen) { dropSlots(); view.innerHTML = `<div class="pv-empty">描画に失敗しました: ${esc(e.message || '')}</div>`; } return; }
+    if (!d) return;
     // 差分画像は表示を消す前に計算する（計算中も前の結果を見られるように）
-    let res = null;
-    if (cl && cr && (st.mode === 'diff' || (st.mode === 'side' && ($('#ovSideHl').checked || $('#ovBoxes').checked)))) {
-      res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx: st.dx, dy: st.dy, ang: st.ang, resF: st.resF });
-      if (gen !== st.gen) return;
-    }
-    view.innerHTML = ''; st.side = null;
-    if (!cl || !cr) {
-      const pair = document.createElement('div'); pair.className = 'pair';
-      for (const c of [cl, cr]) if (c) { const d = document.createElement('canvas'); d.width = c.width; d.height = c.height; d.getContext('2d').drawImage(c, 0, 0); placeCanvas(d, false); pair.appendChild(d); }
-      view.appendChild(pair);
-      $('#ovStats').innerHTML = (pl && pr) ? (cl ? '<b>左だけにあるページです</b><br><span class="muted">右では削除されています</span>' : '<b>右だけにあるページです</b><br><span class="muted">右で追加されたページです</span>') : '片側のみ読み込まれています';
-      return;
-    }
-    if (st.mode === 'side') {
-      const W2 = Math.max(cl.width, cr.width + Math.max(0, st.dx)), H2 = Math.max(cl.height, cr.height + Math.max(0, st.dy));
-      const pair = document.createElement('div'); pair.className = 'pair';
-      const canvases = [0, 1].map(() => { const d = document.createElement('canvas'); d.width = W2; d.height = H2; placeCanvas(d, true); pair.appendChild(d); return d; });
-      st.side = { canvases, res }; st.regions = res ? res.regions : []; st.regIdx = -1; st.out = canvases[0];
-      drawSide();
-      view.appendChild(pair);
-      $('#ovStats').innerHTML = res ? resultHtml(res, autoMsg) : '並べて表示中';
-      return;
-    }
-    const out = document.createElement('canvas');
-    const W2 = Math.max(cl.width, cr.width + Math.max(0, st.dx)), H2 = Math.max(cl.height, cr.height + Math.max(0, st.dy));
-    out.width = W2; out.height = H2;
-    const c = out.getContext('2d');
-    st.out = out;
-    const tint = $('#ovTint').checked, colL = $('#ovColL').value, colR = $('#ovColR').value;
-    if (st.mode === 'diff') {
-      st.base = res; st.regions = res.regions; st.regIdx = -1;
-      drawBoxes();
-      $('#ovStats').innerHTML = resultHtml(res, autoMsg);
-    } else if (st.mode === 'overlay') {
-      // 色付け：左右の線をそれぞれの色にして乗算で重ねる（重なった線は濃く、片側だけの線はその色で見える）
-      c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(tint ? tinted(cl, colL) : cl, 0, 0);
-      c.globalAlpha = +$('#ovOpacity').value / 100; if (tint) c.globalCompositeOperation = 'multiply';
-      drawR(c, tint ? tinted(cr, colR) : cr, st.dx, st.dy, st.ang);
-      c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
-      $('#ovStats').innerHTML = '左の上に右を半透明で重ねています' + (tint ? '<br><span class="muted">色：左＝左の色、右＝右の色、重なった線は濃く表示</span>' : '');
-    } else if (st.mode === 'swipe') {
-      const L = tint ? tinted(cl, colL) : cl, R = tint ? tinted(cr, colR) : cr;
-      const drawSwipe = () => {
-        const x = Math.round(W2 * +$('#ovSwipe').value / 100);
-        c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(L, 0, 0);
-        c.save(); c.beginPath(); c.rect(x, 0, W2 - x, H2); c.clip(); c.fillStyle = '#fff'; c.fillRect(x, 0, W2 - x, H2); drawR(c, R, st.dx, st.dy, st.ang); c.restore();
-        c.fillStyle = '#1f6feb'; c.fillRect(x - 2, 0, 4, H2);
-        c.font = 'bold 22px sans-serif'; c.fillStyle = 'rgba(192,80,77,.9)'; c.fillText('◀ 左', Math.max(8, x - 80), 30); c.fillStyle = 'rgba(58,143,74,.9)'; c.fillText('右 ▶', Math.min(W2 - 70, x + 12), 30);
-      };
-      drawSwipe(); st.drawSwipe = drawSwipe;
-      const move = e => { const r = out.getBoundingClientRect(); $('#ovSwipe').value = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100)); drawSwipe(); };
-      out.addEventListener('pointerdown', e => { if (st.hand || e.button !== 0) return; out.setPointerCapture(e.pointerId); move(e); });
-      out.addEventListener('pointermove', e => { if (!st.hand && (e.buttons & 1)) move(e); });
-      out.classList.add('swipe');
-      $('#ovStats').innerHTML = '画像上をドラッグして境界を動かせます';
-    } else if (st.mode === 'blink') {
-      st.blinkFrame = () => {
-        st.blinkOn = !st.blinkOn;
-        c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2);
-        if (st.blinkOn) drawR(c, cr, st.dx, st.dy, st.ang); else c.drawImage(cl, 0, 0);
-        c.font = 'bold 26px sans-serif'; c.fillStyle = st.blinkOn ? 'rgba(58,143,74,.95)' : 'rgba(192,80,77,.95)';
-        c.fillText(st.blinkOn ? '右' : '左', 14, 34);
-      };
-      st.blinkOn = true; st.blinkFrame(); startBlink();
-      out.addEventListener('click', () => { if (!st.hand) st.blinkFrame(); });
-      $('#ovStats').innerHTML = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます';
-    }
-    placeCanvas(out);
-    view.appendChild(out);
+    const v = compose(d);
+    dropSlots(); view.innerHTML = ''; view.appendChild(v.el);
+    setCurrent(v);
+    startBlink();
   }
+
+  /* ---- 全ページ表示：全ページを縦に並べ、見えているページだけを描く ---- */
+  let io = null;
+  function dropSlots() { if (io) { io.disconnect(); io = null; } st.slots = null; st.curSlot = null; }
+  const pairLabel = p => `左 ${p.l < 0 ? '—' : p.l + 1} ／ 右 ${p.r < 0 ? '—' : p.r + 1}`;
+  async function buildScroll(pl, pr, gen) {
+    const pairs = pl && pr ? await pagePairs(pl, pr) : (pl || pr).map((_, i) => ({ l: pl ? i : -1, r: pr ? i : -1 }));
+    if (gen !== st.gen) return;
+    if (st.mode === 'blink') st.blinkOn = false;
+    // 今のページの、ページ内のどこを見ていたかを覚えておき、組み立て直した後も同じ位置を表示する
+    const cs = st.slots && st.curSlot, keep = cs && cs.p.l === st.l && cs.p.r === st.r ? keepPos() : null;
+    dropSlots();
+    const list = document.createElement('div'); list.className = 'ov-scroll';
+    const half = st.mode === 'side';
+    st.slots = pairs.map((p, k) => {
+      const el = document.createElement('div'); el.className = 'ov-page'; el.dataset.k = k;
+      const head = document.createElement('div'); head.className = 'ov-pghead';
+      head.innerHTML = `<span>${pairLabel(p)}</span>` + (p.l < 0 ? '<span class="tag add">右で追加</span>' : p.r < 0 ? '<span class="tag del">左から削除</span>' : '');
+      const body = document.createElement('div'); body.className = 'pair';
+      // まだ描いていないページは、ページの大きさの仮の枠で場所を取っておく
+      const pgL = pl && p.l >= 0 ? pl[p.l] : null, pgR = pr && p.r >= 0 ? pr[p.r] : null, pg = pgL || pgR;
+      const W = renderWidth(pgL, pgR), sc = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0);
+      const n = (pgL && pgR) ? (half ? 2 : 1) : 1;
+      for (let i = 0; i < n; i++) {
+        const ph = document.createElement('div'); ph.className = 'ov-ph'; ph.textContent = '描画中…';
+        ph.dataset.w = Math.round(pg.w * sc); ph.dataset.h = Math.round(pg.h * sc); ph.dataset.scale = sc;
+        placeCanvas(ph, half && n === 2); body.appendChild(ph);
+      }
+      el.append(head, body); list.appendChild(el);
+      return { k, p, el, head, body, v: null, near: false, busy: false };
+    });
+    view.innerHTML = ''; view.appendChild(list);
+    // 開いたときは今のページへ
+    let k0 = st.slots.findIndex(s => s.p.l === st.l && s.p.r === st.r);
+    if (k0 < 0) k0 = Math.max(0, st.slots.findIndex(s => (st.l >= 0 && s.p.l === st.l) || (st.l < 0 && s.p.r === st.r)));
+    st.curSlot = null;
+    if (keep && st.slots[keep.k] && st.slots[keep.k].p.l === st.l && st.slots[keep.k].p.r === st.r) { restorePos(keep); markCurrent(st.slots[keep.k]); } else scrollToSlot(k0, false);
+    io = new IntersectionObserver(ents => {
+      for (const e of ents) { const s = st.slots && st.slots[+e.target.dataset.k]; if (s) { s.near = e.isIntersecting; if (!s.near) releaseSlot(s); } }
+      pump(gen);
+    }, { root: view, rootMargin: '120% 0px' });
+    st.slots.forEach(s => io.observe(s.el));
+    onScroll();
+    startBlink();
+  }
+  function keepPos() {
+    const s = st.curSlot || st.slots[0], vr = view.getBoundingClientRect(), r = s.el.getBoundingClientRect();
+    return { k: s.k, f: (vr.top - r.top) / (r.height || 1) };
+  }
+  function restorePos(kp) {
+    const s = st.slots[kp.k]; if (!s) return;
+    const vr = view.getBoundingClientRect(), r = s.el.getBoundingClientRect();
+    view.scrollTop += r.top - vr.top + kp.f * r.height;
+  }
+  function scrollToSlot(k, smooth = true) {
+    const s = st.slots[k]; if (!s) return;
+    const top = view.scrollTop + s.el.getBoundingClientRect().top - view.getBoundingClientRect().top - 6;
+    if (smooth) view.scrollTo({ top, behavior: 'smooth' }); else view.scrollTop = top;
+    markCurrent(s);
+  }
+  // 見えていないページの描画は捨てる（メモリを使いすぎないように）。仮の枠に戻す
+  function releaseSlot(s) {
+    if (!s.v) return;
+    const els = [...s.body.children];
+    const ph = els.map(el => { const x = document.createElement('div'); x.className = 'ov-ph'; x.textContent = '描画中…'; x.dataset.w = el.width || el.dataset.w; x.dataset.h = el.height || el.dataset.h; x.dataset.scale = el.dataset.scale; placeCanvas(x, el.dataset.half === '1'); return x; });
+    s.body.replaceChildren(...ph); s.v = null;
+  }
+  // 近くにあるページを、今のページに近い順に1つずつ描く
+  let pumping = false;
+  async function pump(gen) {
+    if (pumping) return; pumping = true;
+    try {
+      const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
+      while (st.slots && gen === st.gen) {
+        const c = st.curSlot ? st.curSlot.k : 0;
+        const todo = st.slots.filter(s => s.near && !s.v && !s.failed).sort((a, b) => Math.abs(a.k - c) - Math.abs(b.k - c))[0];
+        if (!todo) break;
+        let d;
+        try { d = await prepare(pl, pr, todo.p.l, todo.p.r, gen); }
+        catch (e) { todo.body.innerHTML = `<div class="pv-empty">描画に失敗しました: ${esc(e.message || '')}</div>`; todo.failed = true; continue; }
+        if (!d || gen !== st.gen || !st.slots) break;
+        if (!todo.near) continue;
+        fillSlot(todo, compose(d));
+        await sleep(0);
+      }
+    } finally { pumping = false; }
+    // 描いている間に世代が変わっていたら、新しい一覧で描き直す
+    if (st.slots && gen !== st.gen && io) pump(st.gen);
+  }
+  function fillSlot(s, v) {
+    // 今見ている位置より上のページの大きさが変わっても、表示位置がずれないようにする
+    const vr = view.getBoundingClientRect(), above = s.el.getBoundingClientRect().bottom <= vr.top + 1, h0 = s.el.offsetHeight;
+    s.v = v; s.body.replaceChildren(...(v.el.classList && v.el.classList.contains('pair') ? [...v.el.children] : [v.el]));
+    if (above) view.scrollTop += s.el.offsetHeight - h0;
+    if (v.regions && v.regions.length && v.l >= 0 && v.r >= 0 && st.mode !== 'blink') {
+      if (!$('.tag.diff', s.head)) s.head.insertAdjacentHTML('beforeend', `<span class="tag diff">${v.regions.length} 箇所</span>`);
+    }
+    if (st.curSlot === s) setCurrent(v);
+  }
+  // 表示領域の上から 1/3 の位置にあるページを「今のページ」にする
+  function markCurrent(s) {
+    if (st.curSlot === s) return;
+    if (st.curSlot) st.curSlot.el.classList.remove('cur');
+    st.curSlot = s; s.el.classList.add('cur');
+    if (s.v) setCurrent(s.v);
+    else {
+      st.cur = null; st.l = s.p.l; st.r = s.p.r; st.cl = st.cr = st.out = st.base = st.side = null; st.regions = [];
+      const off = st.align.get(`${s.p.l}:${s.p.r}`) || [0, 0, 0]; [st.dx, st.dy, st.ang] = off; showOffset();
+      $('#ovStats').innerHTML = '<span class="muted">描画しています…</span>';
+    }
+    $('#ovLPage').value = String(st.l); $('#ovRPage').value = String(st.r);
+  }
+  function onScroll() {
+    if (!st.slots) return;
+    const vr = view.getBoundingClientRect(), y = vr.top + Math.min(vr.height / 3, 200);
+    let s = st.slots.find(q => q.el.getBoundingClientRect().bottom > y) || st.slots[st.slots.length - 1];
+    if (s) markCurrent(s);
+  }
+  view.addEventListener('scroll', () => { if (st.slots) onScroll(); }, { passive: true });
+  // 1ページだけ描き直す（位置合わせを変えたとき）
+  async function redrawSlot(s) {
+    const gen = st.gen, pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
+    const d = await prepare(pl, pr, s.p.l, s.p.r, gen);
+    if (d && st.slots && gen === st.gen) { const t = $('.tag.diff', s.head); if (t) t.remove(); fillSlot(s, compose(d)); }
+  }
+  // 1ページ表示はそのページを描き直し、全ページ表示はそのページまでスクロールする
+  function go() {
+    if (!st.slots) return update();
+    let k = st.slots.findIndex(s => s.p.l === st.l && s.p.r === st.r);
+    if (k < 0) k = st.slots.findIndex(s => (st.l >= 0 && s.p.l === st.l) || (st.l < 0 && s.p.r === st.r));
+    if (k >= 0) scrollToSlot(k);
+  }
+  function setScroll(on) {
+    st.scroll = on; Settings.set('ovScroll', on);
+    $$('#ovViewSw button').forEach(b => b.classList.toggle('on', (b.dataset.v === 'scroll') === on));
+    update();
+  }
+  $$('#ovViewSw button').forEach(b => b.onclick = () => setScroll(b.dataset.v === 'scroll'));
 
   /* ---- 手のひらツール・ホイール ---- */
   function setHand(on) {
@@ -427,11 +605,12 @@ const OV = (() => {
   view.addEventListener('pointerup', endPan); view.addEventListener('pointercancel', endPan);
 
   function gotoRegion(d) {
-    if ((st.mode !== 'diff' && st.mode !== 'side') || !st.regions.length) return toast('変更箇所はありません');
-    st.regIdx = (st.regIdx + d + st.regions.length) % st.regions.length;
-    drawBoxes();
-    const r = st.regions[st.regIdx], k = st.out.clientWidth / st.out.width;
-    view.scrollTo({ top: st.out.offsetTop + r.y * k - view.clientHeight / 3, left: st.out.offsetLeft + r.x * k - view.clientWidth / 3, behavior: 'smooth' });
+    const v = st.cur;
+    if ((st.mode !== 'diff' && st.mode !== 'side') || !v || !v.regions.length) return toast('このページに変更箇所はありません');
+    v.regIdx = (v.regIdx + d + v.regions.length) % v.regions.length; st.regIdx = v.regIdx;
+    drawBoxes(v);
+    const r = v.regions[v.regIdx], o = v.out.getBoundingClientRect(), vr = view.getBoundingClientRect(), k = o.width / v.out.width;
+    view.scrollTo({ top: view.scrollTop + o.top - vr.top + r.y * k - view.clientHeight / 3, left: view.scrollLeft + o.left - vr.left + r.x * k - view.clientWidth / 3, behavior: 'smooth' });
   }
 
   // 比べるページの組（対応付けが有効ならその結果、なければ同じページ番号どうし）
@@ -456,7 +635,7 @@ const OV = (() => {
     const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
     if (!pl || !pr) return toast('左右に文書を読み込んでください');
     const res = $('#ovScanRes'), btn = $('#ovScan');
-    st.scanning = true; btn.textContent = '中止'; res.innerHTML = '';
+    st.scanning = true; $('.lbl', btn).textContent = '中止'; res.innerHTML = '';
     const pairs = await pagePairs(pl, pr), rows = [];
     for (let k = 0; k < pairs.length && st.scanning; k++) {
       res.innerHTML = `<span class="muted">調べています… ${k + 1} / ${pairs.length}</span>`;
@@ -465,7 +644,7 @@ const OV = (() => {
       delete r.res; rows.push(r);
       await sleep(0);
     }
-    const stopped = !st.scanning; st.scanning = false; btn.textContent = '全ページの差分を調べる';
+    const stopped = !st.scanning; st.scanning = false; $('.lbl', btn).textContent = '全ページの差分を調べる';
     const mx = Math.max(1, ...rows.map(r => r.pct));
     const changedPages = rows.filter(r => r.regs > 0).length, adds = rows.filter(r => r.kind === 'add').length, dels = rows.filter(r => r.kind === 'del').length;
     const pg = v => v < 0 ? '<span class="muted">—</span>' : v + 1;
@@ -534,6 +713,7 @@ const OV = (() => {
     update();
   }
   function step(side, d) {
+    if (st.slots) { const c = st.curSlot ? st.curSlot.k : 0; return scrollToSlot(Math.max(0, Math.min(st.slots.length - 1, c + d))); }
     const lsel = $('#ovLPage'), rsel = $('#ovRPage');
     const nl = lsel.options.length - 1, nr = rsel.options.length - 1; // 先頭は「—」
     const pairs = $('#ovLink').checked && PageMatch.ready();
@@ -544,7 +724,7 @@ const OV = (() => {
     } else if ($('#ovLink').checked) { st.l = Math.max(0, Math.min(nl - 1, st.l + d)); st.r = Math.max(0, Math.min(nr - 1, st.r + d)); }
     else if (side === 0) st.l = Math.max(0, Math.min(nl - 1, st.l + d));
     else st.r = Math.max(0, Math.min(nr - 1, st.r + d));
-    update();
+    go();
   }
 
   $$('#ovModes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
@@ -553,12 +733,12 @@ const OV = (() => {
   $('#ovLPage').onchange = e => {
     const v = +e.target.value, d = v - st.l, pairs = PageMatch.ready();
     if ($('#ovLink').checked) st.r = pairs ? pairs.find(p => p.l === v).r : Math.max(0, Math.min($('#ovRPage').options.length - 2, st.r + d));
-    st.l = v; update();
+    st.l = v; go();
   };
   $('#ovRPage').onchange = e => {
     const v = +e.target.value, pairs = PageMatch.ready();
     if ($('#ovLink').checked && pairs) st.l = pairs.find(p => p.r === v).l;
-    st.r = v; update();
+    st.r = v; go();
   };
   $('#ovMatch').checked = PageMatch.enabled();
   $('#ovMatch').onchange = async () => {
@@ -568,10 +748,12 @@ const OV = (() => {
     update();
   };
   $('#ovOpacity').oninput = () => { if (st.mode === 'overlay') update(); };
-  $('#ovSwipe').oninput = () => { if (st.mode === 'swipe' && st.drawSwipe) st.drawSwipe(); };
+  $('#ovSwipe').oninput = () => { if (st.mode === 'swipe') drawSwipes(); };
   let thrT = 0; $('#ovThr').oninput = () => { clearTimeout(thrT); thrT = setTimeout(() => { if (st.mode === 'diff') update(); }, 150); };
-  $('#ovBoxes').onchange = () => { if (st.mode === 'side' && !st.side?.res) update(); else drawBoxes(); };
-  $('#ovSideHl').onchange = () => { if (st.side && !st.side.res) update(); else drawSide(); };
+    // 並べて表示で差分を計算していなかったページがあれば計算し直す
+  const sideNoRes = () => liveViews().some(v => v.side && !v.side.res);
+  $('#ovBoxes').onchange = () => { if (st.mode === 'side' && sideNoRes()) update(); else drawBoxes(); };
+  $('#ovSideHl').onchange = () => { if (sideNoRes()) update(); else drawSide(); };
   for (const id of ['#ovTint', '#ovColL', '#ovColR']) $(id).addEventListener('change', () => { if (st.mode === 'overlay' || st.mode === 'swipe') update(); });
   $('#ovBlinkMs').oninput = () => { $('#ovBlinkVal').textContent = (+$('#ovBlinkMs').value / 1000).toFixed(2); startBlink(); };
   $('#ovBlinkManual').onchange = () => { startBlink(); if (st.mode === 'blink') $('#ovStats').innerHTML = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます'; };
@@ -582,7 +764,8 @@ const OV = (() => {
   const setOff = () => {
     st.dx = Math.round(+$('#ovDx').value || 0); st.dy = Math.round(+$('#ovDy').value || 0);
     st.ang = Math.max(-10, Math.min(10, Math.round((+$('#ovRot').value || 0) * 100) / 100));
-    st.align.set(pairKey(), [st.dx, st.dy, st.ang]); update();
+    st.align.set(pairKey(), [st.dx, st.dy, st.ang]);
+    if (st.slots) { if (st.curSlot) redrawSlot(st.curSlot); } else update();
   };
   $('#ovDx').onchange = setOff; $('#ovDy').onchange = setOff; $('#ovRot').onchange = setOff;
   $('#ovReset').onclick = () => { $('#ovDx').value = 0; $('#ovDy').value = 0; $('#ovRot').value = 0; setOff(); };
@@ -610,13 +793,16 @@ const OV = (() => {
   // ＋／－は今の倍率から 1.25 倍ずつ（幅・縦に合わせているときも、その倍率から）
   $('#ovZIn').onclick = () => zoomBy(1.25);
   $('#ovZOut').onclick = () => zoomBy(1 / 1.25);
-  let rt = 0; window.addEventListener('resize', () => { if (App.tab === 'overlay' && (st.zoom === 'fit' || st.zoom === 'fith')) { clearTimeout(rt); rt = setTimeout(() => { $$('canvas', view).forEach(c => placeCanvas(c, c.dataset.half === '1')); }, 100); } });
+  let rt = 0; window.addEventListener('resize', () => { if (App.tab === 'overlay' && (st.zoom === 'fit' || st.zoom === 'fith')) { clearTimeout(rt); rt = setTimeout(() => { sized().forEach(c => placeCanvas(c, c.dataset.half === '1')); }, 100); } });
 
   showPanelFor(st.mode);
+  st.scroll = !!Settings.get('ovScroll');
+  $$('#ovViewSw button').forEach(b => b.classList.toggle('on', (b.dataset.v === 'scroll') === st.scroll));
   // ページの対応付けを（必要なら裏で）調べ、終わったら、連動中なら右のページを左に対応するページへ合わせ直す
   async function refreshMatch() {
     const before = PageMatch.ready(), gen = st.gen;
     const pairs = await ensureMatch();
+    if (pairs && !before && App.tab === 'overlay' && gen === st.gen && st.scroll) { update(); return; }
     if (pairs && !before && $('#ovLink').checked && App.tab === 'overlay' && gen === st.gen) {
       const p = pairs.find(q => q.l === st.l);
       if (p && p.r !== st.r) { st.r = p.r; update(); }
@@ -628,6 +814,7 @@ const OV = (() => {
   }
   function deactivate() { stopBlink(); }
   function invalidate() {
+    dropSlots(); st.cur = null;
     st.gen++; st.scanning = false; // 実行中の描画・位置合わせ・一括チェックは捨てる（前のファイルの結果を残さないように）
     st.l = 0; st.r = 0; st.cache.clear(); st.dirty = true; $('#ovScanRes').innerHTML = '';
     // ファイルが変わったら位置合わせ量を必ず0に戻す
