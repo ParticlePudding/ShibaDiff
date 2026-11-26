@@ -172,4 +172,8 @@ class Tool:
         await self.open_slots(sel)
         async with self.page.expect_download() as d:
             await self.page.click(sel)
+            # レポートの出力設定のダイアログが開いたら、そのまま出力する
+            await self.page.wait_for_timeout(150)
+            if await self.page.is_visible('#modal.on .rep-opts'):
+                await self.page.click('#modal.on .foot button.primary')
         dl = await d.value; p = os.path.join(self.out_dir, dl.suggested_filename); await dl.save_as(p); return p

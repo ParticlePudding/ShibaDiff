@@ -55,5 +55,33 @@ ${body}</body></html>`;
   async function ask(title, text, choices) {
     return modal({ title, html: text, buttons: [{ label: 'キャンセル', value: null }, ...choices] });
   }
-  return { sha256, fileInfo, bothInfo, page, jpeg, ask };
+  // 画像の幅（画質）：軽量・標準・高精細
+  const QUALITY = { light: 900, std: 1400, high: 2200 };
+  const qualityField = { k: 'quality', label: '画像の画質', type: 'radio', def: 'std', choices: [['light', '軽量（小さいファイル）'], ['std', '標準'], ['high', '高精細（細い線まで）']] };
+  /* 出力の設定を聞くダイアログ。設定はレポートの種類ごとに覚える（doccmp:report:種類）。
+     fields: [{k, label, type:'radio'|'check', def, choices:[[値, 表示]]}]、choices: 下のボタン（出力する範囲）[{label, value, primary}]
+     戻り値：{scope: 押したボタンの値, …各項目の値}（キャンセルなら null） */
+  async function options(kind, title, intro, fields, choices) {
+    const saved = store.get('report:' + kind) || {};
+    const val = f => (saved[f.k] !== undefined && (f.type === 'check' || f.choices.some(c => c[0] === saved[f.k]))) ? saved[f.k] : f.def;
+    const radios = fields.filter(f => f.type === 'radio'), checks = fields.filter(f => f.type === 'check');
+    const html = `<div class="rep-intro">${intro}</div><div class="rep-opts">` +
+      radios.map(f => `<div class="rep-row" role="radiogroup" aria-label="${esc(f.label)}"><span class="rep-lbl">${esc(f.label)}</span>` +
+        f.choices.map(([v, l]) => `<label><input type="radio" name="rep_${f.k}" data-k="${f.k}" value="${v}"${val(f) === v ? ' checked' : ''}>${esc(l)}</label>`).join('') + '</div>').join('') +
+      (checks.length ? `<div class="rep-row"><span class="rep-lbl">載せる内容</span><span class="rep-chk">` +
+        checks.map(f => `<label><input type="checkbox" data-k="${f.k}"${val(f) ? ' checked' : ''}>${esc(f.label)}</label>`).join('') + '</span></div>' : '') + '</div>';
+    const read = m => {
+      const o = {};
+      for (const f of fields) {
+        if (f.type === 'check') o[f.k] = $(`input[data-k="${f.k}"]`, m).checked;
+        else { const r = $(`input[data-k="${f.k}"]:checked`, m); o[f.k] = r ? r.value : f.def; }
+      }
+      return o;
+    };
+    const res = await modal({ title, html, buttons: [{ label: 'キャンセル', value: null }, ...choices.map(c => ({ label: c.label, primary: c.primary, value: m => ({ ...read(m), scope: c.value }) }))] });
+    if (res) { const o = { ...res }; delete o.scope; store.set('report:' + kind, o); }
+    return res;
+  }
+  const width = q => QUALITY[q] || QUALITY.std;
+  return { sha256, fileInfo, bothInfo, page, jpeg, ask, options, qualityField, width };
 })();

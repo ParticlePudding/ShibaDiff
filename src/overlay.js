@@ -380,15 +380,32 @@ const OV = (() => {
         c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(L, 0, 0);
         c.save(); c.beginPath(); c.rect(x, 0, W2 - x, H2); c.clip(); c.fillStyle = '#fff'; c.fillRect(x, 0, W2 - x, H2); drawR(c, R, dx, dy, ang); c.restore();
         c.fillStyle = '#1f6feb'; c.fillRect(x - 2, 0, 4, H2);
+        // 境界のつまみ（手のひらツールのときも、ここをドラッグすれば境界を動かせる）
+        const kr = Math.max(14, Math.round(W2 * 0.012)), ky = Math.round(H2 / 2);
+        c.beginPath(); c.arc(x, ky, kr, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = '#fff'; c.lineWidth = Math.max(2, kr / 6); c.beginPath();
+        c.moveTo(x - kr * 0.25, ky - kr * 0.45); c.lineTo(x - kr * 0.6, ky); c.lineTo(x - kr * 0.25, ky + kr * 0.45);
+        c.moveTo(x + kr * 0.25, ky - kr * 0.45); c.lineTo(x + kr * 0.6, ky); c.lineTo(x + kr * 0.25, ky + kr * 0.45); c.stroke();
         c.font = 'bold 22px sans-serif'; c.fillStyle = 'rgba(192,80,77,.9)'; c.fillText('◀ 左', Math.max(8, x - 80), 30); c.fillStyle = 'rgba(58,143,74,.9)'; c.fillText('右 ▶', Math.min(W2 - 70, x + 12), 30);
       };
       v.drawSwipe();
       // 境界は全ページ共通（どのページで動かしても、表示中のページすべてに反映）
       const move = e => { const rc = out.getBoundingClientRect(); $('#ovSwipe').value = Math.max(0, Math.min(100, (e.clientX - rc.left) / rc.width * 100)); drawSwipes(); };
-      out.addEventListener('pointerdown', e => { if (st.hand || e.button !== 0) return; out.setPointerCapture(e.pointerId); move(e); });
-      out.addEventListener('pointermove', e => { if (!st.hand && (e.buttons & 1)) move(e); });
+      // 手のひらツールのときは、境界の線の近く（±16px）をつかんだときだけ境界を動かし、それ以外は表示位置を動かす
+      const nearEdge = e => { const rc = out.getBoundingClientRect(); return Math.abs(e.clientX - (rc.left + rc.width * +$('#ovSwipe').value / 100)) <= 16; };
+      let drag = false;
+      out.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || (st.hand && !nearEdge(e))) return;
+        e.preventDefault(); e.stopPropagation(); drag = true; out.setPointerCapture(e.pointerId); move(e);
+      });
+      out.addEventListener('pointermove', e => {
+        if (drag && (e.buttons & 1)) move(e);
+        else out.classList.toggle('edge', st.hand && nearEdge(e));
+      });
+      const end = () => { drag = false; };
+      out.addEventListener('pointerup', end); out.addEventListener('pointercancel', end);
       out.classList.add('swipe');
-      v.stats = '画像上をドラッグして境界を動かせます';
+      v.stats = '画像上をドラッグして境界を動かせます<br><span class="muted">手のひらツールのときは、境界の線（つまみ）をドラッグします</span>';
     } else if (st.mode === 'blink') {
       v.frame = on => {
         c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2);
@@ -657,12 +674,36 @@ const OV = (() => {
   }
 
   /* ---- レポート：全ページの差分画像（枠と番号付き）と変更箇所の一覧 ---- */
+  // 左右に並べるときの画像：左はそのまま、右は位置合わせした状態にし、変更箇所に色と枠を付ける
+  function sideImages(a, b, off, res) {
+    const W2 = Math.max(a.width, b.width + Math.max(0, off[0])), H2 = Math.max(a.height, b.height + Math.max(0, off[1]));
+    return [0, 1].map(k => {
+      const cv = document.createElement('canvas'); cv.width = W2; cv.height = H2;
+      const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2);
+      if (k === 0) c.drawImage(a, 0, 0); else drawR(c, b, off[0], off[1], off[2]);
+      if (res) {
+        const im = c.getImageData(0, 0, W2, H2), d = im.data, m = res.mask, want = k + 1, col = k ? [26, 115, 232] : [229, 50, 45];
+        for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
+        c.putImageData(im, 0, 0); drawBoxesOn(c, res.regions, -1);
+      }
+      return cv;
+    });
+  }
   async function exportReport() {
     const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
     if (!pl || !pr) return toast('左右に文書を読み込んでください');
-    const scope = await Report.ask('重ね合わせ比較のレポート', 'レポートに差分画像を載せるページを選んでください。<br><span class="muted">追加・削除されたページは、どちらを選んでも載せます。変更のないページは一覧にだけ載せます（「すべて」を選ぶと画像も載せます）。ページ数が多いと時間がかかります。</span>',
+    const o = await Report.options('overlay', '重ね合わせ比較のレポート',
+      '出力する内容を選び、下のボタンで載せるページを選んでください。<br><span class="muted">追加・削除されたページは、どちらを選んでも載せます。変更のないページは一覧にだけ載せます（「すべてのページ」を選ぶと画像も載せます）。ページ数が多いと時間がかかります。</span>',
+      [{ k: 'layout', label: '画像の並べ方', type: 'radio', def: 'diff', choices: [['diff', '差分画像（重ねた画像）'], ['side', '左右に並べる'], ['both', '差分画像＋左右に並べる']] },
+        Report.qualityField,
+        { k: 'files', label: 'ファイル情報（SHA-256）', type: 'check', def: true },
+        { k: 'cond', label: '比較条件', type: 'check', def: true },
+        { k: 'summary', label: 'ページの一覧', type: 'check', def: true },
+        { k: 'regions', label: '変更箇所の位置の表', type: 'check', def: true }],
       [{ label: 'すべてのページ', value: 'all' }, { label: '変更のあるページだけ', value: 'changed', primary: true }]);
-    if (!scope) return;
+    if (!o) return;
+    const scope = o.scope, maxW = Report.width(o.quality), sideW = Math.round(maxW * 0.7);
+    const nm = side => esc(S[side].name);
     let html;
     await withBusy('レポートを作成しています…', async () => {
       const pairs = await pagePairs(pl, pr), rows = [], secs = [];
@@ -673,31 +714,47 @@ const OV = (() => {
         rows.push(r);
         const title = `左 ${pg(r.l)} ページ ／ 右 ${pg(r.r)} ページ`;
         if (r.kind !== 'pair') {
-          // 追加・削除されたページは、そのページだけを載せる
-          const side = r.kind === 'add' ? 1 : 0, idx = side ? r.r : r.l, cv = await renderAt(side, idx, Math.min(1400, renderWidth(side ? null : pl[idx], side ? pr[idx] : null)));
-          secs.push(`<h2 id="p${k}">${title}　<span class="tag ${r.kind}">${r.kind === 'add' ? '右で追加' : '左から削除'}</span></h2><figure><img src="${Report.jpeg(cv)}" alt=""><figcaption>${r.kind === 'add' ? '右だけにあるページ（追加されたページ）' : '左だけにあるページ（削除されたページ）'}</figcaption></figure>`);
+          // 追加・削除されたページは、そのページだけを載せる（左右に並べるときは、ない側を空けておく）
+          const side = r.kind === 'add' ? 1 : 0, idx = side ? r.r : r.l, cv = await renderAt(side, idx, Math.min(maxW, renderWidth(side ? null : pl[idx], side ? pr[idx] : null)));
+          const cap = r.kind === 'add' ? '右だけにあるページ（追加されたページ）' : '左だけにあるページ（削除されたページ）';
+          const fig = `<figure><img src="${Report.jpeg(cv, o.layout === 'diff' ? maxW : sideW)}" alt=""><figcaption>${side ? '右' : '左'}：${nm(side)}　${idx + 1} ページ<br>${cap}</figcaption></figure>`;
+          const body = o.layout === 'diff' ? fig : `<div class="pair">${side ? '<div class="none">（対応するページなし）</div>' + fig : fig + '<div class="none">（対応するページなし）</div>'}</div>`;
+          secs.push(`<h2 id="p${k}">${title}　<span class="tag ${r.kind}">${r.kind === 'add' ? '右で追加' : '左から削除'}</span></h2>${body}`);
         } else if (scope === 'all' || r.regs) {
-          const res = r.res, cv = document.createElement('canvas'); cv.width = res.W; cv.height = res.H;
-          const c = cv.getContext('2d'); c.putImageData(res.img, 0, 0); drawBoxesOn(c, res.regions, -1);
-          const list = res.regions.map((g, i) => `<tr><td class="num">${i + 1}</td><td>横 ${Math.round(g.x / res.W * 100)}%・縦 ${Math.round(g.y / res.H * 100)}%</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td></tr>`).join('');
-          secs.push(`<h2 id="p${k}">${title}　${r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</h2>` +
-            `<figure><img src="${Report.jpeg(cv)}" alt=""><figcaption>赤＝左にだけある（削除・変更前）、青＝右にだけある（追加・変更後）、橙の枠＝変更箇所。変化量 ${r.pct.toFixed(2)}%` +
-            `${r.off && (r.off[0] || r.off[1] || r.off[2]) ? `。右の位置合わせ：X ${r.off[0]} / Y ${r.off[1]}px${r.off[2] ? ` / 回転 ${r.off[2]}°` : ''}` : ''}</figcaption></figure>` +
+          const res = r.res, parts = [];
+          const offTxt = r.off && (r.off[0] || r.off[1] || r.off[2]) ? `。右の位置合わせ：X ${r.off[0]} / Y ${r.off[1]}px${r.off[2] ? ` / 回転 ${r.off[2]}°` : ''}` : '';
+          if (o.layout !== 'side') {
+            const cv = document.createElement('canvas'); cv.width = res.W; cv.height = res.H;
+            const c = cv.getContext('2d'); c.putImageData(res.img, 0, 0); drawBoxesOn(c, res.regions, -1);
+            parts.push(`<figure><img src="${Report.jpeg(cv, maxW)}" alt=""><figcaption>差分画像：赤＝左にだけある（削除・変更前）、青＝右にだけある（追加・変更後）、橙の枠＝変更箇所。変化量 ${r.pct.toFixed(2)}%${offTxt}</figcaption></figure>`);
+            cv.width = cv.height = 0;
+          }
+          if (o.layout !== 'diff') {
+            const W = renderWidth(pl[r.l], pr[r.r]);
+            const [a, b] = await Promise.all([renderAt(0, r.l, W), renderAt(1, r.r, W)]);
+            const [ca, cb] = sideImages(a, b, r.off || [0, 0, 0], res);
+            parts.push(`<div class="pair"><figure><img src="${Report.jpeg(ca, sideW)}" alt=""><figcaption>左：${nm(0)}　${r.l + 1} ページ（赤＝左にだけある部分）</figcaption></figure>` +
+              `<figure><img src="${Report.jpeg(cb, sideW)}" alt=""><figcaption>右：${nm(1)}　${r.r + 1} ページ（青＝右にだけある部分）${o.layout === 'side' ? `。変化量 ${r.pct.toFixed(2)}%${offTxt}` : ''}</figcaption></figure></div>`);
+            ca.width = ca.height = cb.width = cb.height = 0;
+          }
+          const list = o.regions ? res.regions.map((g, i) => `<tr><td class="num">${i + 1}</td><td>横 ${Math.round(g.x / res.W * 100)}%・縦 ${Math.round(g.y / res.H * 100)}%</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td></tr>`).join('') : '';
+          secs.push(`<h2 id="p${k}">${title}　${r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</h2>` + parts.join('') +
             (list ? `<table class="list"><thead><tr><th style="width:50px">番号</th><th>位置（ページの左上から）</th><th>大きさ（ページに対する割合）</th></tr></thead><tbody>${list}</tbody></table>` : ''));
-          cv.width = cv.height = 0;
         }
         delete r.res;
         await sleep(0);
       }
       const nPair = rows.filter(r => r.kind === 'pair').length, nChg = rows.filter(r => r.regs).length;
       const nAdd = rows.filter(r => r.kind === 'add').length, nDel = rows.filter(r => r.kind === 'del').length;
-      const summary = `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
+      const summary = !o.summary ? '' : `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
         rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
       const cond = [`差分の感度 ${$('#ovThr').value}`, `ずれの許容 ${$('#ovTolPx').value}px`, `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
       html = Report.page({
         title: `重ね合わせレポート - ${S[0].name} / ${S[1].name}`, heading: '重ね合わせ比較レポート',
-        meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}<br>比較条件: ${esc(cond)}`,
-        body: (await Report.bothInfo()) + summary + secs.join('')
+        meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}` + (o.cond ? `<br>比較条件: ${esc(cond)}` : '') +
+          (o.files ? '' : `<br>左: ${nm(0)}　右: ${nm(1)}`),
+        body: (o.files ? await Report.bothInfo() : '') + summary + secs.join(''),
+        css: '.pair figure{margin:4px 0 14px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
       });
     });
     if (html) download(`重ね合わせレポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');

@@ -122,14 +122,21 @@ const FD = (() => {
     // Excel で文字化けしないよう、BOM 付き UTF-8・CRLF にする
     download(`フォルダ比較_${st.names[0] || '左'}_${st.names[1] || '右'}.csv`, '\ufeff' + lines.join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
   };
-  $('#fdReport').onclick = () => {
+  $('#fdReport').onclick = async () => {
     if (!st.rows.length) return toast('先にフォルダを比較してください');
+    const o = await Report.options('folder', 'フォルダ比較のレポート', '出力する内容を選んでください。',
+      [{ k: 'rows', label: '載せるファイル', type: 'radio', def: 'all', choices: [['all', 'すべて'], ['diff', '違いのあるものだけ（同一を除く）']] },
+        { k: 'dates', label: '更新日時', type: 'check', def: true }, { k: 'sizes', label: 'サイズ', type: 'check', def: true }],
+      [{ label: '出力', value: 'ok', primary: true }]);
+    if (!o) return;
     const c = { same: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
     const order = { diff: 0, left: 1, right: 2, wait: 3, same: 4 };
-    const rows = ROWS_SORTED().sort((x, y) => order[x.st] - order[y.st]);
+    const rows = ROWS_SORTED().filter(r => o.rows === 'all' || r.st !== 'same').sort((x, y) => order[x.st] - order[y.st]);
+    const sz = o.sizes, dts = o.dates;
     const body = `<table class="files"><tr><th>左</th><td>${esc(st.names[0])}</td></tr><tr><th>右</th><td>${esc(st.names[1])}</td></tr></table>` +
-      `<table class="list"><thead><tr><th>ファイル</th><th>状態</th><th class="num">左サイズ</th><th class="num">右サイズ</th><th>左 更新日時</th><th>右 更新日時</th></tr></thead><tbody>` +
-      rows.map(r => `<tr><td>${esc(r.path)}</td><td><span class="tag ${r.st}">${ST[r.st][0]}</span></td><td class="num">${r.a ? fmtSize(r.a.size) : ''}</td><td class="num">${r.b ? fmtSize(r.b.size) : ''}</td><td>${dt(r.a)}</td><td>${dt(r.b)}</td></tr>`).join('') + '</tbody></table>';
+      `<table class="list"><thead><tr><th>ファイル</th><th>状態</th>${sz ? '<th class="num">左サイズ</th><th class="num">右サイズ</th>' : ''}${dts ? '<th>左 更新日時</th><th>右 更新日時</th>' : ''}</tr></thead><tbody>` +
+      rows.map(r => `<tr><td>${esc(r.path)}</td><td><span class="tag ${r.st}">${ST[r.st][0]}</span></td>${sz ? `<td class="num">${r.a ? fmtSize(r.a.size) : ''}</td><td class="num">${r.b ? fmtSize(r.b.size) : ''}</td>` : ''}${dts ? `<td>${dt(r.a)}</td><td>${dt(r.b)}</td>` : ''}</tr>`).join('') + '</tbody></table>' +
+      (o.rows === 'diff' && c.same ? `<p class="sub">同一の ${c.same} ファイルは省略しています。</p>` : '');
     const html = Report.page({
       title: `フォルダ比較レポート - ${st.names[0]} / ${st.names[1]}`, heading: 'フォルダ比較レポート',
       meta: `<b>全 ${fmtNum(st.rows.length)} ファイル</b>　相違 ${c.diff}・左のみ ${c.left}・右のみ ${c.right}・同一 ${c.same}${c.wait ? `・比較中 ${c.wait}` : ''}<br>比較方法: ${$('#fdContent').checked ? '内容まで比較' : 'サイズだけで判定'}`,

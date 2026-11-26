@@ -623,21 +623,50 @@ const TV = (() => {
   }
   async function exportReport() {
     if (!S[0] || !S[1]) return toast('左右にファイルを読み込んでください');
+    const o = await Report.options('text', 'テキスト比較のレポート', '出力する内容を選んでください。',
+      [{ k: 'range', label: '載せる行', type: 'radio', def: 'view', choices: [['view', '画面と同じ（差分のみ表示の設定に従う）'], ['all', 'すべての行'], ['ctx', '差分と前後3行だけ']] },
+        { k: 'layout', label: '並べ方', type: 'radio', def: 'side', choices: [['side', '左右に並べる'], ['unified', '一列（変更前→変更後の順）']] },
+        { k: 'files', label: 'ファイル情報（SHA-256）', type: 'check', def: true },
+        { k: 'cond', label: '比較条件と凡例', type: 'check', def: true }],
+      [{ label: '出力', value: 'ok', primary: true }]);
+    if (!o) return;
     const A = L(0), B = L(1);
     const MARK = { c: '＊', d: '−', i: '＋', w: '' };
+    // 載せる行：画面の表示上の行／すべての行／差分と前後3行（それ以外は「n 行省略」にまとめる）
+    let items;
+    if (o.range === 'view') items = st.view;
+    else if (o.range === 'all') items = st.rows.map((_, i) => i);
+    else {
+      const keep = new Uint8Array(st.rows.length);
+      st.rows.forEach((r, i) => { if (r.t !== 'e') for (let j = Math.max(0, i - 3); j <= Math.min(st.rows.length - 1, i + 3); j++) keep[j] = 1; });
+      items = []; let from = -1;
+      for (let i = 0; i <= st.rows.length; i++) {
+        if (i < st.rows.length && !keep[i]) { if (from < 0) from = i; continue; }
+        if (from >= 0) { items.push({ fold: true, from, to: i }); from = -1; }
+        if (i < st.rows.length) items.push(i);
+      }
+    }
+    const uni = o.layout === 'unified';
     let body = '';
-    for (const e of st.view) {
-      if (typeof e === 'object') { body += `<tr class="fold"><td colspan="4">… ${e.to - e.from} 行省略 …</td></tr>`; continue; }
+    for (const e of items) {
+      if (typeof e === 'object') { body += `<tr class="fold"><td colspan="${uni ? 4 : 4}">… ${e.to - e.from} 行省略 …</td></tr>`; continue; }
       const r = st.rows[e];
+      if (uni) {
+        // 一列：一致は1行、変更は変更前（−）と変更後（＋）の2行
+        const line = (side, li, mk, cls) => `<tr><td class="ln">${side === 0 || mk === '' ? li + 1 : ''}</td><td class="ln">${side === 1 || mk === '' ? (mk === '' ? r.b : li) + 1 : ''}</td><td class="mk">${mk}</td><td class="${cls}">${r.t === 'c' ? inlineHtml(r, side) : esc((side ? B : A)[li])}</td></tr>`;
+        if (r.t === 'e') body += line(0, r.a, '', '');
+        else { if (r.a >= 0) body += line(0, r.a, '−', `t-${r.t === 'w' ? 'w' : r.t === 'c' ? 'c' : 'd'} s0`); if (r.b >= 0) body += line(1, r.b, '＋', `t-${r.t === 'w' ? 'w' : r.t === 'c' ? 'c' : 'i'} s1`); }
+        continue;
+      }
       const cell = (side, li) => li < 0 ? `<td class="ln"></td><td class="pad"></td>` :
         `<td class="ln">${r.t !== 'e' ? `<b>${MARK[r.t]}</b>` : ''}${li + 1}</td><td class="t-${r.t} s${side}">${r.t === 'c' ? inlineHtml(r, side) : esc((side ? B : A)[li])}</td>`;
       body += `<tr>${cell(0, r.a)}${cell(1, r.b)}</tr>`;
     }
     let cl = 0, dl = 0, il = 0; for (const r of st.rows) { if (r.t === 'c') cl++; else if (r.t === 'd') dl++; else if (r.t === 'i') il++; }
-    const o = opts();
-    const cond = [o.ws === 'change' ? '空白の量を無視' : o.ws === 'all' ? '空白を無視' : '', o.ignoreCase ? '大小文字無視' : '', o.blank ? '空行無視' : '', o.zen ? '全角半角無視' : '', o.fold ? '差分のみ表示' : ''].filter(Boolean).join('、') || 'なし（完全一致で比較）';
-    const [h0, h1] = await Promise.all([Report.sha256(S[0].bytes), Report.sha256(S[1].bytes)]);
-    const info = (s, h) => `${esc(s.name)}<br><span class="sub">${s.size ? fmtSize(s.size) + '・' : ''}更新 ${fmtDate(s.mtime)}${s.kind === 'text' ? '・' + (Enc.NAMES[s.enc] || s.enc) + '・' + (Enc.EOLNAME[s.eol] || '') : ''}${h ? `<br>SHA-256: ${h}` : ''}${s.dirty ? '<br><b style="color:#b42318">※ 未保存の編集を含む内容です（元のファイルとは異なります）</b>' : ''}</span>`;
+    const co = opts();
+    const cond = [co.ws === 'change' ? '空白の量を無視' : co.ws === 'all' ? '空白を無視' : '', co.ignoreCase ? '大小文字無視' : '', co.blank ? '空行無視' : '', co.zen ? '全角半角無視' : '', co.fold ? '差分のみ表示' : ''].filter(Boolean).join('、') || 'なし（完全一致で比較）';
+    const [h0, h1] = o.files ? await Promise.all([Report.sha256(S[0].bytes), Report.sha256(S[1].bytes)]) : ['', ''];
+    const info = (s, h) => !o.files ? esc(s.name) : `${esc(s.name)}<br><span class="sub">${s.size ? fmtSize(s.size) + '・' : ''}更新 ${fmtDate(s.mtime)}${s.kind === 'text' ? '・' + (Enc.NAMES[s.enc] || s.enc) + '・' + (Enc.EOLNAME[s.eol] || '') : ''}${h ? `<br>SHA-256: ${h}` : ''}${s.dirty ? '<br><b style="color:#b42318">※ 未保存の編集を含む内容です（元のファイルとは異なります）</b>' : ''}</span>`;
     const css = `*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:"BIZ UDPGothic","Meiryo",sans-serif;margin:20px;color:#222}h1{font-size:18px;margin:0 0 8px}
 table{border-collapse:collapse;width:100%;table-layout:fixed;font-family:"BIZ UDGothic","MS Gothic",monospace;font-size:12.5px}
@@ -649,16 +678,19 @@ th .sub{font-weight:400;color:#666;font-size:11px;word-break:break-all}
 .ipt{display:inline-block;width:0;height:1em;border-left:2px solid #0550ae;margin:0 1px;vertical-align:-.15em}.s1 .ipt{border-left-color:#b3261e}
 .dnum{font-family:sans-serif;font-size:10.5px;color:#0550ae;border:1px solid #a8d4ff;border-radius:8px;padding:0 4px;margin:0 3px}
 .wsc,.weol{color:#9aa5b1}
+td.mk{text-align:center;color:#444;font-weight:700}table.files{font-family:"BIZ UDPGothic","Meiryo",sans-serif;margin-bottom:10px}table.files th{width:40px}table.files td{white-space:normal}
 tr.fold td{background:#eef3fb;color:#4c6a96;text-align:center;font-family:sans-serif}
 .meta{color:#444;font-size:12.5px;margin-bottom:12px;line-height:1.7}.meta b{color:#222}
 .legend span{display:inline-block;margin-right:14px}
 @media print{body{margin:8mm}thead{display:table-header-group}tr{break-inside:avoid}}`;
     const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>比較レポート - ${esc(S[0].name)} / ${esc(S[1].name)}</title><style>${css}</style></head><body>
 <h1>比較レポート</h1>
-<div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）　比較条件: ${esc(cond)}<br>
-<span class="legend"><span>＊ 変更（変更前＝赤・取り消し線、変更後＝青・下線）</span><span>− 左だけにある行（赤）</span><span>＋ 右だけにある行（青）</span></span></div>
-<table><colgroup><col style="width:62px"><col><col style="width:62px"><col></colgroup>
-<thead><tr><th colspan="2">左: ${info(S[0], h0)}</th><th colspan="2">右: ${info(S[1], h1)}</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+<div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）${o.cond ? `　比較条件: ${esc(cond)}<br>
+<span class="legend">${uni ? '<span>− 変更前・左だけにある行（赤）</span><span>＋ 変更後・右だけにある行（青）</span><span>変わった文字：変更前＝取り消し線、変更後＝下線</span>' : '<span>＊ 変更（変更前＝赤・取り消し線、変更後＝青・下線）</span><span>− 左だけにある行（赤）</span><span>＋ 右だけにある行（青）</span>'}</span>` : ''}</div>
+${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr><th>右</th><td>${info(S[1], h1)}</td></tr></table>
+<table><colgroup><col style="width:52px"><col style="width:52px"><col style="width:22px"><col></colgroup><thead><tr><th>左</th><th>右</th><th></th><th>内容</th></tr></thead><tbody>${body}</tbody></table>`
+: `<table><colgroup><col style="width:62px"><col><col style="width:62px"><col></colgroup>
+<thead><tr><th colspan="2">左: ${info(S[0], h0)}</th><th colspan="2">右: ${info(S[1], h1)}</th></tr></thead><tbody>${body}</tbody></table>`}</body></html>`;
     download(`比較レポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');
   }
 

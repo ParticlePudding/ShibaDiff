@@ -447,33 +447,66 @@ const PV = (() => {
   $('#pvReport').onclick = async () => {
     const avail = [0, 1].filter(s => st.sides[s]);
     if (!avail.length) return toast('ファイルを読み込んでください');
-    const scope = await Report.ask('ページ表示・注釈のレポート', '載せるページを選んでください。<br><span class="muted">注釈を付けたページを、注釈ごと画像にして載せます。付箋の内容は一覧にします。</span>',
+    const both = avail.length === 2;
+    const o = await Report.options('page', 'ページ表示・注釈のレポート',
+      '出力する内容を選び、下のボタンで載せるページを選んでください。<br><span class="muted">ページを注釈ごと画像にして載せます。「左右に並べる」では、左右の対応するページ（挿入・削除されたページは対応付けの結果）を横に並べます。</span>',
+      [...(both ? [{ k: 'layout', label: 'ページの並べ方', type: 'radio', def: 'side', choices: [['side', '左右に並べる'], ['single', '1ページずつ（左の全ページ→右の全ページ）']] }] : []),
+        Report.qualityField,
+        { k: 'files', label: 'ファイル情報（SHA-256）', type: 'check', def: true },
+        { k: 'list', label: '注釈の一覧表', type: 'check', def: true },
+        { k: 'notes', label: '各ページの付箋の内容', type: 'check', def: true }],
       [{ label: 'すべてのページ', value: 'all' }, { label: '注釈のあるページだけ', value: 'ann', primary: true }]);
-    if (!scope) return;
+    if (!o) return;
+    const scope = o.scope, side2 = both && o.layout === 'side', maxW = Report.width(o.quality), w = side2 ? Math.round(maxW * 0.7) : maxW;
+    const has = (side, i) => i >= 0 && (st.ann[side][i] || []).length > 0;
     let html;
     await withBusy('レポートを作成しています…', async () => {
       const secs = [], rows = [];
-      for (const side of avail) {
-        const sd = st.sides[side], nm = side ? '右' : '左';
-        const idx = sd.pages.map((_, i) => i).filter(i => scope === 'all' || (st.ann[side][i] || []).length);
-        for (const i of idx) {
-          $('#busyMsg').textContent = `レポートを作成しています… ${nm} ${i + 1} / ${sd.pages.length} ページ`;
-          const arr = st.ann[side][i] || [], pg = sd.pages[i];
-          const cv = await renderWithAnn(side, i, Math.min(2, 1400 / Math.max(pg.w, pg.h)));
-          const cnt = Object.entries(arr.reduce((m, a) => (m[a.t] = (m[a.t] || 0) + 1, m), {})).map(([t, n]) => `${TNAME[t] || t} ${n}`).join('・');
-          const notes = arr.filter(a => a.t === 'note').map(a => `<li>${esc(a.text).replace(/\n/g, '<br>')}</li>`).join('');
-          secs.push(`<h2>${nm}：${esc(S[side].name)}　${i + 1} / ${sd.pages.length} ページ　${arr.length ? `<span class="tag note">注釈 ${arr.length}</span>` : ''}</h2>` +
-            `<figure><img src="${Report.jpeg(cv)}" alt=""><figcaption>${cnt ? '注釈：' + cnt : '注釈なし'}</figcaption></figure>` + (notes ? `<div><b>付箋</b><ol>${notes}</ol></div>` : ''));
-          cv.width = cv.height = 0;
-          if (arr.length) rows.push(`<tr><td>${nm}</td><td class="num">${i + 1}</td><td>${cnt}</td><td>${arr.filter(a => a.t === 'note').map(a => esc(a.text).replace(/\n/g, ' ')).join('<br>')}</td></tr>`);
+      // 1ページ分の画像（注釈込み）・注釈の数・付箋
+      const one = async (side, i) => {
+        const sd = st.sides[side], arr = st.ann[side][i] || [], pg = sd.pages[i];
+        const cv = await renderWithAnn(side, i, Math.min(3, w * 1.2 / Math.max(pg.w, pg.h)));
+        const cnt = Object.entries(arr.reduce((m, a) => (m[a.t] = (m[a.t] || 0) + 1, m), {})).map(([t, n]) => `${TNAME[t] || t} ${n}`).join('・');
+        const notes = o.notes ? arr.filter(a => a.t === 'note').map(a => `<li>${esc(a.text).replace(/\n/g, '<br>')}</li>`).join('') : '';
+        const nm = side ? '右' : '左';
+        const fig = `<figure><img src="${Report.jpeg(cv, w)}" alt=""><figcaption>${nm}：${esc(S[side].name)}　${i + 1} / ${sd.pages.length} ページ　${cnt ? '注釈：' + cnt : '注釈なし'}</figcaption></figure>` + (notes ? `<div class="notes"><b>付箋</b><ol>${notes}</ol></div>` : '');
+        cv.width = cv.height = 0;
+        if (arr.length) rows.push(`<tr><td>${nm}</td><td class="num">${i + 1}</td><td>${cnt}</td><td>${arr.filter(a => a.t === 'note').map(a => esc(a.text).replace(/\n/g, ' ')).join('<br>')}</td></tr>`);
+        return { fig, n: arr.length };
+      };
+      if (side2) {
+        // 左右の対応するページを組にする（対応付けがあればその結果、なければ同じページ番号どうし）
+        const nl = st.sides[0].pages.length, nr = st.sides[1].pages.length;
+        const pairs = PageMatch.ready() || Array.from({ length: Math.max(nl, nr) }, (_, i) => ({ l: i < nl ? i : -1, r: i < nr ? i : -1 }));
+        const use = pairs.filter(p => scope === 'all' || has(0, p.l) || has(1, p.r));
+        for (let k = 0; k < use.length; k++) {
+          const p = use[k];
+          $('#busyMsg').textContent = `レポートを作成しています… ${k + 1} / ${use.length} 組`;
+          const a = p.l >= 0 ? await one(0, p.l) : null, b = p.r >= 0 ? await one(1, p.r) : null;
+          const n = (a ? a.n : 0) + (b ? b.n : 0);
+          secs.push(`<h2>左 ${p.l < 0 ? '—' : p.l + 1} ページ ／ 右 ${p.r < 0 ? '—' : p.r + 1} ページ　${n ? `<span class="tag note">注釈 ${n}</span>` : ''}</h2>` +
+            `<div class="pair"><div>${a ? a.fig : '<div class="none">（対応するページなし）</div>'}</div><div>${b ? b.fig : '<div class="none">（対応するページなし）</div>'}</div></div>`);
           await sleep(0);
+        }
+      } else {
+        for (const side of avail) {
+          const sd = st.sides[side], nm = side ? '右' : '左';
+          const idx = sd.pages.map((_, i) => i).filter(i => scope === 'all' || has(side, i));
+          for (const i of idx) {
+            $('#busyMsg').textContent = `レポートを作成しています… ${nm} ${i + 1} / ${sd.pages.length} ページ`;
+            const r = await one(side, i);
+            secs.push(`<h2>${nm}：${esc(S[side].name)}　${i + 1} / ${sd.pages.length} ページ　${r.n ? `<span class="tag note">注釈 ${r.n}</span>` : ''}</h2>` + r.fig);
+            await sleep(0);
+          }
         }
       }
       const total = avail.reduce((n, s) => n + Object.values(st.ann[s]).reduce((m, a) => m + a.length, 0), 0);
+      const list = !o.list ? '' : `<h2>注釈の一覧</h2>` + (rows.length ? `<table class="list"><thead><tr><th style="width:40px">側</th><th class="num" style="width:50px">頁</th><th style="width:28%">注釈</th><th>付箋の内容</th></tr></thead><tbody>${rows.join('')}</tbody></table>` : '<p>注釈はありません。</p>');
       html = Report.page({
         title: `注釈レポート - ${avail.map(s => S[s].name).join(' / ')}`, heading: 'ページ表示・注釈レポート',
-        meta: `<b>注釈 ${total} 件</b>（${avail.map(s => s ? '右' : '左').join('・')}の文書）`,
-        body: (await Report.bothInfo()) + `<h2>注釈の一覧</h2>` + (rows.length ? `<table class="list"><thead><tr><th style="width:40px">側</th><th class="num" style="width:50px">頁</th><th style="width:28%">注釈</th><th>付箋の内容</th></tr></thead><tbody>${rows.join('')}</tbody></table>` : '<p>注釈はありません。</p>') + secs.join('')
+        meta: `<b>注釈 ${total} 件</b>（${avail.map(s => s ? '右' : '左').join('・')}の文書）` + (o.files ? '' : '<br>' + avail.map(s => `${s ? '右' : '左'}: ${esc(S[s].name)}`).join('　')),
+        body: (o.files ? await Report.bothInfo() : '') + list + (secs.length ? secs.join('') : '<p>載せるページはありません。</p>'),
+        css: '.pair figure{margin:4px 0 6px}.notes{font-size:12.5px;margin-bottom:12px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
       });
     });
     if (html) download(`注釈レポート_${baseName(S[avail[0]].name)}.html`, html, 'text/html;charset=utf-8');

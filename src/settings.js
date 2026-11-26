@@ -77,6 +77,9 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
     }
     if (k.startsWith('doccmp:rot:')) { const [name] = k.slice(11).split('|'); return { kind: 'ページの回転', name, detail: raw + '°', bytes: raw.length }; }
     const names = { 'doccmp:settings': '設定', 'doccmp:textopts': 'テキスト比較の比較条件', 'doccmp:tvLayout': '左右表示／一列表示', 'doccmp:pv:color': '注釈の色', 'doccmp:pv:width': '注釈の線の太さ', 'doccmp:pv:zoom': 'ページ表示の倍率', 'doccmp:pv:stamp': '日付印（旧形式）' };
+    const rep = { text: 'テキスト比較', overlay: '重ね合わせ比較', page: 'ページ表示・注釈', folder: 'フォルダ比較' };
+    const m = /^doccmp:report:(\w+)$/.exec(k);
+    if (m) return { kind: '設定', name: `レポートの出力設定（${rep[m[1]] || m[1]}）`, detail: '', bytes: raw.length };
     return { kind: '設定', name: names[k] || k.slice(7), detail: '', bytes: raw.length };
   }
   /* 保存データをすべて削除したとき、開いている間の設定も初期値に戻す（保存はしない） */

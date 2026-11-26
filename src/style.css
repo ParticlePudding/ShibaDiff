@@ -385,3 +385,11 @@ button:has(>.ic),summary:has(>.ic){display:inline-flex;align-items:center;justif
 .ov-page .ov-pghead .tag.add{background:#d7e7ff;color:#1a5fb4}.ov-page .ov-pghead .tag.del{background:#ffe0de;color:#b42318}.ov-page .ov-pghead .tag.diff{background:#fff1d6;color:#9a4b00}
 .ov-ph{background:#fff;opacity:.75;box-shadow:0 1px 5px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;color:#8a929c;font-size:13px}
 .ov-page .pair{min-width:0}
+.ov-view.hand canvas.swipe.edge,.ov-view canvas.swipe.edge{cursor:ew-resize}
+/* レポートの出力設定 */
+.rep-intro{margin-bottom:10px;line-height:1.6}
+.rep-opts{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line2);border-radius:6px;padding:10px 12px;background:#f8fafc}
+.rep-row{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center}
+.rep-lbl{font-weight:600;min-width:7em}
+.rep-row label{display:inline-flex;align-items:center;gap:4px}
+.rep-chk{display:flex;flex-wrap:wrap;gap:4px 14px}
