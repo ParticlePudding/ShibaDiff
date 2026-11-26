@@ -1,10 +1,26 @@
 /* Office (docx/xlsx/pptx) テキスト抽出。ZIPは自前で読み、展開はブラウザ標準の DecompressionStream を使用 */
 const Zip = (() => {
-  async function inflateRaw(data) {
+  // 展開後の大きさの上限（ZIP爆弾対策）。ヘッダの値は偽装できるので、実際に展開したバイト数で判定する
+  const LIMIT = { entry: 100 * 1024 * 1024, total: 300 * 1024 * 1024, ratio: 200, ratioFrom: 16 * 1024 * 1024 };
+  const TOO_BIG = () => new Error('展開後のサイズが大きすぎるため読み込みを中止しました（ZIPの内容が異常に大きいか、細工されたファイルの可能性があります）');
+  async function inflateRaw(data, budget) {
     if (typeof DecompressionStream === 'undefined') throw new Error('このブラウザはZIP展開に対応していません');
-    const ds = new DecompressionStream('deflate-raw');
-    const stream = new Blob([data]).stream().pipeThrough(ds);
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+    const chunks = []; let n = 0;
+    for (; ;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.length;
+      if (n > LIMIT.entry || n > budget.left || (n > LIMIT.ratioFrom && n > data.length * LIMIT.ratio)) {
+        try { await reader.cancel(); } catch (e) { }
+        throw TOO_BIG();
+      }
+      chunks.push(value);
+    }
+    budget.left -= n;
+    const out = new Uint8Array(n); let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.length; }
+    return out;
   }
   function open(bytes) {
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -21,25 +37,27 @@ const Zip = (() => {
       if (p + 46 > bytes.length) throw new Error('ZIPの構造が壊れています');
       if (dv.getUint32(p, true) !== 0x02014b50) break;
       const method = dv.getUint16(p + 10, true);
-      const csize = dv.getUint32(p + 20, true);
+      const csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
       const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), cmtLen = dv.getUint16(p + 32, true);
       const lho = dv.getUint32(p + 42, true);
       const name = td.decode(bytes.subarray(p + 46, p + 46 + nameLen));
-      entries.set(name, { method, csize, lho });
+      entries.set(name, { method, csize, usize, lho });
       p += 46 + nameLen + extraLen + cmtLen;
     }
+    const budget = { left: LIMIT.total };
     return {
       names: () => Array.from(entries.keys()),
       has: n => entries.has(n),
       async read(name) {
         const e = entries.get(name); if (!e) return null;
+        if (e.usize > LIMIT.entry || e.usize > budget.left) throw TOO_BIG();
         const l = e.lho;
         if (l + 30 > bytes.length || dv.getUint32(l, true) !== 0x04034b50) throw new Error('ZIPの構造が壊れています');
         const nl = dv.getUint16(l + 26, true), xl = dv.getUint16(l + 28, true);
         const start = l + 30 + nl + xl;
         const data = bytes.subarray(start, start + e.csize);
-        if (e.method === 0) return data;
-        if (e.method === 8) return inflateRaw(data);
+        if (e.method === 0) { budget.left -= data.length; return data; }
+        if (e.method === 8) return inflateRaw(data, budget);
         throw new Error('未対応の圧縮形式: ' + e.method);
       },
       async text(name) { const d = await this.read(name); return d ? new TextDecoder('utf-8').decode(d) : null; }

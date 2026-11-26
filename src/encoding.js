@@ -35,8 +35,9 @@ const Enc = (() => {
     return eus < sjs ? 'euc-jp' : 'shift_jis';
   }
 
+  const DUMP_MAX = 4 * 1024 * 1024;
   function hexdump(bytes) {
-    const MAX = 4 * 1024 * 1024;
+    const MAX = DUMP_MAX;
     const n = Math.min(bytes.length, MAX), out = [];
     const hx = []; for (let i = 0; i < 256; i++) hx.push(i.toString(16).toUpperCase().padStart(2, '0'));
     for (let off = 0; off < n; off += 16) {
@@ -147,5 +148,5 @@ const Enc = (() => {
   }
   const EOLNAME = { '\r\n': 'CRLF', '\n': 'LF', '\r': 'CR' };
 
-  return { detect, decode, encode, splitLines, NAMES, LIST, EOLNAME };
+  return { detect, decode, encode, splitLines, NAMES, LIST, EOLNAME, DUMP_MAX };
 })();

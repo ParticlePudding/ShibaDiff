@@ -30,11 +30,20 @@ python3 build.py    # ShibaDiff.html を生成
 
 ## テスト
 ```
-pip install playwright python-docx openpyxl python-pptx pillow reportlab
-python3 tools/gen_samples.py        # samples/ にサンプルファイルを生成
-python3 tests/test_regression.py    # 各テストは headless Chrome で実際に操作して確認します
+pip install -r requirements-dev.txt
+python3 -m playwright install chromium   # Google Chrome があれば不要（CHROME_PATH で場所を指定できます）
+npm run samples                          # samples/ にサンプルファイルを生成（乱数の種は固定）
+npm test                                 # すべてのテストを headless Chrome で実行
 ```
+各テストは画面を実際に操作し、結果を `OK` / `NG` で表示します。1つでも `NG` があれば終了コードが 1 になります。
+スクリーンショットやダウンロードしたファイルは `tests/out/` に保存されます。
 
-## 同梱ライブラリ
-- pdf.js（Apache License 2.0）
-- core-js（MIT License、pdf.js に同梱）
+## ライセンス
+ShibaDiff は [MIT License](LICENSE) で公開しています。
+
+同梱しているライブラリとそのライセンスは次のとおりです。全文は、アプリの「設定」→「このツールについて」→「ライセンス全文を表示」で確認できます。
+- [pdf.js](https://github.com/mozilla/pdf.js) 4.10.38（Apache License 2.0）
+- [core-js](https://github.com/zloirock/core-js) 3.39.0（MIT License、pdf.js の legacy ビルドに同梱）
+
+## 業務で使うときの注意
+GitHub Pages 版は main ブランチの最新がそのまま反映されます。業務では、版を固定するために `ShibaDiff.html` をダウンロードして使うことをおすすめします。

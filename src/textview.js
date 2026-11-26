@@ -437,11 +437,11 @@ const TV = (() => {
     if (!S[side]) S[side] = App.newTextSide();
     return S[side];
   }
-  function snapshot() { return { L: S[0] ? S[0].lines : null, R: S[1] ? S[1].lines : null, cur: st.cur }; }
+  function snapshot() { return { L: S[0] ? S[0].lines : null, R: S[1] ? S[1].lines : null, nl: [S[0] ? S[0].finalNL : null, S[1] ? S[1].finalNL : null], cur: st.cur }; }
   function pushUndo() { st.undo.push(snapshot()); if (st.undo.length > 200) st.undo.shift(); st.redo = []; }
   function restore(s) {
-    if (S[0] && s.L) S[0].lines = s.L;
-    if (S[1] && s.R) S[1].lines = s.R;
+    if (S[0] && s.L) { S[0].lines = s.L; if (s.nl && s.nl[0] != null) S[0].finalNL = s.nl[0]; }
+    if (S[1] && s.R) { S[1].lines = s.R; if (s.nl && s.nl[1] != null) S[1].finalNL = s.nl[1]; }
     st.cur = s.cur; App.afterEdit(0, true); App.afterEdit(1, true); compare(true);
   }
   function undo() { if (!st.undo.length) return toast('元に戻す操作はありません'); st.redo.push(snapshot()); restore(st.undo.pop()); }
@@ -513,6 +513,13 @@ const TV = (() => {
   }
 
   /* ---- status ---- */
+  // 最初に違うバイトの位置（同一なら -1。長さが違えば短い方の長さ以下のどこか）
+  function firstByteDiff(a, b) {
+    if (!a || !b) return 0;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
+    return a.length === b.length ? -1 : n;
+  }
   function sideInfo(s) {
     if (!s) return '—';
     if (s.kind === 'pdf') return s.noTextLayer ? `PDF ${s.pageCount}ページ・文字情報なし（スキャン）` : `PDF ${s.pageCount}ページ・抽出 ${fmtNum(s.lines.length)}行`;
@@ -529,14 +536,20 @@ const TV = (() => {
     else if (!n) {
       const o = opts();
       const ignored = o.ws !== 'none' || o.ignoreCase || o.blank || o.zen;
-      const same = S[0].bytes && S[1].bytes && S[0].bytes.length === S[1].bytes.length && S[0].bytes.every((v, i) => v === S[1].bytes[i]);
+      const diffAt = firstByteDiff(S[0].bytes, S[1].bytes), same = diffAt < 0;
+      if (!same && (S[0].kind === 'binary' || S[1].kind === 'binary')) {
+        // バイナリの表示は先頭だけなので、表示上の差がなくても中身が違えば「同一」とは言わない
+        msg = `<b style="color:#b45309">⚠ バイナリの内容が異なります</b><span>最初の違い：オフセット 0x${diffAt.toString(16).toUpperCase()}（${fmtNum(diffAt)}）。表示は先頭 ${fmtSize(Enc.DUMP_MAX)} のみです</span>`;
+      } else {
       msg = `<b style="color:#21752f">✓ ${same ? '完全に同一です' : (ignored ? '比較オプションの範囲で同一です' : 'テキスト内容は同一です')}</b>`;
       if (!same && !ignored && S[0].kind === S[1].kind && S[0].kind === 'text' && (S[0].enc !== S[1].enc || S[0].eol !== S[1].eol)) msg += '<span>（文字コードまたは改行コードが異なります）</span>';
       if (!same && S[0].kind === 'text' && S[1].kind === 'text' && S[0].lines.length && (S[0].finalNL !== false) !== (S[1].finalNL !== false)) msg += '<span>（末尾の改行の有無が異なります）</span>';
+      }
     } else {
       let dl = 0, il = 0, cl = 0;
       for (const r of st.rows) { if (r.t === 'c') cl++; else if (r.t === 'd') dl++; else if (r.t === 'i') il++; }
       msg = `差分 <b>${st.cur >= 0 ? st.cur + 1 : '-'} / ${n}</b> 箇所<span>変更 ${fmtNum(cl)}行・左のみ ${fmtNum(dl)}行・右のみ ${fmtNum(il)}行</span>`;
+      if ([0, 1].some(i => S[i].kind === 'binary' && S[i].bytes && S[i].bytes.length > Enc.DUMP_MAX)) msg += `<span>（バイナリは先頭 ${fmtSize(Enc.DUMP_MAX)} だけを表示・比較しています。それより後ろの違いは数に含みません）</span>`;
     }
     $('#textStatus').innerHTML = `${msg}<span class="grow"></span><span>左: ${esc(sideInfo(S[0]))}</span><span>右: ${esc(sideInfo(S[1]))}</span>`;
     const go = $('#goOverlay'); if (go) go.onclick = () => App.setTab('overlay');
@@ -555,9 +568,13 @@ const TV = (() => {
     const sa = S[0], sb = S[1];
     const eolA = (sa && sa.eol) || '\n', eolB = (sb && sb.eol) || '\n';
     const nlA = !sa || sa.finalNL !== false, nlB = !sb || sb.finalNL !== false;
-    // 最終行が同じでも末尾改行の有無が違う場合は、変更として扱う
-    const last = R[R.length - 1];
-    if (last && last.t === 'e' && last.a === A.length - 1 && last.b === B.length - 1 && nlA !== nlB) R[R.length - 1] = { ...last, t: 'c' };
+    // 一致行でも、片側だけ「改行のない最終行」なら行末が違うので、変更として扱う
+    // （最終行が反対側では途中の行になる場合も含む。文脈行にすると git apply の結果が壊れる）
+    const noEolA = i => i === A.length - 1 && !nlA, noEolB = i => i === B.length - 1 && !nlB;
+    for (let i = 0; i < R.length; i++) {
+      const x = R[i];
+      if (x.t === 'e' && noEolA(x.a) !== noEolB(x.b)) R[i] = { ...x, t: 'c' };
+    }
     const name = sa ? sa.name : 'file';
     const out = [`diff --git a/${name} b/${name}`, `--- a/${name}`, `+++ b/${name}`].map(l => l + '\n');
     const NONL = '\\ No newline at end of file\n';

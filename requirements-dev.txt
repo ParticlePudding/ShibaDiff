@@ -1,0 +1,8 @@
+# テスト（headless Chrome での操作）
+playwright
+# サンプルファイルの生成（tools/gen_samples.py）
+python-docx
+openpyxl
+python-pptx
+Pillow
+reportlab

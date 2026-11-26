@@ -19,10 +19,12 @@ const App = (() => {
     return null;
   }
 
+  // 変更の有無の判定に使う内容（末尾の改行の有無も含める）
+  const textSig = s => s.lines.join('\n') + (s.finalNL !== false && s.lines.length ? '\n' : '');
   function setText(s, text) {
     const sp = Enc.splitLines(text);
     s.lines = sp.lines; s.eol = sp.eol; s.mixed = sp.mixed; s.finalNL = sp.finalNL;
-    s.orig = s.lines.join('\n');
+    s.orig = textSig(s);
   }
 
   async function prepare(s) {
@@ -68,12 +70,20 @@ const App = (() => {
     const n = e && e.name, m = (e && e.message) || String(e);
     if (n === 'InvalidPDFException' || /Invalid PDF/i.test(m)) return 'PDFファイルが壊れているか、PDF形式ではありません。';
     if (n === 'PasswordException') return 'パスワードが入力されませんでした。';
-    if (/ZIP/.test(m)) return 'Office文書が壊れている可能性があります。';
+    if (/ZIPの構造|ZIP形式/.test(m)) return 'Office文書が壊れている可能性があります。';
     return m;
   }
   function disposeSide(s) { if (s && s.pdf) { try { s.pdf.destroy(); } catch (e) { } } }
 
+  /* 保存していない変更がある側を置き換える前に確認する（置き換えると元に戻す履歴も消えるため） */
+  async function confirmDiscard(sides, verb) {
+    const d = sides.filter(i => S[i] && S[i].dirty);
+    if (!d.length) return true;
+    const names = d.map(i => `${i ? '右' : '左'}の「${esc(S[i].name)}」`).join('と');
+    return !!await modal({ title: '保存していない変更', html: `${names}には保存していない変更があります。${verb}と変更は失われます。続けてもよろしいですか？`, buttons: [{ label: 'キャンセル', value: false }, { label: '続ける', primary: true, value: true }] });
+  }
   async function loadFile(side, file) {
+    if (!await confirmDiscard([side], '別のファイルを読み込む')) return;
     try {
       await withBusy(`${file.name} を読み込み中…`, async () => {
         const bytes = new Uint8Array(await file.arrayBuffer());
@@ -89,6 +99,7 @@ const App = (() => {
     }
   }
   async function loadPair(files) {
+    if (!await confirmDiscard([0, 1], '別のファイルを読み込む')) return false;
     for (let i = 0; i < 2; i++) {
       if (!files[i]) continue;
       try {
@@ -102,6 +113,7 @@ const App = (() => {
     for (let i = 0; i < 2; i++) if (!files[i]) { disposeSide(S[i]); S[i] = null; }
     if (app.tab === 'folder') setTab('text');
     changed([0, 1]);
+    return true;
   }
 
   function changed(sides) {
@@ -129,7 +141,7 @@ const App = (() => {
   /* called after the model lines of a side changed */
   function afterEdit(side, quiet) {
     const s = S[side]; if (!s) return;
-    s.dirty = s.lines.join('\n') !== s.orig;
+    s.dirty = textSig(s) !== s.orig;
     s._pages = s.kind === 'pdf' || s.kind === 'image' ? s._pages : null;
     updateSlot(side);
     if (s.kind !== 'pdf' && s.kind !== 'image') { PV.invalidate(side); OV.invalidate(); }
@@ -213,7 +225,8 @@ const App = (() => {
   async function openEditor(side, line) {
     const s = S[side];
     if (s && s.noText) return toast('画像ファイルは編集できません');
-    const txt = s ? s.lines.join('\n') : '';
+    // 末尾の改行も編集欄に出す（出さないと、適用しただけで末尾の改行が消える）
+    const txt = s ? s.lines.join('\n') + (s.finalNL !== false && s.lines.length ? '\n' : '') : '';
     const res = await modal({
       title: `${side ? '右' : '左'}のテキストを${s ? '編集' : '入力'}${s ? ' — ' + s.name : ''}`, wide: true,
       html: `<textarea id="edTa" spellcheck="false" wrap="off"></textarea><div class="muted" style="margin-top:6px">${s && s.kind !== 'text' ? '※ 抽出したテキストを編集します（元の文書は変更されません）。' : ''}「適用」で比較をやり直します。Tabキーでタブを入力できます。</div>`,
@@ -281,7 +294,7 @@ const App = (() => {
       } catch (e) { if (e && e.name === 'AbortError') return; }
     }
     if (!saved) download(name, blob);
-    if (isText) { s.asciiOnly = s.asciiOnly && !/[^\x00-\x7F]/.test(body); s.orig = s.lines.join('\n'); s.dirty = false; s.enc = enc; s.bytes = bytes; s.size = bytes.length; updateSlot(side); }
+    if (isText) { s.asciiOnly = s.asciiOnly && !/[^\x00-\x7F]/.test(body); s.orig = textSig(s); s.dirty = false; s.enc = enc; s.bytes = bytes; s.size = bytes.length; updateSlot(side); }
     toast(`保存しました（${Enc.NAMES[enc]}・${Enc.EOLNAME[s.eol] || 'CRLF'}）`);
   }
 

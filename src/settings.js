@@ -46,7 +46,9 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
 <h4 id="set-about">このツールについて</h4>
 <table class="about">
 <tr><td>版</td><td>${esc(APP.version)}（${esc(APP.build)}）</td></tr>
+<tr><td>ライセンス</td><td>MIT License</td></tr>
 <tr><td>同梱ライブラリ</td><td>pdf.js ${esc(APP.pdfjs)}（Apache License 2.0）<br>core-js（MIT License。pdf.js に同梱）</td></tr>
+<tr><td></td><td><button type="button" id="setLicenses">ライセンス全文を表示…</button></td></tr>
 <tr><td>通信</td><td>外部との通信は行いません（Content-Security-Policy で禁止しています）</td></tr>
 </table></div>`,
       buttons: [{ label: '閉じる', primary: true, value: null }],
@@ -66,6 +68,7 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
           });
         });
         $('#setData', m).onclick = () => { close(null); setTimeout(() => openData().then(() => open('data')), 0); };
+        $('#setLicenses', m).onclick = () => { close(null); setTimeout(() => openLicenses().then(() => open('about')), 0); };
         if (section) { const h = $('#set-' + section, m); if (h) h.scrollIntoView(); }
       }
     });
@@ -92,6 +95,10 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
       cur[k] = v; subs.forEach(f => { try { f(k, v); } catch (e) { console.error(e); } });
     }
     applyFont();
+  }
+  function openLicenses() {
+    const t = ($('#licenses') || {}).textContent || '';
+    return modal({ title: 'ライセンス', wide: true, html: `<pre class="licenses">${esc(t)}</pre>`, buttons: [{ label: '閉じる', primary: true, value: null }] });
   }
   function openData() {
     const rows = () => allKeys().map(k => ({ k, ...describe(k) }));

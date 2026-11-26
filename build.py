@@ -58,6 +58,16 @@ app_head = f"const APP = {{ version: {json.dumps(ver)}, build: {json.dumps(datet
 app = app_head + "\n".join(f"// ---- {n} ----\n" + read(os.path.join(SRC, n)) for n in js_files)
 check_script_safe("app", app)
 
+# ライセンス表記（ShibaDiff 本体と、同梱する pdf.js・core-js）。設定の「このツールについて」から表示する
+def notice(title, path):
+    return f"==================== {title} ====================\n\n" + read(path).strip() + "\n"
+licenses = "\n\n".join([
+    notice("ShibaDiff (MIT License)", os.path.join(HERE, "LICENSE")),
+    notice(f"pdf.js {pdfjs_ver} (Apache License 2.0) https://github.com/mozilla/pdf.js", os.path.join(PDFJS, "LICENSE")),
+    notice("core-js 3.39.0 (MIT License, bundled in pdf.js legacy build) https://github.com/zloirock/core-js", os.path.join(HERE, "third_party", "core-js-LICENSE")),
+])
+check_script_safe("licenses", licenses)
+
 html = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -71,6 +81,7 @@ html = f"""<!DOCTYPE html>
 </head>
 <body>
 {body}
+<script type="text/plain" id="licenses">{licenses}</script>
 <script type="application/json" id="cmaps">{cmaps_json}</script>
 <script type="text/plain" id="pdfjs-worker">{worker}</script>
 <script type="module">{lib}</script>

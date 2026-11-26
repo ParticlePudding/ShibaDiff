@@ -304,3 +304,4 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
   .dlg .foot button{flex:1;min-height:38px}
   #toast{bottom:20px;max-width:92vw;text-align:center}
 }
+.licenses { max-height: 60vh; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 0; padding: 8px; background: #f6f7f9; border: 1px solid #dde; }

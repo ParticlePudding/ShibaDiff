@@ -38,6 +38,11 @@ from playwright.async_api import async_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOL = 'file://' + os.path.join(ROOT, 'ShibaDiff.html')
+SAMPLES = os.path.join(ROOT, 'samples') + '/'
+FIXTURES = os.path.join(ROOT, 'tests', 'fixtures') + '/'
+OUT = os.path.join(ROOT, 'tests', 'out')
+# Chrome の場所：環境変数 CHROME_PATH → /usr/bin/google-chrome → Playwright 同梱の Chromium
+CHROME = os.environ.get('CHROME_PATH') or ('/usr/bin/google-chrome' if os.path.exists('/usr/bin/google-chrome') else None)
 
 
 class Tool:
@@ -45,10 +50,11 @@ class Tool:
         self.out_dir = out_dir; os.makedirs(out_dir, exist_ok=True)
         self.w, self.h, self.mobile = width, height, mobile
         self.errors = []
+        self.results = []
 
     async def __aenter__(self):
         self._p = await async_playwright().start()
-        self.browser = await self._p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+        self.browser = await self._p.chromium.launch(executable_path=CHROME, args=['--no-sandbox'])
         self.ctx = await self.browser.new_context(viewport={'width': self.w, 'height': self.h}, accept_downloads=True,
                                                   device_scale_factor=1, has_touch=self.mobile, is_mobile=self.mobile)
         self.page = await self.ctx.new_page()
@@ -61,6 +67,21 @@ class Tool:
 
     async def __aexit__(self, *a):
         await self.browser.close(); await self._p.stop()
+
+    # ---- 合否の判定 ----
+    def check(self, name, cond, info=''):
+        """条件を確かめて記録する。最後に finish() で、1つでも NG があれば終了コード 1 にする"""
+        self.results.append((name, bool(cond)))
+        print(('OK  ' if cond else 'NG  ') + name + (f'  [{info}]' if info != '' else ''), flush=True)
+        return bool(cond)
+
+    def finish(self, allowed_errors=()):
+        """想定外のエラー（console.error・ページの例外・ネイティブのダイアログ）がないことも確かめる"""
+        bad = [e for e in self.errors if not any(a in e for a in allowed_errors)]
+        self.check('想定外のエラーがない', not bad, bad if bad else '')
+        fails = [n for n, ok in self.results if not ok]
+        print(f'== {len(self.results) - len(fails)} / {len(self.results)} OK' + (f'  NG: {", ".join(fails)}' if fails else ''), flush=True)
+        if fails: raise SystemExit(1)
 
     async def wait_for(self, expr, timeout=120):
         """CSPで eval が禁止されているため、Python側でポーリングする"""
@@ -123,6 +144,9 @@ class Tool:
 
     async def ov_stats(self):
         return (await self.page.inner_text('#ovStats')).replace('\n', ' ')
+
+    def samples(self, rel):
+        return SAMPLES + rel
 
     async def toast(self):
         return await self.page.inner_text('#toast')

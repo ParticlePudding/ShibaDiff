@@ -1,14 +1,17 @@
 {
   "name": "shibadiff",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "WinMerge と DocuWorks Viewer の機能をまとめた単一HTMLの文書比較ツール",
   "scripts": {
-    "build": "python3 build.py"
+    "build": "python3 build.py",
+    "samples": "python3 tools/gen_samples.py",
+    "test": "python3 tests/run_all.py"
   },
   "keywords": [],
-  "author": "",
+  "author": "ParticlePudding",
   "private": true,
   "dependencies": {
-    "pdfjs-dist": "^4.10.38"
-  }
+    "pdfjs-dist": "4.10.38"
+  },
+  "license": "MIT"
 }
