@@ -64,7 +64,7 @@ html = f"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
-<title>文書比較ツール</title>
+<title>ShibaDiff</title>
 <style>
 {css}
 </style>
@@ -80,7 +80,7 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>
 """
-out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "dist", "文書比較ツール.html")
+out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "dist", "ShibaDiff.html")
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as f:
     f.write(html)

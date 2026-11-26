@@ -1,6 +1,6 @@
 /* フォルダ比較 */
 const FD = (() => {
-  const st = { files: [null, null], names: ['', ''], rows: [], sort: { k: 'path', d: 1 }, running: false, sel: -1 };
+  const st = { files: [null, null], names: ['', ''], rows: [], sort: { k: 'path', d: 1 }, running: false, sel: -1, gen: 0 };
   const slots = $$('.fd-slot');
 
   function setFolder(side, name, map) {
@@ -51,7 +51,7 @@ const FD = (() => {
   }
   async function run() {
     if (!st.files[0] || !st.files[1]) return toast('左右にフォルダを指定してください');
-    if (st.running) return;
+    const gen = ++st.gen; // 比較中にフォルダが変わったら、前の比較は打ち切る
     st.running = true;
     const [A, B] = st.files, paths = Array.from(new Set([...A.keys(), ...B.keys()]));
     const content = $('#fdContent').checked;
@@ -62,7 +62,10 @@ const FD = (() => {
     st.sel = -1; render();
     let done = 0; const todo = st.rows.filter(r => r.st === 'wait');
     for (const r of todo) {
-      try { r.st = (await sameContent(r.a, r.b)) ? 'same' : 'diff'; } catch (e) { r.st = 'diff'; r.err = e.message; }
+      let same;
+      try { same = await sameContent(r.a, r.b); } catch (e) { same = false; r.err = e.message; }
+      if (gen !== st.gen) return;
+      r.st = same ? 'same' : 'diff';
       if (++done % 25 === 0) { render(); $('#fdStatus').textContent = `内容を比較中… ${done} / ${todo.length}`; await sleep(0); }
     }
     st.running = false; render();
@@ -102,7 +105,7 @@ const FD = (() => {
     sl.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); sl.classList.add('drag'); });
     sl.addEventListener('dragleave', () => sl.classList.remove('drag'));
     sl.addEventListener('drop', async e => {
-      e.preventDefault(); e.stopPropagation(); sl.classList.remove('drag'); $('#dropOverlay').classList.remove('on');
+      e.preventDefault(); e.stopPropagation(); sl.classList.remove('drag'); $('#dropOverlay').classList.remove('on'); App.resetDrag();
       await dropFolders(e.dataTransfer, side);
     });
   });

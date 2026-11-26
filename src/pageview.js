@@ -314,7 +314,7 @@ const PV = (() => {
     svg.addEventListener('pointercancel', end);
     svg.addEventListener('dblclick', async e => {
       const target = e.target.closest('[data-i]'); if (!target || st.tool !== 'select') return;
-      const a = list(side, i)[+target.dataset.i];
+      const a = list(side, i)[+target.dataset.i]; if (!a) return;
       if (a.t === 'note') {
         const t = await askText('付箋を編集', a.text); if (t == null) return;
         if (!t.trim()) list(side, i).splice(+target.dataset.i, 1); else a.text = t;
@@ -440,7 +440,7 @@ const PV = (() => {
     const n = files.reduce((t, f) => t + Object.values(f.annotations).reduce((s, x) => s + (x ? x.length : 0), 0), 0);
     if (!n) return toast('保存する注釈がありません');
     const withAnn = files.filter(f => Object.values(f.annotations).some(x => x && x.length));
-    download(`注釈_${withAnn.map(f => baseName(f.name)).join('_')}.json`, JSON.stringify({ app: 'doc-compare', version: 1, files }, null, 1), 'application/json');
+    download(`注釈_${withAnn.map(f => baseName(f.name)).join('_')}.json`, JSON.stringify({ app: 'shibadiff', version: 1, files }, null, 1), 'application/json');
   };
   $('#annImport').onclick = () => $('#annFile').click();
   $('#annFile').onchange = async e => {

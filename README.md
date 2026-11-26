@@ -1,10 +1,10 @@
-# 文書比較ツール
+# ShibaDiff
 
 WinMerge のテキスト比較と DocuWorks Viewer のページ表示・注釈を1つにまとめた、**単一HTMLファイル**の文書比較ツールです。
 インストール不要で、ネットワークにつながらない環境でも動きます（外部との通信は Content-Security-Policy で禁止しています）。
 
 ## 使い方
-`dist/文書比較ツール.html` を Edge / Chrome で開き、比較したいファイルを左右にドロップします。
+`dist/ShibaDiff.html` を Edge / Chrome で開き、比較したいファイルを左右にドロップします。
 
 | 機能 | 内容 |
 |---|---|
@@ -23,7 +23,7 @@ WinMerge のテキスト比較と DocuWorks Viewer のページ表示・注釈�
 ## ビルド
 ```
 npm ci              # pdf.js を取得
-python3 build.py    # dist/文書比較ツール.html を生成
+python3 build.py    # dist/ShibaDiff.html を生成
 ```
 ソースは `src/` にあり、`build.py` が CSS・JavaScript・pdf.js（ワーカー・日本語CMap込み）を1つのHTMLにまとめます。
 

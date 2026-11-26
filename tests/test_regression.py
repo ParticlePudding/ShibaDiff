@@ -26,6 +26,6 @@ async def main():
         p = await t.download('.dlg .foot button:has-text("Shift_JIS")'); print('saved bytes sjis ok:', open(p,'rb').read().decode('cp932').strip()[:20])
         # report print rendering
         await t.load(C+'07_Word/議事録_初版.docx', C+'07_Word/議事録_修正版.docx'); rp=await t.download('#tReport')
-        pg2=await t.ctx.new_page(); await pg2.goto('file://'+rp); await pg2.emulate_media(media='print'); await pg2.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out')); await pg2.close()
+        pg2=await t.ctx.new_page(); await pg2.goto('file://'+rp); await pg2.emulate_media(media='print'); await pg2.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out', 'report_print.png')); await pg2.close()
         print('errors', t.errors)
 asyncio.run(main())

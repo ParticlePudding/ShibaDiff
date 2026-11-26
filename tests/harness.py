@@ -1,4 +1,4 @@
-"""レビュー用ヘルパー：headless Chrome で文書比較ツールを操作する。
+"""レビュー用ヘルパー：headless Chrome でShibaDiff を操作する。
 
 使い方（例）:
     import asyncio, sys, os
@@ -37,7 +37,7 @@ import asyncio, os, time
 from playwright.async_api import async_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOOL = 'file://' + os.path.join(ROOT, 'dist', '文書比較ツール.html')
+TOOL = 'file://' + os.path.join(ROOT, 'dist', 'ShibaDiff.html')
 
 
 class Tool:

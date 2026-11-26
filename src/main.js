@@ -195,7 +195,7 @@ const App = (() => {
     el.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); el.classList.add('drag'); $('#dropOverlay').classList.add('on'); });
     el.addEventListener('dragleave', () => el.classList.remove('drag'));
     el.addEventListener('drop', e => {
-      e.preventDefault(); e.stopPropagation(); el.classList.remove('drag'); $('#dropOverlay').classList.remove('on');
+      e.preventDefault(); e.stopPropagation(); el.classList.remove('drag'); $('#dropOverlay').classList.remove('on'); dragDepth = 0;
       const fs = Array.from(e.dataTransfer.files);
       if (fs.length >= 2) loadPair([fs[0], fs[1]]); else if (fs[0]) loadFile(side, fs[0]);
     });
@@ -234,7 +234,9 @@ const App = (() => {
     TV.pushUndo();
     if (!S[side]) { S[side] = newTextSide(); }
     const ls = res === '' ? [] : res.split(/\r\n|\r|\n/);
-    if (ls.length > 1 && ls[ls.length - 1] === '') { ls.pop(); S[side].finalNL = true; }
+    const endsNL = ls.length > 1 && ls[ls.length - 1] === '';
+    if (endsNL) ls.pop();
+    S[side].finalNL = endsNL || !ls.length;
     S[side].lines = ls;
     afterEdit(side);
     TV.compare(true);
@@ -262,12 +264,13 @@ const App = (() => {
       s.mixedOk = true;
     }
     let { bytes, unmapped } = Enc.encode(body, enc);
-    void 0;
     if (unmapped) {
       const v = await modal({ title: '文字コードの確認', html: `${Enc.NAMES[enc]} で表せない文字が ${unmapped} 個あります（「?」に置き換わります）。<br>UTF-8 で保存しますか？`, buttons: [{ label: 'キャンセル', value: null }, { label: 'そのまま保存', value: 'keep' }, { label: 'UTF-8で保存', primary: true, value: 'utf8' }] });
       if (!v) return;
       if (v === 'utf8') { enc = 'utf-8'; bytes = Enc.encode(body, enc).bytes; }
     }
+    const hadBom = s.bytes && s.bytes.length >= 2 && ((s.bytes[0] === 0xFF && s.bytes[1] === 0xFE) || (s.bytes[0] === 0xFE && s.bytes[1] === 0xFF));
+    if (/^utf-16/.test(enc) && s.bytes && !hadBom) bytes = bytes.subarray(2); // 元にBOMがなければ付けない
     const name = isText ? (s.name === '(新規テキスト)' ? '新規テキスト.txt' : s.name) : baseName(s.name) + '_抽出テキスト.txt';
     const blob = new Blob([bytes], { type: 'application/octet-stream' });
     let saved = false;
@@ -393,7 +396,7 @@ PDF・画像のページを重ねて、変わった部分を色分けします�
 <span class="muted">すべての処理はこのブラウザの中だけで行われ、ファイルが外部に送信されることはありません（ネットワーク接続なしで動作します）。</span>`
   });
 
-  Object.assign(app, { loadFile, loadPair, newTextSide, afterEdit, openEditor, setTab, updateSlot, visualOnly });
+  Object.assign(app, { resetDrag: () => { dragDepth = 0; }, loadFile, loadPair, newTextSide, afterEdit, openEditor, setTab, updateSlot, visualOnly });
   return app;
 })();
 

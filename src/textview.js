@@ -266,8 +266,15 @@ const TV = (() => {
   function markWrap() { // 選択中の差分・検索ヒットの印だけを付け直す
     $$('.row.cur,.row.hit', wrapEl).forEach(el => el.classList.remove('cur', 'first', 'last', 'hit'));
     if (st.cur >= 0 && st.blocks[st.cur]) {
-      const b = st.blocks[st.cur], els = [];
-      for (let r = b.r0; r < b.r1; r++) els.push(...$$(`.row[data-v="${st.rowToView[r]}"]`, wrapEl));
+      const b = st.blocks[st.cur], want = new Set();
+      for (let r = b.r0; r < b.r1; r++) want.add(String(st.rowToView[r]));
+      const v0 = st.rowToView[b.r0], from = $(`.row[data-v="${v0}"]`, wrapEl), els = [];
+      // 差分の先頭行から順にたどる（全行を検索し直さない）
+      for (let ch = from && from.closest('.wchunk'); ch; ch = ch.nextElementSibling) {
+        let any = false;
+        for (const x of ch.querySelectorAll('.row[data-v]')) if (want.has(x.dataset.v)) { els.push(x); any = true; }
+        if (!any && els.length) break;
+      }
       const bySide = st.unified ? [els] : [els.filter(x => x.dataset.s === '0'), els.filter(x => x.dataset.s === '1')];
       for (const g of bySide) { g.forEach(x => x.classList.add('cur')); if (g.length) { g[0].classList.add('first'); g[g.length - 1].classList.add('last'); } }
     }

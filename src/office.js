@@ -18,6 +18,7 @@ const Zip = (() => {
     const entries = new Map();
     const td = new TextDecoder('utf-8');
     for (let n = 0; n < count; n++) {
+      if (p + 46 > bytes.length) throw new Error('ZIPの構造が壊れています');
       if (dv.getUint32(p, true) !== 0x02014b50) break;
       const method = dv.getUint16(p + 10, true);
       const csize = dv.getUint32(p + 20, true);
@@ -33,6 +34,7 @@ const Zip = (() => {
       async read(name) {
         const e = entries.get(name); if (!e) return null;
         const l = e.lho;
+        if (l + 30 > bytes.length || dv.getUint32(l, true) !== 0x04034b50) throw new Error('ZIPの構造が壊れています');
         const nl = dv.getUint16(l + 26, true), xl = dv.getUint16(l + 28, true);
         const start = l + 30 + nl + xl;
         const data = bytes.subarray(start, start + e.csize);

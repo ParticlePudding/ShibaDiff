@@ -1,6 +1,7 @@
 /* 設定（頻繁には切り替えない項目）とブラウザ保存データの管理 */
 const Settings = (() => {
   const old = store.get('pv:stamp', null);
+  const BASE = { stampTop: '確認', stampName: '' };
   const DEF = {
     wrap: false, showWs: false, unit: 'auto', numDelta: true, fontSize: 'm', persist: true,
     dateFmt: 'yy', stampKind: 'date', stampSize: 'm',
@@ -83,6 +84,15 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
     const names = { 'doccmp:settings': '設定', 'doccmp:textopts': 'テキスト比較の比較条件', 'doccmp:tvLayout': '左右表示／一列表示', 'doccmp:pv:color': '注釈の色', 'doccmp:pv:width': '注釈の線の太さ', 'doccmp:pv:zoom': 'ページ表示の倍率', 'doccmp:pv:stamp': '日付印（旧形式）' };
     return { kind: '設定', name: names[k] || k.slice(7), detail: '', bytes: raw.length };
   }
+  /* 保存データをすべて削除したとき、開いている間の設定も初期値に戻す（保存はしない） */
+  function resetAll() {
+    for (const k of Object.keys(DEF)) {
+      const v = k in BASE ? BASE[k] : DEF[k];
+      if (cur[k] === v) continue;
+      cur[k] = v; subs.forEach(f => { try { f(k, v); } catch (e) { console.error(e); } });
+    }
+    applyFont();
+  }
   function openData() {
     const rows = () => allKeys().map(k => ({ k, ...describe(k) }));
     const table = list => list.length ? `<table class="datatbl"><thead><tr><th><input type="checkbox" id="dAll" aria-label="すべて選択"></th><th>種類</th><th>内容</th><th>詳細</th></tr></thead><tbody>` +
@@ -102,7 +112,7 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
         const btns = $$('.foot button', m);
         const keep = (b, fn) => { const nb = b.cloneNode(true); b.replaceWith(nb); nb.onclick = fn; };
         keep(btns[0], () => { const ks = $$('[data-key]:checked', m).map(c => c.dataset.key); if (!ks.length) return toast('削除するものを選んでください'); ks.forEach(k => localStorage.removeItem(k)); toast(`${ks.length} 件を削除しました`); draw(); });
-        keep(btns[1], () => { if (!confirm('このツールの保存データをすべて削除しますか？（設定も初期状態に戻ります）')) return; allKeys().forEach(k => localStorage.removeItem(k)); toast('すべて削除しました'); draw(); });
+        keep(btns[1], () => { if (!confirm('このツールの保存データをすべて削除しますか？（設定も初期状態に戻ります）')) return; allKeys().forEach(k => localStorage.removeItem(k)); resetAll(); toast('すべて削除しました'); draw(); });
       }
     });
   }

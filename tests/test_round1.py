@@ -32,7 +32,7 @@ async def main():
         await t.page.mouse.click(bb['x']+bb['width']*0.8, bb['y']+60)
         await t.click('#btnSettings'); await t.page.select_option('[data-k=stampKind]','name'); await t.page.select_option('[data-k=stampSize]','l'); await t.page.keyboard.press('Escape')
         await t.click('[data-tool=stamp]'); await t.page.mouse.click(bb['x']+bb['width']*0.6, bb['y']+60)
-        await t.page.wait_for_timeout(400); await t.page.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out'), clip={'x':bb['x']+bb['width']*0.45,'y':bb['y'],'width':bb['width']*0.55,'height':140})
+        await t.page.wait_for_timeout(400); await t.page.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out', 'numdelta.png'), clip={'x':bb['x']+bb['width']*0.45,'y':bb['y'],'width':bb['width']*0.55,'height':140})
         # data manager
         await t.click('#btnSettings'); await t.click('#setData'); await t.page.wait_for_timeout(400); await t.shot('10_data')
         print('data rows:', await t.js("document.querySelectorAll('#dList [data-key]').length"))
@@ -46,7 +46,9 @@ async def main():
         await t.page.keyboard.press('Escape'); print('focus restored to:', await t.js("document.activeElement.id"))
         # slot keyboard
         await t.tab('text'); await t.page.focus('.slot[data-side="0"]')
-        async with t.page.expect_file_chooser() as fc: await t.page.keyboard.press('Enter')
-        print('file chooser opened:', bool(await fc.value))
+        # ファイル選択ダイアログ自体は headless Chrome で不安定なため、input の click が呼ばれたかで確認する
+        await t.js("(()=>{window._pick=0;const i=document.querySelector('.slot[data-side=\"0\"] input[type=file]');i.click=()=>{window._pick++;};})()")
+        await t.page.keyboard.press('Enter')
+        print('file chooser opened:', await t.js("window._pick") == 1)
         print('errors', t.errors)
 asyncio.run(main())

@@ -1,10 +1,9 @@
 {
-  "name": "doc-compare",
+  "name": "shibadiff",
   "version": "1.1.0",
-  "description": "",
-  "main": "index.js",
+  "description": "WinMerge と DocuWorks Viewer の機能をまとめた単一HTMLの文書比較ツール",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "python3 build.py"
   },
   "keywords": [],
   "author": "",
