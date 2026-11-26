@@ -111,6 +111,12 @@ async def main():
         blue = "(()=>{const c=document.querySelectorAll('#ovView canvas')[1],d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let r=0;for(let i=0;i<d.length;i+=4) if(d[i]===26&&d[i+1]===115&&d[i+2]===232) r++;return r})()"
         b1 = await t.js(blue); await t.page.uncheck('#ovSideHl'); await t.page.wait_for_timeout(300); b0 = await t.js(blue)
         ck('並べて表示のハイライトを切り替えられる', b1 > 100 and b0 == 0, f'{b1} → {b0}')
+        # 拡大して並べても、左の画像の左端までスクロールで届く（中央寄せで左側がはみ出さない）
+        await t.page.select_option('#ovZoom', '1.5'); await t.page.wait_for_timeout(400)
+        await t.js("$('#ovView').scrollLeft = 0")
+        r = await t.js("(()=>{const v=$('#ovView').getBoundingClientRect(), cs=document.querySelectorAll('#ovView canvas'); return [cs[0].getBoundingClientRect().left - v.left, $('#ovView').scrollWidth - (cs[1].getBoundingClientRect().right - cs[0].getBoundingClientRect().left)]})()")
+        ck('拡大して並べても、左の画像の左端まで見える', r[0] >= 0 and r[1] >= 0, r)
+        await t.page.select_option('#ovZoom', 'fit'); await t.page.wait_for_timeout(300)
         await t.click('#ovModes button[data-mode=diff]'); await t.page.wait_for_timeout(800)
         await t.page.select_option('#ovZoom', 'fith'); await t.page.wait_for_timeout(300)
         h, vh = await t.js("document.querySelector('#ovView canvas').getBoundingClientRect().height"), await t.js("$('#ovView').clientHeight")

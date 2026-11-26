@@ -180,7 +180,8 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 .ov-wrap{flex:1;min-height:0;display:flex}
 .ov-view{flex:1;min-width:0;overflow:auto;background:#8a929c;position:relative;padding:14px}
 .ov-view canvas{display:block;margin:0 auto;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);image-rendering:auto}
-.ov-view .pair{display:flex;gap:14px;justify-content:center;align-items:flex-start}
+/* 並べて表示：中身が表示領域より広いときは左端から並べる（中央寄せのままだと左側がスクロールでも届かない位置にはみ出す） */
+.ov-view .pair{display:flex;gap:14px;justify-content:center;align-items:flex-start;width:max-content;min-width:100%}
 .ov-view .pair canvas{margin:0}
 .ov-side{flex:none;width:250px;border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:10px;font-size:12.5px}
 .ov-side h4{margin:12px 0 6px;font-size:12.5px;color:#334}
