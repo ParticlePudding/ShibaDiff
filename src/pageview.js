@@ -5,7 +5,7 @@ const PV = (() => {
   const COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#212121', '#fdd835'];
   const st = {
     tool: 'select', color: store.get('pv:color', '#e53935'), width: +store.get('pv:width', 2), zoom: store.get('pv:zoom', 'fitw'),
-    rot: [0, 0], sides: [null, null], ann: [{}, {}], sel: null, dirty: [true, true], driver: null, driverTimer: 0
+    rot: [0, 0], sides: [null, null], ann: [{}, {}], sel: null, dirty: [true, true], expect: [null, null]
   };
   const scrollEl = side => $('.pv-scroll', cols[side]);
 
@@ -34,10 +34,7 @@ const PV = (() => {
       const x = num(a.x), y = num(a.y); if (x === null || y === null) return null;
       return { t, x, y, text: str(a.text), bg: col(a.bg, '#fff59d') };
     }
-    if (t === 'stamp') {
-      const x = num(a.x), y = num(a.y); if (x === null || y === null) return null;
-      return { t, x, y, top: str(a.top, 40), date: str(a.date, 40), name: str(a.name, 40), c: col(a.c, '#d6281f'), kind: a.kind === 'name' ? 'name' : 'date', r: num(a.r, 12, 60) || 26 };
-    }
+    // 日付印（stamp）は v1.2.0 で廃止。古い注釈に残っていても読み込まない
     return null;
   }
   function cleanAnnMap(m) {
@@ -84,7 +81,6 @@ const PV = (() => {
     }
     if (a.t === 'rect') return { x: a.x - 2, y: a.y - 2, w: a.w + 4, h: a.h + 4 };
     if (a.t === 'note') { const d = noteDims(a); return { x: a.x - 2, y: a.y - 2, w: d.w + 4, h: d.h + 4 }; }
-    if (a.t === 'stamp') { const r = (a.r || 26) + 3; return { x: a.x - r, y: a.y - r, w: r * 2, h: r * 2 }; }
     return { x: 0, y: 0, w: 0, h: 0 };
   }
   function annSvg(raw, i, selected) {
@@ -106,26 +102,6 @@ const PV = (() => {
         `<rect x="${a.x}" y="${a.y}" width="${d.w}" height="${d.h}" fill="${a.bg || '#fff59d'}" stroke="#c9ad00" stroke-width=".6"/>` +
         `<text x="${a.x + 7}" y="${a.y + 5 + d.fs}" font-size="${d.fs}" fill="#222" font-family="BIZ UDPGothic,Meiryo,sans-serif">` +
         d.lines.map((l, k) => `<tspan x="${a.x + 7}" dy="${k ? d.fs * 1.35 : 0}">${esc(l) || ' '}</tspan>`).join('') + `</text></g>`;
-    } else if (a.t === 'stamp') {
-      const r = a.r || 26, k = r / 26, cx = a.x, cy = a.y, c = a.c || '#d6281f';
-      const ch = d => 2 * Math.sqrt(Math.max(0, r * r - d * d));
-      const fit = (t, base, w) => Math.max(4, Math.min(base, t ? w / (textW(t, 1) || 1) : base)); // 円からはみ出さない文字の大きさ
-      const f = 'font-family="BIZ UDPGothic,Meiryo,sans-serif" text-anchor="middle" fill="' + c + '"';
-      s = `<g data-i="${i}" style="mix-blend-mode:multiply"><circle cx="${cx}" cy="${cy}" r="${r}" fill="rgba(255,255,255,.01)" stroke="${c}" stroke-width="${1.6 * k}"/>`;
-      if (a.kind === 'name') { // 認印：氏名だけ（4文字までは縦書き）
-        const nm = Array.from(a.name || ''); const n = nm.length || 1;
-        if (n <= 4) { const fs = Math.min(r * 0.95, (r * 1.6) / n); s += nm.map((ch1, j) => `<text x="${cx}" y="${cy - (n * fs) / 2 + fs * (j + 0.85)}" font-size="${fs}" font-weight="bold" ${f}>${esc(ch1)}</text>`).join(''); }
-        else { const fs = fit(a.name, 10 * k, r * 1.7); s += `<text x="${cx}" y="${cy + fs * 0.35}" font-size="${fs}" font-weight="bold" ${f}>${esc(a.name)}</text>`; }
-      } else { // 日付印：上段・日付・氏名
-        const d1 = 8 * k;
-        s += `<line x1="${cx - ch(d1) / 2}" y1="${cy - d1}" x2="${cx + ch(d1) / 2}" y2="${cy - d1}" stroke="${c}" stroke-width="${k}"/>` +
-          `<line x1="${cx - ch(d1) / 2}" y1="${cy + d1}" x2="${cx + ch(d1) / 2}" y2="${cy + d1}" stroke="${c}" stroke-width="${k}"/>`;
-        const fsT = fit(a.top, 9 * k, ch(13 * k) * 0.92), fsD = fit(a.date, 9.5 * k, ch(0) * 0.86), fsN = fit(a.name, 9 * k, ch(13 * k) * 0.92);
-        s += `<text x="${cx}" y="${cy - 12 * k}" font-size="${fsT}" ${f}>${esc(a.top || '')}</text>` +
-          `<text x="${cx}" y="${cy + fsD * 0.36}" font-size="${fsD}" font-weight="bold" ${f}>${esc(a.date || '')}</text>` +
-          `<text x="${cx}" y="${cy + 12 * k + fsN * 0.75}" font-size="${fsN}" ${f}>${esc(a.name || '')}</text>`;
-      }
-      s += '</g>';
     }
     if (selected) { const b = bbox(a); s += `<rect class="selbox" x="${b.x - 2}" y="${b.y - 2}" width="${b.w + 4}" height="${b.h + 4}" pointer-events="none"/>`; }
     return s;
@@ -226,20 +202,6 @@ const PV = (() => {
     const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
     return p.matrixTransform(svg.getScreenCTM().inverse());
   }
-  function today() {
-    const d = new Date(), mm = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
-    const fmt = Settings.get('dateFmt');
-    if (fmt === 'yyyy') return `${d.getFullYear()}.${mm}.${dd}`;
-    if (fmt === 'wareki') {
-      try {
-        const parts = new Intl.DateTimeFormat('ja-JP-u-ca-japanese', { era: 'narrow', year: 'numeric' }).formatToParts(d);
-        const era = (parts.find(p => p.type === 'era') || {}).value || '', yr = (parts.find(p => p.type === 'year') || {}).value || '';
-        return `${era}${yr}.${mm}.${dd}`;
-      } catch (e) { /* 和暦が使えないブラウザは西暦にする */ }
-    }
-    return `'${String(d.getFullYear()).slice(2)}.${mm}.${dd}`;
-  }
-  const STAMP_R = { s: 20, m: 26, l: 34 };
   function attachPointer(side, i, svg) {
     let drag = null;
     svg.addEventListener('pointerdown', async e => {
@@ -274,13 +236,6 @@ const PV = (() => {
           a.x = Math.max(2, Math.min(a.x, pg.w - d.w - 4)); a.y = Math.max(2, Math.min(a.y, pg.h - d.h - 4)); // ページからはみ出さないように
           arr.push(a); drawAnn(side, i); saveAnn(side);
         }
-        return;
-      } else if (tool === 'stamp') {
-        const pg = st.sides[side].pages[i];
-        const r = STAMP_R[Settings.get('stampSize')] || 26;
-        arr.push({ t: 'stamp', kind: Settings.get('stampKind'), r, x: Math.max(r + 2, Math.min(p.x, pg.w - r - 2)), y: Math.max(r + 2, Math.min(p.y, pg.h - r - 2)), top: Settings.get('stampTop'), name: Settings.get('stampName'), date: today(), c: '#d6281f' });
-        drawAnn(side, i); saveAnn(side);
-
         return;
       }
       if (drag) { svg.setPointerCapture(e.pointerId); e.preventDefault(); }
@@ -318,9 +273,6 @@ const PV = (() => {
       if (a.t === 'note') {
         const t = await askText('付箋を編集', a.text); if (t == null) return;
         if (!t.trim()) list(side, i).splice(+target.dataset.i, 1); else a.text = t;
-      } else if (a.t === 'stamp') {
-        const t = await askText('日付印を編集（上段 / 日付 / 名前 を改行区切り）', [a.top, a.date, a.name].join('\n')); if (t == null) return;
-        [a.top, a.date, a.name] = t.split('\n').concat(['', '', '']);
       } else return;
       st.sel = null; drawAnn(side, i); saveAnn(side);
     });
@@ -350,13 +302,22 @@ const PV = (() => {
     sc.addEventListener('scroll', () => {
       const cp = currentPage(side);
       const inp = $('.pvPage', col); if (document.activeElement !== inp) inp.value = cp.i + 1;
-      if (!$('#pvSync').checked || st.driver === 1 - side) return;
-      st.driver = side; clearTimeout(st.driverTimer); st.driverTimer = setTimeout(() => st.driver = null, 150);
+      // 連動で動かした側の scroll イベント（こちらが設定した位置そのもの）は無視する。
+      // 以前は「動かした側を0.15秒固定」していたため、その間の利用者のスクロールが反対側に伝わらず、左右がずれることがあった
+      const ex = st.expect[side];
+      if (ex && Math.abs(sc.scrollTop - ex.top) <= 1 && Math.abs(sc.scrollLeft - ex.left) <= 1) { st.expect[side] = null; return; }
+      st.expect[side] = null;
+      if (!$('#pvSync').checked) return;
       const o = 1 - side, osd = st.sides[o]; if (!osd || $('#pvShow').value !== 'both') return;
-      const j = Math.min(cp.i, osd.slots.length - 1), os = osd.slots[j].slot;
-      scrollEl(o).scrollTop = os.offsetTop - 8 + cp.f * (os.offsetHeight + 14);
-      const r = sc.scrollWidth - sc.clientWidth, or = scrollEl(o).scrollWidth - scrollEl(o).clientWidth;
-      if (r > 0 && or > 0) scrollEl(o).scrollLeft = sc.scrollLeft / r * or;
+      const j = PageMatch.other(side, cp.i, osd.slots.length), os = osd.slots[j].slot, osc = scrollEl(o);
+      const before = { top: osc.scrollTop, left: osc.scrollLeft };
+      osc.scrollTop = os.offsetTop - 8 + cp.f * (os.offsetHeight + 14);
+      const r = sc.scrollWidth - sc.clientWidth, or = osc.scrollWidth - osc.clientWidth;
+      if (r > 0 && or > 0) osc.scrollLeft = sc.scrollLeft / r * or;
+      // 実際に設定された位置（端では切り詰められる）を覚えておき、その scroll イベントだけを無視する。
+      // 位置が変わらなかったときはイベントが来ないので、覚えない
+      const exp = { top: osc.scrollTop, left: osc.scrollLeft };
+      st.expect[o] = (exp.top !== before.top || exp.left !== before.left) ? exp : null;
     }, { passive: true });
     $('.pvPrev', col).onclick = () => goPage(side, currentPage(side).i - 1);
     $('.pvNext', col).onclick = () => goPage(side, currentPage(side).i + 1);
@@ -388,9 +349,7 @@ const PV = (() => {
   }
 
   /* ---------- toolbar ---------- */
-  let stampAsked = false;
   function setTool(t) {
-    if (t === 'stamp' && !Settings.get('stampName') && !stampAsked) { stampAsked = true; toast('日付印に入れる氏名を設定してください'); Settings.open('stamp'); }
     st.tool = t; wrap.dataset.tool = t;
     $$('#toolGrp .toolbtn').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
     if (t !== 'select') select(null);
@@ -409,7 +368,6 @@ const PV = (() => {
   markSw();
   $('#annWidth').value = String(st.width);
   $('#annWidth').onchange = e => { st.width = +e.target.value; store.set('pv:width', st.width); };
-  $('#stampCfg').onclick = () => Settings.open('stamp');
   const zSel = $('#zSel');
   zSel.value = st.zoom;
   function setZoom(z) {
@@ -484,6 +442,42 @@ const PV = (() => {
     const c = out.getContext('2d'); c.translate(out.width / 2, out.height / 2); c.rotate(rot * Math.PI / 180); c.drawImage(base, -base.width / 2, -base.height / 2);
     return out;
   }
+  /* ---- レポート：注釈を付けたページの画像と、注釈・付箋の一覧 ---- */
+  const TNAME = { pen: 'ペン', marker: 'マーカー', rect: '枠', note: '付箋' };
+  $('#pvReport').onclick = async () => {
+    const avail = [0, 1].filter(s => st.sides[s]);
+    if (!avail.length) return toast('ファイルを読み込んでください');
+    const scope = await Report.ask('ページ表示・注釈のレポート', '載せるページを選んでください。<br><span class="muted">注釈を付けたページを、注釈ごと画像にして載せます。付箋の内容は一覧にします。</span>',
+      [{ label: 'すべてのページ', value: 'all' }, { label: '注釈のあるページだけ', value: 'ann', primary: true }]);
+    if (!scope) return;
+    let html;
+    await withBusy('レポートを作成しています…', async () => {
+      const secs = [], rows = [];
+      for (const side of avail) {
+        const sd = st.sides[side], nm = side ? '右' : '左';
+        const idx = sd.pages.map((_, i) => i).filter(i => scope === 'all' || (st.ann[side][i] || []).length);
+        for (const i of idx) {
+          $('#busyMsg').textContent = `レポートを作成しています… ${nm} ${i + 1} / ${sd.pages.length} ページ`;
+          const arr = st.ann[side][i] || [], pg = sd.pages[i];
+          const cv = await renderWithAnn(side, i, Math.min(2, 1400 / Math.max(pg.w, pg.h)));
+          const cnt = Object.entries(arr.reduce((m, a) => (m[a.t] = (m[a.t] || 0) + 1, m), {})).map(([t, n]) => `${TNAME[t] || t} ${n}`).join('・');
+          const notes = arr.filter(a => a.t === 'note').map(a => `<li>${esc(a.text).replace(/\n/g, '<br>')}</li>`).join('');
+          secs.push(`<h2>${nm}：${esc(S[side].name)}　${i + 1} / ${sd.pages.length} ページ　${arr.length ? `<span class="tag note">注釈 ${arr.length}</span>` : ''}</h2>` +
+            `<figure><img src="${Report.jpeg(cv)}" alt=""><figcaption>${cnt ? '注釈：' + cnt : '注釈なし'}</figcaption></figure>` + (notes ? `<div><b>付箋</b><ol>${notes}</ol></div>` : ''));
+          cv.width = cv.height = 0;
+          if (arr.length) rows.push(`<tr><td>${nm}</td><td class="num">${i + 1}</td><td>${cnt}</td><td>${arr.filter(a => a.t === 'note').map(a => esc(a.text).replace(/\n/g, ' ')).join('<br>')}</td></tr>`);
+          await sleep(0);
+        }
+      }
+      const total = avail.reduce((n, s) => n + Object.values(st.ann[s]).reduce((m, a) => m + a.length, 0), 0);
+      html = Report.page({
+        title: `注釈レポート - ${avail.map(s => S[s].name).join(' / ')}`, heading: 'ページ表示・注釈レポート',
+        meta: `<b>注釈 ${total} 件</b>（${avail.map(s => s ? '右' : '左').join('・')}の文書）`,
+        body: (await Report.bothInfo()) + `<h2>注釈の一覧</h2>` + (rows.length ? `<table class="list"><thead><tr><th style="width:40px">側</th><th class="num" style="width:50px">頁</th><th style="width:28%">注釈</th><th>付箋の内容</th></tr></thead><tbody>${rows.join('')}</tbody></table>` : '<p>注釈はありません。</p>') + secs.join('')
+      });
+    });
+    if (html) download(`注釈レポート_${baseName(S[avail[0]].name)}.html`, html, 'text/html;charset=utf-8');
+  };
   $('#pvPrint').onclick = async () => {
     const avail = [0, 1].filter(s => st.sides[s]);
     if (!avail.length) return toast('ファイルが読み込まれていません');
@@ -513,6 +507,8 @@ const PV = (() => {
   };
 
   function activate() {
+    // 左右の連動で、挿入・削除されたページを飛ばして対応するページに合わせられるよう、裏で対応付けを調べておく
+    if (S[0] && S[1] && PageMatch.enabled()) PageMatch.compute().catch(() => { });
     if (window.innerWidth < 760 && $('#pvShow').value === 'both') {
       // 狭い画面では片側ずつ表示
       $('#pvShow').value = S[0] || !S[1] ? '0' : '1';
@@ -530,5 +526,5 @@ const PV = (() => {
     if (e.key === 'Escape') { setTool('select'); select(null); return true; }
     return false;
   }
-  return { activate, invalidate, onKey, st };
+  return { activate, invalidate, onKey, st, cleanAnnot };
 })();

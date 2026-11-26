@@ -49,7 +49,7 @@ cmaps_json = json.dumps(cmaps, separators=(",", ":"))
 
 css = read(os.path.join(SRC, "style.css"))
 body = read(os.path.join(SRC, "body.html"))
-js_files = ["util.js", "settings.js", "encoding.js", "diff.js", "office.js", "pdf.js", "pages.js",
+js_files = ["util.js", "settings.js", "encoding.js", "diff.js", "office.js", "pdf.js", "pages.js", "pagematch.js", "report.js",
             "textview.js", "pageview.js", "overlay.js", "folder.js", "main.js"]
 import datetime
 ver = json.load(open(os.path.join(HERE, "package.json")))["version"]

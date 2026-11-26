@@ -3,7 +3,7 @@ const OV = (() => {
   const view = $('#ovView');
   const st = {
     mode: 'diff', l: 0, r: 0, dx: 0, dy: 0, ang: 0, resF: 1, zoom: 'fit', regions: [], regIdx: -1, cache: new Map(),
-    blink: 0, blinkOn: false, dirty: true, out: null, base: null, cl: null, cr: null, scanning: false, gen: 0,
+    blink: 0, blinkOn: false, hand: false, dirty: true, out: null, base: null, cl: null, cr: null, scanning: false, gen: 0,
     align: new Map() // ページの組み合わせごとの位置合わせ量 "l:r" -> [dx, dy]
   };
   /* スキャン画像（画像ファイル・文字情報のないPDF）を含むか */
@@ -38,8 +38,26 @@ const OV = (() => {
   const resFactor = (pl, pr) => renderWidth(pl, pr) / widthFor(pl, pr, RES.std);
 
   function fillSelect(sel, n, v) {
-    sel.innerHTML = Array.from({ length: n }, (_, i) => `<option value="${i}">${i + 1} / ${n}</option>`).join('');
-    sel.value = String(Math.min(v, Math.max(0, n - 1)));
+    // 対応するページがない側（挿入・削除されたページ）は「—」にする
+    sel.innerHTML = `<option value="-1" hidden>— / ${n}</option>` + Array.from({ length: n }, (_, i) => `<option value="${i}">${i + 1} / ${n}</option>`).join('');
+    sel.value = String(v < 0 ? -1 : Math.min(v, Math.max(0, n - 1)));
+  }
+  /* ---- ページの対応（挿入・削除されたページ） ---- */
+  // 対応付けを（まだなら）計算し、結果を表示する。連動中なら右のページを左に対応するページへ合わせる
+  async function ensureMatch() {
+    const info = $('#ovMatchInfo');
+    if (!S[0] || !S[1] || !PageMatch.enabled()) { info.innerHTML = ''; return null; }
+    if (PageMatch.ready()) { info.innerHTML = PageMatch.describe(PageMatch.ready()); return PageMatch.ready(); }
+    info.textContent = 'ページの対応を調べています…';
+    const pairs = await PageMatch.compute((k, n) => { info.textContent = `ページの対応を調べています… ${k} / ${n}`; });
+    info.innerHTML = PageMatch.describe(PageMatch.ready());
+    return pairs && PageMatch.ready();
+  }
+  // 今表示している組の位置（組の配列の何番目か）
+  function pairIndex(pairs) {
+    let k = pairs.findIndex(p => p.l === st.l && p.r === st.r);
+    if (k < 0) k = pairs.findIndex(p => (st.l >= 0 && p.l === st.l) || (st.l < 0 && p.r === st.r));
+    return Math.max(0, k);
   }
 
   /* ---- pixel helpers ---- */
@@ -74,7 +92,7 @@ const OV = (() => {
     const scan = scanMode() && tol, STRONG = 170, WEAK = Math.min(250, STRONG + thr);
     const mf = async g => { let o = g; for (let k = 0; k < rad; k++) { o = minFilter(o, W, H); await sleep(0); } return o; };
     const aMin = tol ? await mf(a) : a, bMin = tol ? await mf(b) : b;
-    const img = new ImageData(W, H), d = img.data;
+    const img = new ImageData(W, H), d = img.data, mask = new Uint8Array(W * H); // mask: 1=左だけ 2=右だけ
     // 変更箇所をまとめるます目も、標準での 16px を解像度に合わせて換算する（解像度で箇所の数が変わらないように）
     const CELL = Math.max(8, Math.round(16 * o.resF)), gw = Math.ceil(W / CELL), gh = Math.ceil(H / CELL), grid = new Uint16Array(gw * gh);
     let changed = 0, ink = 0;
@@ -84,8 +102,8 @@ const OV = (() => {
       for (let x = 0; x < W; x++, j++) {
         const ga = a[j], gb = b[j], k = j * 4;
         if (ga < 200 || gb < 200) ink++;
-        if (scan ? (ga < STRONG && bMin[j] >= WEAK) : (ga + thr < bMin[j])) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; changed++; grid[gy + (x / CELL | 0)]++; }
-        else if (scan ? (gb < STRONG && aMin[j] >= WEAK) : (gb + thr < aMin[j])) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; changed++; grid[gy + (x / CELL | 0)]++; }
+        if (scan ? (ga < STRONG && bMin[j] >= WEAK) : (ga + thr < bMin[j])) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; mask[j] = 1; changed++; grid[gy + (x / CELL | 0)]++; }
+        else if (scan ? (gb < STRONG && aMin[j] >= WEAK) : (gb + thr < aMin[j])) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; mask[j] = 2; changed++; grid[gy + (x / CELL | 0)]++; }
         else { const m = Math.min(ga, gb), v = faint ? 255 - ((255 - m) * 0.32 | 0) : m; d[k] = d[k + 1] = d[k + 2] = v; }
         d[k + 3] = 255;
       }
@@ -111,7 +129,7 @@ const OV = (() => {
       regions.push({ x: x0 * CELL - 6, y: y0 * CELL - 6, w: (x1 - x0 + 1) * CELL + 12, h: (y1 - y0 + 1) * CELL + 12 });
     }
     regions.sort((p, q) => (Math.abs(p.y - q.y) < 30 ? p.x - q.x : p.y - q.y));
-    return { img, W, H, changed, ink, regions };
+    return { img, mask, W, H, changed, ink, regions };
   }
 
   /* 3x3 minimum filter (= ink dilation by 1px) */
@@ -190,27 +208,95 @@ const OV = (() => {
 
   /* ---- drawing ---- */
   function stopBlink() { clearInterval(st.blink); st.blink = 0; }
-  function cssWidth(px) {
-    if (st.zoom === 'fit') return Math.max(200, view.clientWidth - 30);
-    return px * (+st.zoom) * (96 / 72) / (st.scale || 2);
+  function startBlink() {
+    stopBlink();
+    if (st.mode === 'blink' && st.blinkFrame && !$('#ovBlinkManual').checked) st.blink = setInterval(st.blinkFrame, +$('#ovBlinkMs').value);
+  }
+  /* ---- 表示の大きさ：幅に合わせる（fit）／縦に合わせる（fith）／倍率 ---- */
+  function cssWidth(cv, half) {
+    const vw = view.clientWidth - 30, vh = view.clientHeight - 30;
+    if (st.zoom === 'fit') return half ? Math.max(150, (view.clientWidth - 50) / 2) : Math.max(200, vw);
+    if (st.zoom === 'fith') return Math.max(100, vh) * cv.width / cv.height;
+    return cv.width * (+st.zoom) * (96 / 72) / (st.scale || 2);
   }
   function placeCanvas(cv, half = false) {
-    let w = cssWidth(cv.width);
-    if (half && st.zoom === 'fit') w = (view.clientWidth - 50) / 2;
+    cv.dataset.half = half ? '1' : '';
+    const w = cssWidth(cv, half);
     cv.style.width = w + 'px'; cv.style.height = (cv.height / cv.width * w) + 'px';
   }
-  function drawBoxes() {
-    if (!st.out || st.mode !== 'diff') return;
-    const c = st.out.getContext('2d');
-    c.putImageData(st.base.img, 0, 0);
-    if (!$('#ovBoxes').checked) return;
-    st.regions.forEach((r, i) => {
-      c.lineWidth = i === st.regIdx ? 6 : 3; c.strokeStyle = i === st.regIdx ? '#ff6d00' : 'rgba(255,152,0,.9)';
+  // 今の表示倍率（幅・縦に合わせているときも数値にする）
+  function effZoom() {
+    const cv = $('canvas', view); if (!cv || !cv.width) return 1;
+    return cv.getBoundingClientRect().width / (cv.width * (96 / 72) / (st.scale || 2));
+  }
+  function syncZoomSel() {
+    const zs = $('#ovZoom'), custom = $('option[value=custom]', zs);
+    if ([...zs.options].some(o => o.value === st.zoom && o.value !== 'custom')) { zs.value = st.zoom; custom.hidden = true; }
+    else { custom.hidden = false; custom.textContent = Math.round(+st.zoom * 100) + '%'; zs.value = 'custom'; }
+  }
+  // 描き直さずに大きさだけ変える。ax, ay（表示領域の中の位置）を中心に拡大・縮小する
+  function rezoom(z, ax, ay) {
+    const cvs = $$('canvas', view);
+    st.zoom = z; syncZoomSel();
+    if (!cvs.length) return;
+    if (ax == null) { ax = view.clientWidth / 2; ay = view.clientHeight / 2; }
+    const before = cvs[0].getBoundingClientRect().width, px = view.scrollLeft + ax, py = view.scrollTop + ay;
+    cvs.forEach(c => placeCanvas(c, c.dataset.half === '1'));
+    const k = cvs[0].getBoundingClientRect().width / (before || 1);
+    view.scrollLeft = px * k - ax; view.scrollTop = py * k - ay;
+  }
+  function zoomBy(f, ax, ay) {
+    const z = Math.max(0.1, Math.min(8, effZoom() * f));
+    rezoom(String(Math.round(z * 1000) / 1000), ax, ay);
+  }
+  function drawBoxesOn(c, regions, sel = st.regIdx) {
+    regions.forEach((r, i) => {
+      c.lineWidth = i === sel ? 6 : 3; c.strokeStyle = i === sel ? '#ff6d00' : 'rgba(255,152,0,.9)';
       c.strokeRect(r.x, r.y, r.w, r.h);
-      c.fillStyle = i === st.regIdx ? '#ff6d00' : 'rgba(255,152,0,.95)'; c.font = 'bold 20px sans-serif';
+      c.fillStyle = i === sel ? '#ff6d00' : 'rgba(255,152,0,.95)'; c.font = 'bold 20px sans-serif';
       const label = String(i + 1), tw = c.measureText(label).width + 10;
       c.fillRect(r.x, r.y - 24, tw, 24); c.fillStyle = '#fff'; c.fillText(label, r.x + 5, r.y - 5);
     });
+  }
+  function drawBoxes() {
+    if (st.mode === 'side') return drawSide();
+    if (!st.out || st.mode !== 'diff') return;
+    const c = st.out.getContext('2d');
+    c.putImageData(st.base.img, 0, 0);
+    if ($('#ovBoxes').checked) drawBoxesOn(c, st.regions);
+  }
+  // 色付け：濃い部分（線・文字）を指定の色にした画像（白はそのまま）
+  const tintCache = new WeakMap();
+  function tinted(cv, color) {
+    let m = tintCache.get(cv); if (!m) tintCache.set(cv, m = new Map());
+    if (m.has(color)) return m.get(color);
+    if (m.size >= 2) m.clear();
+    const t = document.createElement('canvas'); t.width = cv.width; t.height = cv.height;
+    const c = t.getContext('2d'); c.drawImage(cv, 0, 0); c.globalCompositeOperation = 'lighten'; c.fillStyle = color; c.fillRect(0, 0, t.width, t.height);
+    m.set(color, t); return t;
+  }
+  // 並べて表示：左はそのまま、右は位置合わせした状態で並べ、変更箇所に色と枠を付ける
+  function drawSide() {
+    const sd = st.side; if (!sd) return;
+    const hl = $('#ovSideHl').checked && sd.res, boxes = $('#ovBoxes').checked && sd.res;
+    sd.canvases.forEach((cv, k) => {
+      const c = cv.getContext('2d');
+      c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height);
+      if (k === 0) c.drawImage(st.cl, 0, 0); else drawR(c, st.cr, st.dx, st.dy, st.ang);
+      if (hl) {
+        const im = c.getImageData(0, 0, cv.width, cv.height), d = im.data, m = sd.res.mask, want = k + 1;
+        const col = k ? [26, 115, 232] : [229, 50, 45];
+        for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
+        c.putImageData(im, 0, 0);
+      }
+      if (boxes) drawBoxesOn(c, st.regions);
+    });
+  }
+  function resultHtml(res, autoMsg) {
+    const pct = res.ink ? res.changed / res.ink * 100 : 0;
+    return (res.regions.length
+      ? `<b style="color:#b42318">${res.regions.length} 箇所</b>の変更を検出<br><span class="muted">変化量: ${pct.toFixed(2)}%（文字・図の部分に対する割合）</span>`
+      : (res.changed ? `<b>目立った変更はありません</b><br><span class="muted">わずかな差 ${pct.toFixed(3)}%（位置ずれや描画の違い）</span>` : '<b style="color:#21752f">✓ 差異は見つかりませんでした</b>')) + autoMsg;
   }
 
   async function update() {
@@ -220,7 +306,7 @@ const OV = (() => {
     if (gen !== st.gen) return;
     fillSelect($('#ovLPage'), pl ? pl.length : 0, st.l); fillSelect($('#ovRPage'), pr ? pr.length : 0, st.r);
     if (!pl && !pr) { view.innerHTML = '<div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します<br><span style="font-size:12.5px">スキャン画像（PNG/JPEG）同士や、PDFとスキャン画像の比較にも使えます</span></div>'; $('#ovStats').textContent = '—'; return; }
-    const pgL = pl && pl[st.l], pgR = pr && pr[st.r];
+    const pgL = pl && st.l >= 0 ? pl[st.l] : null, pgR = pr && st.r >= 0 ? pr[st.r] : null;
     const W = renderWidth(pgL, pgR); st.scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0); st.resF = resFactor(pgL, pgR);
     let cl, cr;
     try {
@@ -241,16 +327,26 @@ const OV = (() => {
     if (gen !== st.gen) return;
     // 差分画像は表示を消す前に計算する（計算中も前の結果を見られるように）
     let res = null;
-    if (cl && cr && st.mode === 'diff') {
+    if (cl && cr && (st.mode === 'diff' || (st.mode === 'side' && ($('#ovSideHl').checked || $('#ovBoxes').checked)))) {
       res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx: st.dx, dy: st.dy, ang: st.ang, resF: st.resF });
       if (gen !== st.gen) return;
     }
-    view.innerHTML = '';
-    if (!cl || !cr || st.mode === 'side') {
+    view.innerHTML = ''; st.side = null;
+    if (!cl || !cr) {
       const pair = document.createElement('div'); pair.className = 'pair';
-      for (const c of [cl, cr]) if (c) { const d = document.createElement('canvas'); d.width = c.width; d.height = c.height; d.getContext('2d').drawImage(c, 0, 0); placeCanvas(d, !!(cl && cr)); pair.appendChild(d); }
+      for (const c of [cl, cr]) if (c) { const d = document.createElement('canvas'); d.width = c.width; d.height = c.height; d.getContext('2d').drawImage(c, 0, 0); placeCanvas(d, false); pair.appendChild(d); }
       view.appendChild(pair);
-      $('#ovStats').innerHTML = (!cl || !cr) ? '片側のみ読み込まれています' : '並べて表示中';
+      $('#ovStats').innerHTML = (pl && pr) ? (cl ? '<b>左だけにあるページです</b><br><span class="muted">右では削除されています</span>' : '<b>右だけにあるページです</b><br><span class="muted">右で追加されたページです</span>') : '片側のみ読み込まれています';
+      return;
+    }
+    if (st.mode === 'side') {
+      const W2 = Math.max(cl.width, cr.width + Math.max(0, st.dx)), H2 = Math.max(cl.height, cr.height + Math.max(0, st.dy));
+      const pair = document.createElement('div'); pair.className = 'pair';
+      const canvases = [0, 1].map(() => { const d = document.createElement('canvas'); d.width = W2; d.height = H2; placeCanvas(d, true); pair.appendChild(d); return d; });
+      st.side = { canvases, res }; st.regions = res ? res.regions : []; st.regIdx = -1; st.out = canvases[0];
+      drawSide();
+      view.appendChild(pair);
+      $('#ovStats').innerHTML = res ? resultHtml(res, autoMsg) : '並べて表示中';
       return;
     }
     const out = document.createElement('canvas');
@@ -258,95 +354,194 @@ const OV = (() => {
     out.width = W2; out.height = H2;
     const c = out.getContext('2d');
     st.out = out;
+    const tint = $('#ovTint').checked, colL = $('#ovColL').value, colR = $('#ovColR').value;
     if (st.mode === 'diff') {
       st.base = res; st.regions = res.regions; st.regIdx = -1;
       drawBoxes();
-      const pct = res.ink ? res.changed / res.ink * 100 : 0;
-      $('#ovStats').innerHTML = res.regions.length
-        ? `<b style="color:#b42318">${res.regions.length} 箇所</b>の変更を検出<br><span class="muted">変化量: ${pct.toFixed(2)}%（文字・図の部分に対する割合）</span>`
-        : (res.changed ? `<b>目立った変更はありません</b><br><span class="muted">わずかな差 ${pct.toFixed(3)}%（位置ずれや描画の違い）</span>` : '<b style="color:#21752f">✓ 差異は見つかりませんでした</b>');
-      $('#ovStats').innerHTML += autoMsg;
+      $('#ovStats').innerHTML = resultHtml(res, autoMsg);
     } else if (st.mode === 'overlay') {
-      c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(cl, 0, 0);
-      c.globalAlpha = +$('#ovOpacity').value / 100; drawR(c, cr, st.dx, st.dy, st.ang); c.globalAlpha = 1;
-      $('#ovStats').innerHTML = '左の上に右を半透明で重ねています';
+      // 色付け：左右の線をそれぞれの色にして乗算で重ねる（重なった線は濃く、片側だけの線はその色で見える）
+      c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(tint ? tinted(cl, colL) : cl, 0, 0);
+      c.globalAlpha = +$('#ovOpacity').value / 100; if (tint) c.globalCompositeOperation = 'multiply';
+      drawR(c, tint ? tinted(cr, colR) : cr, st.dx, st.dy, st.ang);
+      c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+      $('#ovStats').innerHTML = '左の上に右を半透明で重ねています' + (tint ? '<br><span class="muted">色：左＝左の色、右＝右の色、重なった線は濃く表示</span>' : '');
     } else if (st.mode === 'swipe') {
+      const L = tint ? tinted(cl, colL) : cl, R = tint ? tinted(cr, colR) : cr;
       const drawSwipe = () => {
         const x = Math.round(W2 * +$('#ovSwipe').value / 100);
-        c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(cl, 0, 0);
-        c.save(); c.beginPath(); c.rect(x, 0, W2 - x, H2); c.clip(); c.fillStyle = '#fff'; c.fillRect(x, 0, W2 - x, H2); drawR(c, cr, st.dx, st.dy, st.ang); c.restore();
+        c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2); c.drawImage(L, 0, 0);
+        c.save(); c.beginPath(); c.rect(x, 0, W2 - x, H2); c.clip(); c.fillStyle = '#fff'; c.fillRect(x, 0, W2 - x, H2); drawR(c, R, st.dx, st.dy, st.ang); c.restore();
         c.fillStyle = '#1f6feb'; c.fillRect(x - 2, 0, 4, H2);
         c.font = 'bold 22px sans-serif'; c.fillStyle = 'rgba(192,80,77,.9)'; c.fillText('◀ 左', Math.max(8, x - 80), 30); c.fillStyle = 'rgba(58,143,74,.9)'; c.fillText('右 ▶', Math.min(W2 - 70, x + 12), 30);
       };
       drawSwipe(); st.drawSwipe = drawSwipe;
       const move = e => { const r = out.getBoundingClientRect(); $('#ovSwipe').value = Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100)); drawSwipe(); };
-      out.addEventListener('pointerdown', e => { out.setPointerCapture(e.pointerId); move(e); });
-      out.addEventListener('pointermove', e => { if (e.buttons & 1) move(e); });
-      out.style.cursor = 'ew-resize';
+      out.addEventListener('pointerdown', e => { if (st.hand || e.button !== 0) return; out.setPointerCapture(e.pointerId); move(e); });
+      out.addEventListener('pointermove', e => { if (!st.hand && (e.buttons & 1)) move(e); });
+      out.classList.add('swipe');
       $('#ovStats').innerHTML = '画像上をドラッグして境界を動かせます';
     } else if (st.mode === 'blink') {
-      const frame = () => {
+      st.blinkFrame = () => {
         st.blinkOn = !st.blinkOn;
         c.fillStyle = '#fff'; c.fillRect(0, 0, W2, H2);
         if (st.blinkOn) drawR(c, cr, st.dx, st.dy, st.ang); else c.drawImage(cl, 0, 0);
         c.font = 'bold 26px sans-serif'; c.fillStyle = st.blinkOn ? 'rgba(58,143,74,.95)' : 'rgba(192,80,77,.95)';
         c.fillText(st.blinkOn ? '右' : '左', 14, 34);
       };
-      frame(); st.blink = setInterval(frame, 650);
-      $('#ovStats').innerHTML = '左右を交互に表示しています（変わった部分がちらつきます）';
+      st.blinkOn = true; st.blinkFrame(); startBlink();
+      out.addEventListener('click', () => { if (!st.hand) st.blinkFrame(); });
+      $('#ovStats').innerHTML = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます';
     }
     placeCanvas(out);
     view.appendChild(out);
   }
 
+  /* ---- 手のひらツール・ホイール ---- */
+  function setHand(on) {
+    st.hand = on; view.classList.toggle('hand', on);
+    $('#ovHand').classList.toggle('on', on); $('#ovHand').setAttribute('aria-pressed', on);
+  }
+  $('#ovHand').onclick = () => setHand(!st.hand);
+  // 通常：ホイール＝縦スクロール、Shift＋ホイール＝横スクロール（ブラウザの標準）、Ctrl＋ホイール＝拡大・縮小
+  // 手のひらツール：ホイール＝拡大・縮小。表示領域の上では、ブラウザの Ctrl＋ホイール（ページの拡大）より優先する
+  view.addEventListener('wheel', e => {
+    if (!e.ctrlKey && !e.metaKey && !st.hand) return;
+    e.preventDefault();
+    const r = view.getBoundingClientRect();
+    zoomBy(Math.exp(-Math.max(-300, Math.min(300, e.deltaY)) * 0.0015), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+  // ドラッグで表示位置を動かす（手のひらツール、または中ボタン）
+  let pan = null;
+  view.addEventListener('pointerdown', e => {
+    if (!((st.hand && e.button === 0) || e.button === 1)) return;
+    e.preventDefault(); view.setPointerCapture(e.pointerId);
+    pan = { x: e.clientX, y: e.clientY, sl: view.scrollLeft, st: view.scrollTop, moved: false }; view.classList.add('panning');
+  });
+  view.addEventListener('pointermove', e => {
+    if (!pan) return;
+    if (Math.abs(e.clientX - pan.x) + Math.abs(e.clientY - pan.y) > 3) pan.moved = true;
+    view.scrollLeft = pan.sl - (e.clientX - pan.x); view.scrollTop = pan.st - (e.clientY - pan.y);
+  });
+  const endPan = () => { pan = null; view.classList.remove('panning'); };
+  view.addEventListener('pointerup', endPan); view.addEventListener('pointercancel', endPan);
+
   function gotoRegion(d) {
-    if (st.mode !== 'diff' || !st.regions.length) return toast('変更箇所はありません');
+    if ((st.mode !== 'diff' && st.mode !== 'side') || !st.regions.length) return toast('変更箇所はありません');
     st.regIdx = (st.regIdx + d + st.regions.length) % st.regions.length;
     drawBoxes();
     const r = st.regions[st.regIdx], k = st.out.clientWidth / st.out.width;
     view.scrollTo({ top: st.out.offsetTop + r.y * k - view.clientHeight / 3, left: st.out.offsetLeft + r.x * k - view.clientWidth / 3, behavior: 'smooth' });
   }
 
+  // 比べるページの組（対応付けが有効ならその結果、なければ同じページ番号どうし）
+  async function pagePairs(pl, pr) {
+    const pairs = PageMatch.enabled() ? await ensureMatch() : null;
+    if (pairs) return pairs;
+    return Array.from({ length: Math.max(pl.length, pr.length) }, (_, i) => ({ l: i < pl.length ? i : -1, r: i < pr.length ? i : -1 }));
+  }
+  // 1組を、1ページずつ表示したときと同じ解像度・位置合わせで調べる（件数をそろえるため）
+  async function analyzePair(pl, pr, p, stop) {
+    if (p.l < 0 || p.r < 0) return { ...p, kind: p.l < 0 ? 'add' : 'del', regs: 0, pct: 0 };
+    const W = renderWidth(pl[p.l], pr[p.r]);
+    const a = await renderAt(0, p.l, W), b = await renderAt(1, p.r, W);
+    const key = `${p.l}:${p.r}`;
+    let off = st.align.get(key);
+    if (!off) { off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null; if (scanMode()) st.align.set(key, off); }
+    const res = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]) });
+    return { ...p, kind: 'pair', regs: res.regions.length, pct: res.ink ? res.changed / res.ink * 100 : 0, res, off };
+  }
   async function scan() {
     if (st.scanning) { st.scanning = false; return; }
     const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
     if (!pl || !pr) return toast('左右に文書を読み込んでください');
-    const n = Math.min(pl.length, pr.length), res = $('#ovScanRes'), btn = $('#ovScan');
+    const res = $('#ovScanRes'), btn = $('#ovScan');
     st.scanning = true; btn.textContent = '中止'; res.innerHTML = '';
-    const rows = [];
-    for (let i = 0; i < n && st.scanning; i++) {
-      res.innerHTML = `<span class="muted">調べています… ${i + 1} / ${n}</span>`;
-      // 1ページずつ表示したときと同じ解像度・位置合わせで調べる（件数をそろえるため）
-      const W = renderWidth(pl[i], pr[i]);
-      const a = await renderAt(0, i, W), b = await renderAt(1, i, W);
-      const key = `${i}:${i}`;
-      let off = st.align.get(key);
-      if (!off) { off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (!st.scanning) break; if (scanMode()) st.align.set(key, off); }
-      const r = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[i], pr[i]) });
-      if (!st.scanning) break;
-      rows.push({ i, pct: r.ink ? r.changed / r.ink * 100 : 0, regs: r.regions.length });
+    const pairs = await pagePairs(pl, pr), rows = [];
+    for (let k = 0; k < pairs.length && st.scanning; k++) {
+      res.innerHTML = `<span class="muted">調べています… ${k + 1} / ${pairs.length}</span>`;
+      const r = await analyzePair(pl, pr, pairs[k], () => !st.scanning);
+      if (!r || !st.scanning) break;
+      delete r.res; rows.push(r);
       await sleep(0);
     }
     const stopped = !st.scanning; st.scanning = false; btn.textContent = '全ページの差分を調べる';
     const mx = Math.max(1, ...rows.map(r => r.pct));
-    const changedPages = rows.filter(r => r.regs > 0).length;
-    res.innerHTML = `<div style="margin-bottom:4px">${stopped ? '（途中で中止）' : ''}変更ありのページ: <b>${changedPages}</b> / ${rows.length}${pl.length !== pr.length ? `<br><span style="color:#b42318">ページ数が違います（左 ${pl.length} / 右 ${pr.length}）</span>` : ''}</div>` +
-      `<table class="scan-table"><tr><th>頁</th><th>箇所</th><th style="width:50%">変化量</th></tr>` +
-      rows.map(r => `<tr data-i="${r.i}"><td>${r.i + 1}</td><td>${r.regs ? `<b style="color:#b42318">${r.regs}</b>` : '<span class="muted">0</span>'}</td><td><div class="bar" style="width:${r.regs ? Math.max(3, r.pct / mx * 100) : 0}%"></div></td></tr>`).join('') + '</table>';
-    $$('tr[data-i]', res).forEach(tr => tr.onclick = () => { st.l = st.r = +tr.dataset.i; setMode('diff'); });
+    const changedPages = rows.filter(r => r.regs > 0).length, adds = rows.filter(r => r.kind === 'add').length, dels = rows.filter(r => r.kind === 'del').length;
+    const pg = v => v < 0 ? '<span class="muted">—</span>' : v + 1;
+    res.innerHTML = `<div style="margin-bottom:4px">${stopped ? '（途中で中止）' : ''}変更ありのページ: <b>${changedPages}</b> / ${rows.filter(r => r.kind === 'pair').length}` +
+      (adds ? `<br><span style="color:#1a5fb4">追加されたページ: <b>${adds}</b></span>` : '') + (dels ? `<br><span style="color:#b42318">削除されたページ: <b>${dels}</b></span>` : '') +
+      (pl.length !== pr.length && !PageMatch.ready() ? `<br><span style="color:#b42318">ページ数が違います（左 ${pl.length} / 右 ${pr.length}）</span>` : '') + '</div>' +
+      `<table class="scan-table"><tr><th>左</th><th>右</th><th>箇所</th><th style="width:45%">変化量</th></tr>` +
+      rows.map((r, k) => `<tr data-k="${k}"><td>${pg(r.l)}</td><td>${pg(r.r)}</td><td>${r.kind === 'add' ? '<b style="color:#1a5fb4">追加</b>' : r.kind === 'del' ? '<b style="color:#b42318">削除</b>' : r.regs ? `<b style="color:#b42318">${r.regs}</b>` : '<span class="muted">0</span>'}</td><td>${r.kind === 'pair' ? `<div class="bar" style="width:${r.regs ? Math.max(3, r.pct / mx * 100) : 0}%"></div>` : ''}</td></tr>`).join('') + '</table>';
+    $$('tr[data-k]', res).forEach(tr => tr.onclick = () => { const r = rows[+tr.dataset.k]; st.l = r.l; st.r = r.r; setMode('diff'); });
   }
 
+  /* ---- レポート：全ページの差分画像（枠と番号付き）と変更箇所の一覧 ---- */
+  async function exportReport() {
+    const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
+    if (!pl || !pr) return toast('左右に文書を読み込んでください');
+    const scope = await Report.ask('重ね合わせ比較のレポート', 'レポートに差分画像を載せるページを選んでください。<br><span class="muted">追加・削除されたページは、どちらを選んでも載せます。変更のないページは一覧にだけ載せます（「すべて」を選ぶと画像も載せます）。ページ数が多いと時間がかかります。</span>',
+      [{ label: 'すべてのページ', value: 'all' }, { label: '変更のあるページだけ', value: 'changed', primary: true }]);
+    if (!scope) return;
+    let html;
+    await withBusy('レポートを作成しています…', async () => {
+      const pairs = await pagePairs(pl, pr), rows = [], secs = [];
+      const pg = v => v < 0 ? '—' : v + 1;
+      for (let k = 0; k < pairs.length; k++) {
+        $('#busyMsg').textContent = `レポートを作成しています… ${k + 1} / ${pairs.length}`;
+        const r = await analyzePair(pl, pr, pairs[k], () => false);
+        rows.push(r);
+        const title = `左 ${pg(r.l)} ページ ／ 右 ${pg(r.r)} ページ`;
+        if (r.kind !== 'pair') {
+          // 追加・削除されたページは、そのページだけを載せる
+          const side = r.kind === 'add' ? 1 : 0, idx = side ? r.r : r.l, cv = await renderAt(side, idx, Math.min(1400, renderWidth(side ? null : pl[idx], side ? pr[idx] : null)));
+          secs.push(`<h2 id="p${k}">${title}　<span class="tag ${r.kind}">${r.kind === 'add' ? '右で追加' : '左から削除'}</span></h2><figure><img src="${Report.jpeg(cv)}" alt=""><figcaption>${r.kind === 'add' ? '右だけにあるページ（追加されたページ）' : '左だけにあるページ（削除されたページ）'}</figcaption></figure>`);
+        } else if (scope === 'all' || r.regs) {
+          const res = r.res, cv = document.createElement('canvas'); cv.width = res.W; cv.height = res.H;
+          const c = cv.getContext('2d'); c.putImageData(res.img, 0, 0); drawBoxesOn(c, res.regions, -1);
+          const list = res.regions.map((g, i) => `<tr><td class="num">${i + 1}</td><td>横 ${Math.round(g.x / res.W * 100)}%・縦 ${Math.round(g.y / res.H * 100)}%</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td></tr>`).join('');
+          secs.push(`<h2 id="p${k}">${title}　${r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</h2>` +
+            `<figure><img src="${Report.jpeg(cv)}" alt=""><figcaption>赤＝左にだけある（削除・変更前）、青＝右にだけある（追加・変更後）、橙の枠＝変更箇所。変化量 ${r.pct.toFixed(2)}%` +
+            `${r.off && (r.off[0] || r.off[1] || r.off[2]) ? `。右の位置合わせ：X ${r.off[0]} / Y ${r.off[1]}px${r.off[2] ? ` / 回転 ${r.off[2]}°` : ''}` : ''}</figcaption></figure>` +
+            (list ? `<table class="list"><thead><tr><th style="width:50px">番号</th><th>位置（ページの左上から）</th><th>大きさ（ページに対する割合）</th></tr></thead><tbody>${list}</tbody></table>` : ''));
+          cv.width = cv.height = 0;
+        }
+        delete r.res;
+        await sleep(0);
+      }
+      const nPair = rows.filter(r => r.kind === 'pair').length, nChg = rows.filter(r => r.regs).length;
+      const nAdd = rows.filter(r => r.kind === 'add').length, nDel = rows.filter(r => r.kind === 'del').length;
+      const summary = `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
+        rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
+      const cond = [`差分の感度 ${$('#ovThr').value}`, `ずれの許容 ${$('#ovTolPx').value}px`, `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
+      html = Report.page({
+        title: `重ね合わせレポート - ${S[0].name} / ${S[1].name}`, heading: '重ね合わせ比較レポート',
+        meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}<br>比較条件: ${esc(cond)}`,
+        body: (await Report.bothInfo()) + summary + secs.join('')
+      });
+    });
+    if (html) download(`重ね合わせレポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');
+  }
+  $('#ovReport').onclick = exportReport;
+
+  // 右側のパネルには、そのモードで使う項目だけを出す
+  function showPanelFor(m) { $$('.ov-side [data-modes]').forEach(el => { el.hidden = !el.dataset.modes.split(' ').includes(m); }); }
   function setMode(m) {
     st.mode = m;
     $$('#ovModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
-    $('#ovOpacityRow').style.display = m === 'overlay' ? '' : 'none';
-    $('#ovSwipeRow').style.display = m === 'swipe' ? '' : 'none';
+    showPanelFor(m);
     update();
   }
   function step(side, d) {
     const lsel = $('#ovLPage'), rsel = $('#ovRPage');
-    const nl = lsel.options.length, nr = rsel.options.length;
-    if ($('#ovLink').checked) { st.l = Math.max(0, Math.min(nl - 1, st.l + d)); st.r = Math.max(0, Math.min(nr - 1, st.r + d)); }
+    const nl = lsel.options.length - 1, nr = rsel.options.length - 1; // 先頭は「—」
+    const pairs = $('#ovLink').checked && PageMatch.ready();
+    if (pairs) {
+      // 連動中で対応付けがあるときは、組の順にページを送る（挿入・削除されたページは片側だけを表示）
+      const k = Math.max(0, Math.min(pairs.length - 1, pairIndex(pairs) + d));
+      st.l = pairs[k].l; st.r = pairs[k].r;
+    } else if ($('#ovLink').checked) { st.l = Math.max(0, Math.min(nl - 1, st.l + d)); st.r = Math.max(0, Math.min(nr - 1, st.r + d)); }
     else if (side === 0) st.l = Math.max(0, Math.min(nl - 1, st.l + d));
     else st.r = Math.max(0, Math.min(nr - 1, st.r + d));
     update();
@@ -355,12 +550,32 @@ const OV = (() => {
   $$('#ovModes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
   $('#ovLPrev').onclick = () => step(0, -1); $('#ovLNext').onclick = () => step(0, 1);
   $('#ovRPrev').onclick = () => step(1, -1); $('#ovRNext').onclick = () => step(1, 1);
-  $('#ovLPage').onchange = e => { const v = +e.target.value, d = v - st.l; if ($('#ovLink').checked) st.r = Math.max(0, Math.min($('#ovRPage').options.length - 1, st.r + d)); st.l = v; update(); };
-  $('#ovRPage').onchange = e => { st.r = +e.target.value; update(); };
+  $('#ovLPage').onchange = e => {
+    const v = +e.target.value, d = v - st.l, pairs = PageMatch.ready();
+    if ($('#ovLink').checked) st.r = pairs ? pairs.find(p => p.l === v).r : Math.max(0, Math.min($('#ovRPage').options.length - 2, st.r + d));
+    st.l = v; update();
+  };
+  $('#ovRPage').onchange = e => {
+    const v = +e.target.value, pairs = PageMatch.ready();
+    if ($('#ovLink').checked && pairs) st.l = pairs.find(p => p.r === v).l;
+    st.r = v; update();
+  };
+  $('#ovMatch').checked = PageMatch.enabled();
+  $('#ovMatch').onchange = async () => {
+    Settings.set('pageMatch', $('#ovMatch').checked);
+    $('#ovScanRes').innerHTML = '';
+    if ($('#ovMatch').checked) await ensureMatch(); else { $('#ovMatchInfo').innerHTML = ''; if (st.l < 0 || st.r < 0) { st.l = Math.max(0, st.l); st.r = Math.max(0, st.r); } }
+    update();
+  };
   $('#ovOpacity').oninput = () => { if (st.mode === 'overlay') update(); };
   $('#ovSwipe').oninput = () => { if (st.mode === 'swipe' && st.drawSwipe) st.drawSwipe(); };
   let thrT = 0; $('#ovThr').oninput = () => { clearTimeout(thrT); thrT = setTimeout(() => { if (st.mode === 'diff') update(); }, 150); };
-  $('#ovBoxes').onchange = drawBoxes;
+  $('#ovBoxes').onchange = () => { if (st.mode === 'side' && !st.side?.res) update(); else drawBoxes(); };
+  $('#ovSideHl').onchange = () => { if (st.side && !st.side.res) update(); else drawSide(); };
+  for (const id of ['#ovTint', '#ovColL', '#ovColR']) $(id).addEventListener('change', () => { if (st.mode === 'overlay' || st.mode === 'swipe') update(); });
+  $('#ovBlinkMs').oninput = () => { $('#ovBlinkVal').textContent = (+$('#ovBlinkMs').value / 1000).toFixed(2); startBlink(); };
+  $('#ovBlinkManual').onchange = () => { startBlink(); if (st.mode === 'blink') $('#ovStats').innerHTML = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます'; };
+  $('#ovBlinkToggle').onclick = () => { if (st.blinkFrame) st.blinkFrame(); };
   $('#ovFaint').onchange = () => update();
   let tolT = 0;
   $('#ovTolPx').oninput = () => { $('#ovTolVal').textContent = $('#ovTolPx').value; clearTimeout(tolT); tolT = setTimeout(update, 150); };
@@ -391,13 +606,26 @@ const OV = (() => {
     if (App.tab === 'overlay') update();
   });
   const zs = $('#ovZoom');
-  zs.onchange = () => { st.zoom = zs.value; update(); };
-  const ZS = ['0.5', '0.75', '1', '1.5', '2'];
-  $('#ovZIn').onclick = () => { const i = ZS.indexOf(st.zoom); st.zoom = i < 0 ? '1' : ZS[Math.min(ZS.length - 1, i + 1)]; zs.value = st.zoom; update(); };
-  $('#ovZOut').onclick = () => { const i = ZS.indexOf(st.zoom); st.zoom = i < 0 ? '0.75' : ZS[Math.max(0, i - 1)]; zs.value = st.zoom; update(); };
-  let rt = 0; window.addEventListener('resize', () => { if (App.tab === 'overlay' && st.zoom === 'fit') { clearTimeout(rt); rt = setTimeout(() => { $$('canvas', view).forEach(c => placeCanvas(c, st.mode === 'side')); }, 100); } });
+  zs.onchange = () => { if (zs.value !== 'custom') rezoom(zs.value); };
+  // ＋／－は今の倍率から 1.25 倍ずつ（幅・縦に合わせているときも、その倍率から）
+  $('#ovZIn').onclick = () => zoomBy(1.25);
+  $('#ovZOut').onclick = () => zoomBy(1 / 1.25);
+  let rt = 0; window.addEventListener('resize', () => { if (App.tab === 'overlay' && (st.zoom === 'fit' || st.zoom === 'fith')) { clearTimeout(rt); rt = setTimeout(() => { $$('canvas', view).forEach(c => placeCanvas(c, c.dataset.half === '1')); }, 100); } });
 
-  function activate() { if (st.dirty) update(); }
+  showPanelFor(st.mode);
+  // ページの対応付けを（必要なら裏で）調べ、終わったら、連動中なら右のページを左に対応するページへ合わせ直す
+  async function refreshMatch() {
+    const before = PageMatch.ready(), gen = st.gen;
+    const pairs = await ensureMatch();
+    if (pairs && !before && $('#ovLink').checked && App.tab === 'overlay' && gen === st.gen) {
+      const p = pairs.find(q => q.l === st.l);
+      if (p && p.r !== st.r) { st.r = p.r; update(); }
+    }
+  }
+  async function activate() {
+    if (st.dirty) update();
+    refreshMatch();
+  }
   function deactivate() { stopBlink(); }
   function invalidate() {
     st.gen++; st.scanning = false; // 実行中の描画・位置合わせ・一括チェックは捨てる（前のファイルの結果を残さないように）
@@ -406,14 +634,21 @@ const OV = (() => {
     st.align.clear(); st.dx = 0; st.dy = 0; st.ang = 0; showOffset();
     // 「1px程度のずれを無視」はスキャン画像のときだけ既定でON（CADやWordから作ったPDFでは小さな変更を見落とさないようOFF）
     $('#ovTolPx').value = scanMode() ? 2 : 0; $('#ovTolVal').textContent = $('#ovTolPx').value;
-    if (App.tab === 'overlay') update();
+    $('#ovMatchInfo').innerHTML = ''; // 前のファイルの対応付けの結果を残さない
+    if (App.tab === 'overlay') { update(); refreshMatch(); }
   }
   function onKey(e) {
-    if (e.target.matches('input,select,textarea')) return false;
-    if (e.key === 'ArrowRight' || e.key === 'PageDown') { step(0, 1); return true; }
-    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { step(0, -1); return true; }
+    const typing = e.target.matches('textarea,input[type=text],input[type=number],input[type=search]');
+    // PageUp／PageDown は、ページ番号の選択欄やスライダーにフォーカスがあってもページ送りにする
+    if (!typing && e.key === 'PageDown') { step(0, 1); return true; }
+    if (!typing && e.key === 'PageUp') { step(0, -1); return true; }
+    if (e.target.matches('input,select,textarea') || e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (e.key === 'ArrowRight') { step(0, 1); return true; }
+    if (e.key === 'ArrowLeft') { step(0, -1); return true; }
     if (e.key === 'n') { gotoRegion(1); return true; }
+    if (e.key === 'h' || e.key === 'H') { setHand(!st.hand); return true; }
+    if (e.key === ' ' && st.mode === 'blink' && st.blinkFrame) { st.blinkFrame(); return true; }
     return false;
   }
-  return { activate, deactivate, invalidate, onKey, setPages: (l, r) => { st.l = l; st.r = r; } };
+  return { activate, deactivate, invalidate, onKey, st, setPages: (l, r) => { st.l = l; st.r = r; } };
 })();

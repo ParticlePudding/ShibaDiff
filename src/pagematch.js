@@ -1,0 +1,158 @@
+/* ページの対応付け：途中でページが挿入・削除されても、似ているページどうしを組にする。
+   ページ表示の連動、重ね合わせのページ送り、全ページ一括チェックで使う */
+const PageMatch = (() => {
+  const st = { key: '', pairs: null, busy: null, info: '' };
+  // 組の配列：{ l, r }（片側にしかないページは、反対側が -1）
+  const enabled = () => Settings.get('pageMatch') !== false;
+  const keyOf = () => (S[0] && S[1]) ? `${S[0].key}\u0001${S[1].key}\u0001${S[0].lines.length}\u0001${S[1].lines.length}` : '';
+
+  /* ---- ページごとの特徴 ---- */
+  // PDF の抽出文字（「===== ページ N =====」で区切られている）をページごとに分ける
+  function pageTexts(s, n) {
+    if (s.kind !== 'pdf' || s.noText || s.noTextLayer) return null; // スキャン（文字情報なし）は見た目で比べる
+    const out = Array.from({ length: n }, () => []); let k = -1;
+    for (const ln of s.lines) {
+      const m = /^===== ページ (\d+) =====$/.exec(ln);
+      if (m) { k = +m[1] - 1; continue; }
+      if (k >= 0 && k < n) out[k].push(ln);
+    }
+    const feats = out.map(a => ({ lines: lineSet(a), grams: bigrams(a.join('\n')) }));
+    // 文字がほとんどないページが半分を超えるなら、文字では比べられない（見た目で比べる）
+    if (feats.filter(f => f.grams.total < 20).length * 2 > n) return null;
+    return feats;
+  }
+  function bigrams(t) {
+    const s = t.normalize('NFKC').replace(/\s+/g, ''), m = new Map();
+    for (let i = 0; i < s.length - 1; i++) { const g = s.substr(i, 2); m.set(g, (m.get(g) || 0) + 1); }
+    m.total = Math.max(0, s.length - 1); return m;
+  }
+  // 行の集まり（空白を詰めて正規化）。同じページなら、少し書き換えても多くの行が一致する
+  function lineSet(lines) {
+    const m = new Map(); let total = 0;
+    for (const l of lines) { const k = l.normalize('NFKC').replace(/\s+/g, ''); if (!k) continue; m.set(k, (m.get(k) || 0) + 1); total++; }
+    m.total = total; return m;
+  }
+  // ページの似ている度合い：行が3行以上あれば行の一致で、少なければ文字の並び（2文字の組）で比べる
+  function textSim(a, b) {
+    if (a.lines.total >= 3 && b.lines.total >= 3) return dice(a.lines, b.lines);
+    return dice(a.grams, b.grams);
+  }
+  function dice(a, b) {
+    if (!a.total && !b.total) return 1;
+    if (!a.total || !b.total) return 0;
+    let c = 0; const [x, y] = a.size < b.size ? [a, b] : [b, a];
+    for (const [g, n] of x) { const k = y.get(g); if (k) c += Math.min(n, k); }
+    return 2 * c / (a.total + b.total);
+  }
+  // 見た目の特徴：ページを 32×44 に縮小した濃さ（ぼかして、少しのずれ・傾きでは変わらないようにする）
+  const TW = 48, TH = 66;
+  async function thumb(pg) {
+    const c = document.createElement('canvas'), scale = Math.min(1, 160 / Math.max(pg.w, pg.h));
+    await pg.draw(c, scale);
+    const t = document.createElement('canvas'); t.width = TW; t.height = TH;
+    const x = t.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high';
+    x.fillStyle = '#fff'; x.fillRect(0, 0, TW, TH); x.drawImage(c, 0, 0, TW, TH);
+    const d = x.getImageData(0, 0, TW, TH).data, v = new Float32Array(TW * TH);
+    for (let i = 0; i < v.length; i++) v[i] = 255 - (77 * d[i * 4] + 150 * d[i * 4 + 1] + 29 * d[i * 4 + 2]) / 256;
+    c.width = c.height = 0;
+    return v;
+  }
+  function cosine(a, b) {
+    let ab = 0, aa = 0, bb = 0;
+    for (let i = 0; i < a.length; i++) { ab += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i]; }
+    if (aa < 1e3 && bb < 1e3) return 1; // どちらもほぼ白紙
+    if (aa < 1e3 || bb < 1e3) return 0;
+    return ab / Math.sqrt(aa * bb);
+  }
+
+  /* ---- 並びをそろえる（ページの挿入・削除を許す動的計画法） ---- */
+  // sim(i, j) が T を超える組だけを「同じページ」として組にし、合計が最大になる並びを選ぶ。
+  // 組にならなかった左右のページが同じ数だけ並んでいる区間は、順に組にする（内容が大きく変わったページ）
+  function align(n, m, sim, T) {
+    const band = Math.abs(n - m) + 30; // 対角線から離れすぎた組は調べない（ページ数が多いときの計算量を抑える）
+    const W = m + 1, dp = new Float32Array((n + 1) * W), bt = new Uint8Array((n + 1) * W);
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= m; j++) {
+      if (!i && !j) continue;
+      let best = -Infinity, how = 0;
+      if (i) { const v = dp[(i - 1) * W + j]; if (v > best) { best = v; how = 1; } }
+      if (j) { const v = dp[i * W + j - 1]; if (v > best) { best = v; how = 2; } }
+      if (i && j && Math.abs(i - j - (n - m) * i / Math.max(1, n)) <= band) {
+        const g = sim(i - 1, j - 1) - T;
+        if (g > 0) { const v = dp[(i - 1) * W + j - 1] + g; if (v > best) { best = v; how = 3; } }
+      }
+      dp[i * W + j] = best; bt[i * W + j] = how;
+    }
+    const raw = [];
+    for (let i = n, j = m; i || j;) {
+      const h = bt[i * W + j];
+      if (h === 3) { raw.push({ l: i - 1, r: j - 1 }); i--; j--; }
+      else if (h === 1) { raw.push({ l: i - 1, r: -1 }); i--; }
+      else { raw.push({ l: -1, r: j - 1 }); j--; }
+    }
+    raw.reverse();
+    // 組にならなかった区間を整理する
+    const out = [];
+    for (let k = 0; k < raw.length;) {
+      if (raw[k].l >= 0 && raw[k].r >= 0) { out.push(raw[k++]); continue; }
+      const L = [], R = [];
+      while (k < raw.length && !(raw[k].l >= 0 && raw[k].r >= 0)) { if (raw[k].l >= 0) L.push(raw[k].l); else R.push(raw[k].r); k++; }
+      const c = Math.min(L.length, R.length);
+      if (L.length === R.length) for (let q = 0; q < c; q++) out.push({ l: L[q], r: R[q] });
+      else { L.forEach(l => out.push({ l, r: -1 })); R.forEach(r => out.push({ l: -1, r })); }
+    }
+    // 左右の番号順に並べ直す（左のみ・右のみが、前後の組の間に来るように）
+    return out;
+  }
+
+  /* ---- 計算 ---- */
+  async function compute(onProgress) {
+    const key = keyOf();
+    if (!key) { st.key = ''; st.pairs = null; return null; }
+    if (st.key === key && st.pairs) return st.pairs;
+    if (st.busy && st.busy.key === key) return st.busy.p;
+    const p = (async () => {
+      const [pl, pr] = await Promise.all([S[0].getPages(), S[1].getPages()]);
+      const n = pl.length, m = pr.length;
+      let sim = null;
+      const tl = pageTexts(S[0], n), tr = pageTexts(S[1], m);
+      if (tl && tr) sim = (i, j) => textSim(tl[i], tr[j]);
+      else if (n !== m) {
+        // 文字がない（スキャン）ときは見た目で比べる。ページ数が同じなら1対1とみなす（全ページの縮小画像を作らない）
+        const vl = [], vr = [], tot = n + m;
+        for (let i = 0; i < n; i++) { vl.push(await thumb(pl[i])); if (onProgress) onProgress(i + 1, tot); if (keyOf() !== key) return null; }
+        for (let j = 0; j < m; j++) { vr.push(await thumb(pr[j])); if (onProgress) onProgress(n + j + 1, tot); if (keyOf() !== key) return null; }
+        sim = (i, j) => cosine(vl[i], vr[j]);
+      }
+      const pairs = sim ? align(n, m, sim, tl ? 0.3 : 0.55) : Array.from({ length: Math.max(n, m) }, (_, i) => ({ l: i < n ? i : -1, r: i < m ? i : -1 }));
+      return pairs;
+    })();
+    st.busy = { key, p };
+    const pairs = await p;
+    if (st.busy && st.busy.key === key) st.busy = null;
+    if (pairs && keyOf() === key) { st.key = key; st.pairs = pairs; }
+    return pairs;
+  }
+  function invalidate() { st.key = ''; st.pairs = null; st.busy = null; }
+  const ready = () => st.key === keyOf() && st.pairs && enabled() ? st.pairs : null;
+  // 片側のページ i に対応する、反対側のページ番号（対応がなければ直前の対応から推定）
+  function other(side, i, n) {
+    const pairs = ready();
+    if (!pairs) return Math.max(0, Math.min(i, n - 1));
+    const me = side ? 'r' : 'l', ot = side ? 'l' : 'r';
+    let last = 0;
+    for (const p of pairs) {
+      if (p[ot] >= 0) last = p[ot];
+      if (p[me] === i) return Math.max(0, Math.min(p[ot] >= 0 ? p[ot] : last, n - 1));
+    }
+    return Math.max(0, Math.min(i, n - 1));
+  }
+  // 人が読める説明（追加・削除されたページ）
+  function describe(pairs) {
+    if (!pairs) return '';
+    const add = pairs.filter(p => p.l < 0).map(p => p.r + 1), del = pairs.filter(p => p.r < 0).map(p => p.l + 1);
+    const fmt = a => a.length > 6 ? a.slice(0, 6).join('・') + ` ほか ${a.length - 6}` : a.join('・');
+    if (!add.length && !del.length) return 'ページの挿入・削除はありません';
+    return [add.length ? `右で追加されたページ：${fmt(add)}` : '', del.length ? `左から削除されたページ：${fmt(del)}` : ''].filter(Boolean).join('<br>');
+  }
+  return { compute, invalidate, ready, other, describe, enabled, _align: align };
+})();

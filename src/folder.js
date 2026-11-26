@@ -102,12 +102,6 @@ const FD = (() => {
     const inp = $('input', sl);
     $('.fdPick', sl).onclick = () => inp.click();
     inp.onchange = () => { fromInput(side, inp.files); inp.value = ''; };
-    sl.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); sl.classList.add('drag'); });
-    sl.addEventListener('dragleave', () => sl.classList.remove('drag'));
-    sl.addEventListener('drop', async e => {
-      e.preventDefault(); e.stopPropagation(); sl.classList.remove('drag'); $('#dropOverlay').classList.remove('on'); App.resetDrag();
-      await dropFolders(e.dataTransfer, side);
-    });
   });
   async function dropFolders(dt, side = 0) {
     const ents = Array.from(dt.items || []).map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(e => e && e.isDirectory);
@@ -117,6 +111,32 @@ const FD = (() => {
       else setFolder(side, ents[0].name, await fromEntry(ents[0]));
     });
   }
+  /* ---- CSV・レポート ---- */
+  const ROWS_SORTED = () => st.rows.slice().sort((x, y) => x.path < y.path ? -1 : x.path > y.path ? 1 : 0);
+  const dt = f => f && f.lastModified ? fmtDate(f.lastModified) : '';
+  $('#fdCsv').onclick = () => {
+    if (!st.rows.length) return toast('先にフォルダを比較してください');
+    const q = v => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [['ファイル', '状態', '左サイズ', '右サイズ', '左 更新日時', '右 更新日時'].map(q).join(',')];
+    for (const r of ROWS_SORTED()) lines.push([r.path, ST[r.st][0], r.a ? r.a.size : '', r.b ? r.b.size : '', dt(r.a), dt(r.b)].map(q).join(','));
+    // Excel で文字化けしないよう、BOM 付き UTF-8・CRLF にする
+    download(`フォルダ比較_${st.names[0] || '左'}_${st.names[1] || '右'}.csv`, '\ufeff' + lines.join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
+  };
+  $('#fdReport').onclick = () => {
+    if (!st.rows.length) return toast('先にフォルダを比較してください');
+    const c = { same: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
+    const order = { diff: 0, left: 1, right: 2, wait: 3, same: 4 };
+    const rows = ROWS_SORTED().sort((x, y) => order[x.st] - order[y.st]);
+    const body = `<table class="files"><tr><th>左</th><td>${esc(st.names[0])}</td></tr><tr><th>右</th><td>${esc(st.names[1])}</td></tr></table>` +
+      `<table class="list"><thead><tr><th>ファイル</th><th>状態</th><th class="num">左サイズ</th><th class="num">右サイズ</th><th>左 更新日時</th><th>右 更新日時</th></tr></thead><tbody>` +
+      rows.map(r => `<tr><td>${esc(r.path)}</td><td><span class="tag ${r.st}">${ST[r.st][0]}</span></td><td class="num">${r.a ? fmtSize(r.a.size) : ''}</td><td class="num">${r.b ? fmtSize(r.b.size) : ''}</td><td>${dt(r.a)}</td><td>${dt(r.b)}</td></tr>`).join('') + '</tbody></table>';
+    const html = Report.page({
+      title: `フォルダ比較レポート - ${st.names[0]} / ${st.names[1]}`, heading: 'フォルダ比較レポート',
+      meta: `<b>全 ${fmtNum(st.rows.length)} ファイル</b>　相違 ${c.diff}・左のみ ${c.left}・右のみ ${c.right}・同一 ${c.same}${c.wait ? `・比較中 ${c.wait}` : ''}<br>比較方法: ${$('#fdContent').checked ? '内容まで比較' : 'サイズだけで判定'}`,
+      body, css: '.tag.wait{background:#888}'
+    });
+    download(`フォルダ比較レポート_${st.names[0] || '左'}.html`, html, 'text/html;charset=utf-8');
+  };
   $('#fdRun').onclick = run;
   $('#fdContent').onchange = () => { if (st.files[0] && st.files[1]) run(); };
   $$('.fdFilter').forEach(c => c.onchange = render);
@@ -128,7 +148,7 @@ const FD = (() => {
     $$('#fdTable tbody tr').forEach(x => x.classList.toggle('sel', x === tr));
   });
   document.addEventListener('keydown', e => {
-    if (App.tab !== 'folder' || e.key !== 'Enter' || st.sel < 0 || e.target.matches('input,select,textarea,button')) return;
+    if (App.mode !== 'folder' || e.key !== 'Enter' || st.sel < 0 || e.target.matches('input,select,textarea,button')) return;
     e.preventDefault(); openRow(st.sel);
   });
   $('#fdTable tbody').addEventListener('dblclick', e => { const tr = e.target.closest('tr'); if (tr) openRow(+tr.dataset.i); });

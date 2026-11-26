@@ -18,11 +18,11 @@ async def main():
         check('本物の負数は −50', '"−50' in d, d)
 
         # すべて削除で開いている間の設定も初期値に戻る
-        await t.js("Settings.set('fontSize','l'); Settings.set('stampName','山田')")
+        await t.js("Settings.set('fontSize','l'); Settings.set('wrap', true)")
         await t.click('#btnSettings'); await t.click('#setData'); await t.page.wait_for_timeout(300)
         await t.js("window.confirm=()=>true")
         await t.page.click('#modal .foot button >> nth=1'); await t.page.wait_for_timeout(300)
-        r = await t.js("[Settings.get('fontSize'), Settings.get('stampName'), document.documentElement.dataset.fs]")
+        r = await t.js("[Settings.get('fontSize'), Settings.get('wrap') ? '' : '', document.documentElement.dataset.fs]")
         check('すべて削除で設定が初期化', r == ['m', '', 'm'], r)
         await t.page.keyboard.press('Escape'); await t.page.wait_for_timeout(200); await t.page.keyboard.press('Escape')
 

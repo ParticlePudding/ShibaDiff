@@ -1,14 +1,24 @@
 <header id="top">
   <div class="brand"><i></i><span class="bt">ShibaDiff</span></div>
-  <nav id="tabs" role="tablist" aria-label="機能の切り替え">
-    <button role="tab" data-tab="text" class="on">テキスト比較</button>
-    <button role="tab" data-tab="page">ページ表示・注釈</button>
-    <button role="tab" data-tab="overlay">重ね合わせ比較</button>
-    <button role="tab" data-tab="folder">フォルダ比較</button>
+  <div id="modeSw" class="seg" role="group" aria-label="比較の種類">
+    <button data-mode="file" class="on" aria-pressed="true">ファイル比較</button>
+    <button data-mode="folder" aria-pressed="false">フォルダ比較</button>
+  </div>
+  <nav id="tabs" role="tablist" aria-label="表示の切り替え">
+    <button role="tab" data-tab="text" class="on">テキスト</button>
+    <button role="tab" data-tab="page">ページ・注釈</button>
+    <button role="tab" data-tab="overlay">重ね合わせ</button>
   </nav>
+  <button id="btnBackFolder" class="hdr-btn" hidden title="フォルダ比較の一覧に戻る">← フォルダ一覧</button>
+  <div id="hdrFiles">
+    <button class="hf" data-side="0" title="左のファイル"><span class="badge">左</span><span class="nm">未選択</span></button>
+    <button class="hf" data-side="1" title="右のファイル"><span class="badge">右</span><span class="nm">未選択</span></button>
+    <button id="btnSlots" class="hdr-btn" aria-expanded="true" aria-controls="slots" title="ファイル欄（文字コード・保存・閉じるなど）を開く／たたむ">▾</button>
+  </div>
   <div class="right">
+    <button id="btnFull" title="全画面表示（ヘッダを隠す）。戻すときは Esc または右上のボタン">⛶ 全画面</button>
     <button id="btnClear" title="左右のファイルを閉じる">すべて閉じる</button>
-    <button id="btnSettings" title="設定（表示・日付印・保存データ・このツールについて）">設定</button>
+    <button id="btnSettings" title="設定（表示・保存データ・このツールについて）">設定</button>
     <button id="btnHelp">ヘルプ</button>
   </div>
 </header>
@@ -49,13 +59,16 @@
         <button id="tRedo" title="やり直し (Ctrl+Y)">↷</button>
       </div>
       <div class="sep"></div>
-      <div class="grp">
-        <select id="oWs" title="空白（スペース・タブ）の扱い"><option value="none">空白も比較</option><option value="change">空白の量を無視</option><option value="all">空白を無視</option></select>
-        <label><input type="checkbox" id="oCase">大小文字無視</label>
-        <label><input type="checkbox" id="oBlank">空行無視</label>
-        <label><input type="checkbox" id="oZen">全角半角無視</label>
-        <label><input type="checkbox" id="oFold">差分のみ表示</label>
-      </div>
+      <label title="差分のある行と前後3行だけを表示"><input type="checkbox" id="oFold">差分のみ表示</label>
+      <details class="pop" id="oPop">
+        <summary title="空白・大文字小文字・空行・全角半角の扱い">比較条件 <span id="oBadge" class="pop-badge" hidden></span></summary>
+        <div class="pop-body">
+          <label>空白 <select id="oWs" title="空白（スペース・タブ）の扱い"><option value="none">空白も比較</option><option value="change">空白の量を無視</option><option value="all">空白を無視</option></select></label>
+          <label><input type="checkbox" id="oCase">大文字・小文字を区別しない</label>
+          <label><input type="checkbox" id="oBlank">空行を無視</label>
+          <label><input type="checkbox" id="oZen">全角・半角を区別しない</label>
+        </div>
+      </details>
       <div class="sep"></div>
       <div class="grp">
         <input type="text" id="searchBox" placeholder="検索 (Ctrl+F)">
@@ -88,12 +101,10 @@
         <button class="toolbtn" data-tool="marker" title="蛍光マーカー">🖍 マーカー</button>
         <button class="toolbtn" data-tool="rect" title="四角枠">▭ 枠</button>
         <button class="toolbtn" data-tool="note" title="付箋（クリックした位置に貼る）">📝 付箋</button>
-        <button class="toolbtn" data-tool="stamp" title="日付印">㊞ 日付印</button>
         <button class="toolbtn" data-tool="eraser" title="消しゴム（クリックした注釈を削除）">⌫ 消去</button>
       </div>
       <div class="grp swatches" id="swatches"></div>
       <select id="annWidth" title="線の太さ"><option value="1">細</option><option value="2" selected>中</option><option value="4">太</option></select>
-      <button id="stampCfg" title="日付印の設定">印設定</button>
       <div class="sep"></div>
       <div class="grp">
         <button id="zOut">－</button>
@@ -114,6 +125,7 @@
         <button id="annExport" title="注釈をファイルに保存">注釈を保存</button>
         <button id="annImport" title="保存した注釈を読み込む">注釈を読込</button>
         <button id="pvPrint" title="注釈込みで印刷（PDFとして保存も可）">印刷 / PDF</button>
+        <button id="pvReport" title="注釈を付けたページの画像と、付箋の内容の一覧を、HTMLレポートに出力">レポート</button>
       </div>
     </div>
     <div class="pv-wrap" id="pvWrap" data-tool="select">
@@ -152,21 +164,30 @@
       </div>
       <div class="sep"></div>
       <div class="grp">
-        <button id="ovZOut">－</button><select id="ovZoom"><option value="fit">幅に合わせる</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option></select><button id="ovZIn">＋</button>
+        <button id="ovHand" class="toolbtn" aria-pressed="false" title="手のひらツール（H）：ドラッグで表示位置を移動、ホイールで拡大・縮小">✋ 移動</button>
+        <button id="ovZOut" title="縮小">－</button><select id="ovZoom" title="表示の大きさ（Ctrl+ホイールでも拡大・縮小）"><option value="fit">幅に合わせる</option><option value="fith">縦に合わせる</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option><option value="custom" hidden>—</option></select><button id="ovZIn" title="拡大">＋</button>
       </div>
+      <div class="grow"></div>
+      <button id="ovReport" title="全ページの差分画像と変更箇所の一覧を、HTMLレポートに出力">レポート</button>
     </div>
     <div class="ov-wrap">
-      <div class="ov-view" id="ovView"><div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します</div></div>
+      <div class="ov-view" id="ovView" tabindex="0" aria-label="重ね合わせの表示領域"><div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します</div></div>
       <div class="ov-side">
-        <h4>表示の調整</h4>
+        <h4 id="ovCtlTitle">表示の調整</h4>
         <div class="ov-ctl">
-          <div id="ovOpacityRow" style="display:none">右の濃さ <input type="range" id="ovOpacity" min="0" max="100" value="50"></div>
-          <div id="ovSwipeRow" style="display:none">境界位置 <input type="range" id="ovSwipe" min="0" max="100" value="50"></div>
-          <div>差分の感度 <input type="range" id="ovThr" min="5" max="160" value="60"></div>
-          <label><input type="checkbox" id="ovBoxes" checked>変更箇所を枠で囲む</label>
-          <label><input type="checkbox" id="ovFaint" checked>共通部分を薄く表示</label>
+          <div data-modes="overlay">右の濃さ <input type="range" id="ovOpacity" min="0" max="100" value="50"></div>
+          <div data-modes="swipe">境界位置 <input type="range" id="ovSwipe" min="0" max="100" value="50"></div>
+          <label data-modes="overlay swipe"><input type="checkbox" id="ovTint">色を付けて見分ける</label>
+          <div data-modes="overlay swipe" class="ov-colors">左 <input type="color" id="ovColL" value="#e5322d" aria-label="左の色"> 右 <input type="color" id="ovColR" value="#1a73e8" aria-label="右の色"></div>
+          <div data-modes="blink">切り替えの間隔 <b id="ovBlinkVal">0.65</b> 秒 <input type="range" id="ovBlinkMs" min="200" max="2000" step="50" value="650" aria-label="点滅の間隔（ミリ秒）"></div>
+          <label data-modes="blink"><input type="checkbox" id="ovBlinkManual">手動で切り替える（画像のクリック・Space）</label>
+          <button data-modes="blink" id="ovBlinkToggle" type="button">左右を切り替え</button>
+          <label data-modes="side"><input type="checkbox" id="ovSideHl" checked>変更箇所を色で表示</label>
+          <div data-modes="diff side">差分の感度 <input type="range" id="ovThr" min="5" max="160" value="60"></div>
+          <label data-modes="diff side"><input type="checkbox" id="ovBoxes" checked>変更箇所を枠で囲む</label>
+          <label data-modes="diff"><input type="checkbox" id="ovFaint" checked>共通部分を薄く表示</label>
+          <div data-modes="diff side" title="スキャンなどの細かなずれを差分として扱わない幅">ずれの許容 <b id="ovTolVal">0</b> px <input type="range" id="ovTolPx" min="0" max="5" step="1" value="0" aria-label="ずれの許容（ピクセル）"></div>
           <div title="大きな図面（A1・A0 など）で描く細かさ。軽量は速く、精細は細い線まで比べられます">解像度 <select id="ovRes" aria-label="重ね合わせの解像度"><option value="low">軽量（〜1600px）</option><option value="std">標準（〜2400px）</option><option value="high">精細（〜4000px）</option></select></div>
-          <div title="スキャンなどの細かなずれを差分として扱わない幅">ずれの許容 <b id="ovTolVal">0</b> px <input type="range" id="ovTolPx" min="0" max="5" step="1" value="0" aria-label="ずれの許容（ピクセル）"></div>
         </div>
         <h4>位置合わせ（右をずらす・回す）</h4>
         <div class="ov-ctl">
@@ -176,12 +197,17 @@
         </div>
         <h4>結果</h4>
         <div id="ovStats" class="muted">—</div>
-        <div style="display:flex;gap:4px;margin-top:6px"><button id="ovRegPrev">‹ 前の変更</button><button id="ovRegNext">次の変更 ›</button></div>
-        <h4>凡例</h4>
-        <div class="legend">
+        <div data-modes="diff side" style="display:flex;gap:4px;margin-top:6px"><button id="ovRegPrev">‹ 前の変更</button><button id="ovRegNext">次の変更 ›</button></div>
+        <h4 data-modes="diff side">凡例</h4>
+        <div class="legend" data-modes="diff side">
           <span><i style="background:#e5322d"></i>左にだけある（削除・変更前）</span>
           <span><i style="background:#1a73e8"></i>右にだけある（追加・変更後）</span>
-          <span><i style="background:#bfc5cc"></i>共通部分</span>
+          <span data-modes="diff"><i style="background:#bfc5cc"></i>共通部分</span>
+        </div>
+        <h4>ページの対応</h4>
+        <div class="ov-ctl">
+          <label title="ページの挿入・削除を見つけて、似ているページどうしを組にする"><input type="checkbox" id="ovMatch" checked>挿入・削除されたページを自動で対応付ける</label>
+          <div id="ovMatchInfo" class="muted"></div>
         </div>
         <h4>全ページ一括チェック</h4>
         <button id="ovScan">全ページの差分を調べる</button>
@@ -206,6 +232,9 @@
       <button id="fdRun" class="primary">比較</button>
       <div class="grow"></div>
       <span class="muted">行をダブルクリックで中身を比較</span>
+      <div class="sep"></div>
+      <button id="fdCsv" title="一覧をCSVファイルに出力（Excelで開けます）">CSV</button>
+      <button id="fdReport" title="一覧をHTMLレポートに出力">レポート</button>
     </div>
     <div class="fd-table-wrap"><table class="fd-table" id="fdTable">
       <thead><tr><th data-k="path">ファイル</th><th data-k="st">状態</th><th data-k="ls" class="num">左サイズ</th><th data-k="rs" class="num">右サイズ</th><th data-k="lm">左 更新日時</th><th data-k="rm">右 更新日時</th></tr></thead>
@@ -218,6 +247,11 @@
 <div id="modal"><div class="dlg"><h3></h3><div class="body"></div><div class="foot"></div></div></div>
 <div id="busy"><div id="busyMsg">処理中…</div></div>
 <div id="toast"></div>
-<div id="dropOverlay"></div>
+<div id="dropOverlay" aria-hidden="true">
+  <div class="dz" data-side="0"><b>左</b>に読み込む</div>
+  <div class="dz" data-side="1"><b>右</b>に読み込む</div>
+  <div class="dz dz-both"><b>左右</b>に読み込む<small>（2つのファイル・フォルダ）</small></div>
+</div>
+<button id="btnExitFull" hidden title="全画面表示を終える（Esc）">✕ 全画面を終える</button>
 <div id="printArea"></div>
 <input type="file" id="annFile" accept=".json,application/json" hidden>

@@ -114,3 +114,7 @@ function normCJK(s) {
 }
 function extOf(name) { const m = /\.([^.\\/]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : ''; }
 function baseName(name) { return (name || '').replace(/\.[^.\\/]+$/, ''); }
+
+/* ツールバーのポップアップ（details.pop）は、外側をクリックするか Esc で閉じる */
+document.addEventListener('click', e => { document.querySelectorAll('details.pop[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('details.pop[open]').forEach(d => { d.open = false; d.querySelector('summary').focus(); }); });

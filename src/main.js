@@ -2,7 +2,7 @@
 let S = [null, null];
 
 const App = (() => {
-  const app = { tab: 'text' };
+  const app = { tab: 'text', mode: 'file' };
   const slots = $$('#slots .slot');
 
   function sniff(b) {
@@ -111,8 +111,11 @@ const App = (() => {
       } catch (e) { toast(`「${files[i].name}」を読み込めませんでした。${errMsg(e)}`, true); }
     }
     for (let i = 0; i < 2; i++) if (!files[i]) { disposeSide(S[i]); S[i] = null; }
-    if (app.tab === 'folder') setTab('text');
+    // 先に各画面へ「文書が変わった」ことを知らせてから表示を切り替える（逆だと、古い比較結果を新しい文書で描こうとして失敗する）
+    const fromFolder = app.mode === 'folder';
+    if (fromFolder) app.tab = 'text';
     changed([0, 1]);
+    if (fromFolder) { setMode('file'); $('#btnBackFolder').hidden = false; }
     return true;
   }
 
@@ -120,6 +123,7 @@ const App = (() => {
     TV.resetHistory();
     sides.forEach(updateSlot);
     TV.invalidate();
+    PageMatch.invalidate();
     sides.forEach(s => PV.invalidate(s));
     OV.invalidate();
     autoTab();
@@ -152,6 +156,12 @@ const App = (() => {
   const KIND = { pdf: 'PDF', docx: 'Word', xlsx: 'Excel', pptx: 'PowerPoint', image: '画像', binary: 'バイナリ', text: 'テキスト' };
   function updateSlot(side) {
     const el = slots[side], s = S[side];
+    // ヘッダのファイル名（1行表示）
+    const hf = $(`#hdrFiles .hf[data-side="${side}"]`);
+    hf.classList.toggle('empty', !s);
+    $('.nm', hf).innerHTML = s ? `${s.dirty ? '<span class="dirty" title="未保存の変更があります">● </span>' : ''}${esc(s.name)}` : 'ファイルを選択';
+    hf.title = s ? `${side ? '右' : '左'}：${s.name}（クリックでファイル欄を開く／たたむ）` : `${side ? '右' : '左'}のファイルを選択`;
+    autoSlots();
     el.classList.toggle('loaded', !!s);
     $('.fname', el).innerHTML = s ? `${s.dirty ? '<span class="dirty" title="未保存の変更があります">● </span>' : ''}${esc(s.name)}` : 'ファイルをドロップ、またはクリックして選択';
     $('.fname', el).title = s ? s.name : '';
@@ -203,13 +213,6 @@ const App = (() => {
       if (act === 'edit') openEditor(side, null);
       else if (act === 'save') saveSide(side);
       else if (act === 'close') closeSide(side);
-    });
-    el.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); el.classList.add('drag'); $('#dropOverlay').classList.add('on'); });
-    el.addEventListener('dragleave', () => el.classList.remove('drag'));
-    el.addEventListener('drop', e => {
-      e.preventDefault(); e.stopPropagation(); el.classList.remove('drag'); $('#dropOverlay').classList.remove('on'); dragDepth = 0;
-      const fs = Array.from(e.dataTransfer.files);
-      if (fs.length >= 2) loadPair([fs[0], fs[1]]); else if (fs[0]) loadFile(side, fs[0]);
     });
   });
 
@@ -299,12 +302,61 @@ const App = (() => {
   }
 
   /* ---------- tabs ---------- */
+  /* ---------- ファイル比較／フォルダ比較の切り替え ---------- */
+  function setMode(m) {
+    if (m === app.mode) return;
+    app.mode = m; document.body.dataset.mode = m;
+    $$('#modeSw button').forEach(b => { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    if (m === 'folder') {
+      if (app.tab === 'overlay') OV.deactivate();
+      $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-folder'));
+      $('#btnBackFolder').hidden = true;
+    } else setTab(app.tab);
+  }
+  $$('#modeSw button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  $('#btnBackFolder').onclick = () => setMode('folder');
+
+  /* ---------- ファイル欄の開閉（左右とも読み込んだら自動でたたむ。どちらかが空なら開く） ---------- */
+  let bothBefore = false;
+  function showSlots(open) {
+    document.body.classList.toggle('slots-closed', !open);
+    $('#btnSlots').setAttribute('aria-expanded', open);
+  }
+  function autoSlots() {
+    const both = !!(S[0] && S[1]);
+    if (both && !bothBefore) showSlots(false);
+    if (!both) showSlots(true);
+    bothBefore = both;
+  }
+  $('#btnSlots').onclick = () => showSlots(document.body.classList.contains('slots-closed'));
+  $$('#hdrFiles .hf').forEach(b => b.onclick = () => {
+    const side = +b.dataset.side;
+    if (!S[side]) $('input[type=file]', slots[side]).click();
+    else showSlots(document.body.classList.contains('slots-closed'));
+  });
+
+  /* ---------- 全画面表示（ヘッダとファイル欄を隠し、ブラウザも全画面にする） ---------- */
+  function setFull(on) {
+    document.body.classList.toggle('fullview', on);
+    $('#btnExitFull').hidden = !on;
+    try {
+      if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => { });
+      if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => { });
+    } catch (e) { }
+    window.dispatchEvent(new Event('resize'));
+  }
+  $('#btnFull').onclick = () => setFull(true);
+  $('#btnExitFull').onclick = () => setFull(false);
+  // ブラウザの全画面を Esc で抜けたら、ヘッダも戻す
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && document.body.classList.contains('fullview')) setFull(false); });
+
   function setTab(t) {
+    if (t === 'folder') return setMode('folder'); // 以前の呼び方との互換
+    if (app.mode !== 'file') { app.tab = t; return setMode('file'); }
     if (app.tab === 'overlay' && t !== 'overlay') OV.deactivate();
     app.tab = t;
     $$('#tabs button').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
     $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + t));
-    $('#slots').style.display = t === 'folder' ? 'none' : '';
     if (t === 'text') TV.activate();
     else if (t === 'page') PV.activate();
     else if (t === 'overlay') OV.activate();
@@ -334,26 +386,40 @@ const App = (() => {
   };
 
   /* ---------- global drag & drop ---------- */
-  let dragDepth = 0;
-  window.addEventListener('dragenter', e => { if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) { dragDepth++; $('#dropOverlay').classList.add('on'); } });
-  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('#dropOverlay').classList.remove('on'); } });
-  window.addEventListener('dragover', e => e.preventDefault());
+  // 画面の左半分・右半分を、それぞれ左・右の読み込み先として示す（2つ以上なら「左右に読み込む」）
+  let dragDepth = 0, dropSide = 0;
+  const dov = $('#dropOverlay');
+  const isFileDrag = e => e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+  function hotZone(e) {
+    const many = e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length >= 2;
+    dov.classList.toggle('both', !!many);
+    dropSide = e.clientX < window.innerWidth / 2 ? 0 : 1;
+    $$('.dz[data-side]', dov).forEach(z => z.classList.toggle('hot', +z.dataset.side === dropSide));
+    $('.dz-both', dov).classList.toggle('hot', !!many);
+  }
+  window.addEventListener('dragenter', e => { if (isFileDrag(e)) { dragDepth++; dov.classList.add('on'); hotZone(e); } });
+  window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dov.classList.remove('on'); } });
+  window.addEventListener('dragover', e => { e.preventDefault(); if (isFileDrag(e)) hotZone(e); });
   window.addEventListener('drop', async e => {
-    e.preventDefault(); dragDepth = 0; $('#dropOverlay').classList.remove('on');
+    e.preventDefault(); dragDepth = 0; dov.classList.remove('on');
     const dt = e.dataTransfer; if (!dt) return;
+    const side = e.clientX < window.innerWidth / 2 ? 0 : 1;
     const ents = Array.from(dt.items || []).map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
-    if (ents.length && ents.every(en => en.isDirectory)) { setTab('folder'); return FD.dropFolders(dt); }
+    if (ents.length && ents.every(en => en.isDirectory)) { setMode('folder'); return FD.dropFolders(dt, side); }
     const fs = Array.from(dt.files).filter((f, i) => !ents[i] || ents[i].isFile);
     if (!fs.length) return;
-    if (app.tab === 'folder') setTab('text');
-    if (fs.length >= 2) loadPair([fs[0], fs[1]]);
-    else loadFile(!S[0] ? 0 : !S[1] ? 1 : 0, fs[0]);
+    if (fs.length >= 2) return loadPair([fs[0], fs[1]]);
+    if (app.mode === 'folder') { setMode('file'); }
+    loadFile(side, fs[0]);
   });
 
   /* ---------- keyboard ---------- */
   document.addEventListener('keydown', e => {
     if ($('#modal').classList.contains('on')) return;
     const inField = e.target.matches('input,select,textarea');
+    // 全画面表示は Esc で終える（ブラウザの全画面が使えなかったとき用）
+    if (e.key === 'Escape' && document.body.classList.contains('fullview')) { e.preventDefault(); setFull(false); return; }
+    if (app.mode === 'folder') return;
     if (app.tab === 'text') {
       if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); TV.next(); }
       else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); TV.prev(); }
@@ -380,7 +446,8 @@ const App = (() => {
     title: 'ヘルプ', wide: true,
     html: `
 <h4 style="margin-top:0">ファイルの読み込み</h4>
-左右の欄にファイルをドロップ（2つまとめてドロップすると左右に入ります）。欄をクリックすると選択できます。<br>
+画面の左半分にドロップすると左、右半分にドロップすると右に入ります（ドラッグ中に、入る側を強調して示します。2つまとめてドロップすると左右に入ります）。上のファイル名をクリックしても選択できます。<br>
+左右とも読み込むと、文字コード・保存・閉じるなどのファイル欄は自動でたたまれます（<b>▾</b> で開く）。「⛶ 全画面」でヘッダも隠せます（<kbd>Esc</kbd> で戻る）。<br>
 対応形式: テキスト・ソースコード・CSV など（Shift_JIS / EUC-JP / JIS / UTF-8 / UTF-16 を自動判定）、PDF、Word(.docx)、Excel(.xlsx)、PowerPoint(.pptx)、画像（PNG / JPEG / GIF / BMP / WebP）。<br>
 <span class="muted">DocuWorks文書(.xdw)・旧Office形式(.doc/.xls/.ppt)・TIFFは中身を読めないため、PDFや新しい形式に変換してから読み込んでください。</span>
 <h4>テキスト比較（WinMerge相当）</h4>
@@ -397,19 +464,21 @@ const App = (() => {
 行の折り返し・空白の記号表示・差分の単位（文字／単語）・文字の大きさは「設定」で変えられます。<br>
 「保存」は元の文字コード・改行コードで保存します（欄のプルダウンで変更可）。PDF・Officeファイルは抽出テキストとして保存します。
 <h4>ページ表示・注釈（DocuWorks Viewer相当）</h4>
-左右の文書をページ単位で並べて表示します（スクロール連動）。ペン・蛍光マーカー・四角枠・付箋・日付印を書き込めます。<br>
-選択ツールで注釈をクリック→ドラッグで移動、<kbd>Delete</kbd>で削除、付箋や日付印はダブルクリックで編集。注釈がないところをドラッグすると画面を動かせます。<kbd>Ctrl</kbd>+ホイールで拡大縮小。<br>
-注釈はこのブラウザに自動保存されます（同じファイルを開くと復元）。保存しない設定や、保存データの確認・削除は「設定」からできます。他のPCへ持ち出すときは「注釈を保存」でファイルにしてください。日付印の種類・日付の書き方（和暦など）・大きさ・氏名は「設定」または「印設定」で変えられます。「印刷 / PDF」で注釈入りの印刷・PDF保存ができます。
+左右の文書をページ単位で並べて表示します（スクロール連動）。ペン・蛍光マーカー・四角枠・付箋を書き込めます。<br>
+「レポート」で、注釈を付けたページの画像と付箋の内容を HTML に出力できます。選択ツールで注釈をクリック→ドラッグで移動、<kbd>Delete</kbd>で削除、付箋はダブルクリックで編集。注釈がないところをドラッグすると画面を動かせます。<kbd>Ctrl</kbd>+ホイールで拡大縮小。<br>
+注釈はこのブラウザに自動保存されます（同じファイルを開くと復元）。保存しない設定や、保存データの確認・削除は「設定」からできます。他のPCへ持ち出すときは「注釈を保存」でファイルにしてください。「印刷 / PDF」で注釈入りの印刷・PDF保存ができます。
 <h4>重ね合わせ比較</h4>
-PDF・画像のページを重ねて、変わった部分を色分けします（赤＝左にだけある、青＝右にだけある）。変更箇所はオレンジの枠と番号で示します。<br>
-スキャン画像は開いたときに自動で位置と傾きを合わせます（「自動位置合わせ」で再実行）。細かなずれを差分にしたくないときは「ずれの許容」を増やしてください。「全ページの差分を調べる」で、どのページに変更があるか一覧できます。<kbd>←</kbd><kbd>→</kbd>でページ送り、<kbd>N</kbd>で次の変更箇所。
+PDF・画像のページを重ねて、変わった部分を色分けします（赤＝左にだけある、青＝右にだけある）。変更箇所はオレンジの枠と番号で示します。右側のパネルには、選んだ表示方法で使う項目だけが出ます。<br>
+スキャン画像は開いたときに自動で位置と傾きを合わせます（「自動位置合わせ」で再実行）。細かなずれを差分にしたくないときは「ずれの許容」を増やしてください。A1・A0 などの大きな図面は「解像度」で軽量／精細を選べます。<br>
+途中でページが挿入・削除されていても、似ているページどうしを自動で組にします（ページ送り・一括チェック・ページ表示の連動に使います）。「全ページの差分を調べる」で、どのページに変更があるか、追加・削除されたページを一覧できます。「レポート」で差分画像と一覧を HTML に出力できます。<br>
+操作：ホイール＝縦スクロール、<kbd>Shift</kbd>+ホイール＝横スクロール、<kbd>Ctrl</kbd>+ホイール＝拡大・縮小。「✋ 移動」（<kbd>H</kbd>）ではドラッグで表示位置を動かし、ホイールで拡大・縮小します。<kbd>PageUp</kbd><kbd>PageDown</kbd>（<kbd>←</kbd><kbd>→</kbd>）でページ送り、<kbd>N</kbd>で次の変更箇所、点滅の手動切り替えは画像のクリックか <kbd>Space</kbd>。
 <h4>フォルダ比較</h4>
-2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリックすると中身の比較に移ります。
+ヘッダ左の「フォルダ比較」に切り替えて使います。2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリック（または <kbd>Enter</kbd>）すると中身の比較に移り、「← フォルダ一覧」で一覧に戻れます。一覧は CSV・HTMLレポートに出力できます。
 <h4>プライバシー</h4>
 <span class="muted">すべての処理はこのブラウザの中だけで行われ、ファイルが外部に送信されることはありません（ネットワーク接続なしで動作します）。</span>`
   });
 
-  Object.assign(app, { resetDrag: () => { dragDepth = 0; }, loadFile, loadPair, newTextSide, afterEdit, openEditor, setTab, updateSlot, visualOnly });
+  Object.assign(app, { resetDrag: () => { dragDepth = 0; }, setMode, showSlots, setFull, loadFile, loadPair, newTextSide, afterEdit, openEditor, setTab, updateSlot, visualOnly });
   return app;
 })();
 

@@ -25,8 +25,8 @@
                 #oWs(select) #oCase #oBlank #oZen #oFold(checkbox) #searchBox #tFind #tLayout #tPatch #tReport
                 ステータス #textStatus、行 .pane .row（.t-c 変更 .t-d 左のみ .t-i 右のみ .cd 文字差分）
   ファイル欄: .slot[data-side="0|1"]  中のボタン button[data-act=edit|save|close] select[data-act=enc|eol]
-  ページ表示: ツール [data-tool=select|pen|marker|rect|note|stamp|eraser]  #zSel #zIn #zOut #pvShow #pvSync
-              #annExport #annImport #pvPrint #stampCfg  列 .pv-col[data-side] 内 svg（注釈レイヤー）
+  ページ表示: ツール [data-tool=select|pen|marker|rect|note|eraser]  #zSel #zIn #zOut #pvShow #pvSync
+              #annExport #annImport #pvPrint  列 .pv-col[data-side] 内 svg（注釈レイヤー）
   重ね合わせ: #ovModes button[data-mode=diff|overlay|swipe|blink|side] #ovLPage #ovRPage #ovLNext ...
               #ovThr #ovTol #ovBoxes #ovFaint #ovDx #ovDy #ovAuto #ovScan #ovScanRes #ovStats #ovRegNext
   フォルダ: .fd-slot[data-side] input（webkitdirectory）→ t.load_folders(left_dir, right_dir)  #fdTable #fdStatus
@@ -108,6 +108,10 @@ class Tool:
         return a, b
 
     async def tab(self, name):
+        if name == 'folder':  # フォルダ比較は「モード」の切り替え
+            await self.page.click('#modeSw button[data-mode=folder]'); await self.page.wait_for_timeout(300); return
+        if await self.page.evaluate("App.mode") != 'file':
+            await self.page.click('#modeSw button[data-mode=file]'); await self.page.wait_for_timeout(300)
         await self.page.click(f'#tabs button[data-tab={name}]'); await self.page.wait_for_timeout(1200 if name != 'text' else 300)
         await self.wait_idle(200)
 
@@ -133,7 +137,12 @@ class Tool:
     async def shot(self, name, full=False):
         p = os.path.join(self.out_dir, f'{name}.png'); await self.page.screenshot(path=p, full_page=full); return p
 
+    async def open_slots(self, sel):
+        """ファイル欄（両方読み込むと自動でたたまれる）の中のボタンを押す前に、ファイル欄を開く"""
+        if '.slot' in sel: await self.page.evaluate("App.showSlots(true)")
+
     async def click(self, sel, **kw):
+        await self.open_slots(sel)
         await self.page.click(sel, **kw); await self.page.wait_for_timeout(250)
 
     async def key(self, k):
@@ -160,6 +169,7 @@ class Tool:
 
     async def download(self, sel):
         """クリックでダウンロードされるファイルを out_dir に保存してパスを返す"""
+        await self.open_slots(sel)
         async with self.page.expect_download() as d:
             await self.page.click(sel)
         dl = await d.value; p = os.path.join(self.out_dir, dl.suggested_filename); await dl.save_as(p); return p

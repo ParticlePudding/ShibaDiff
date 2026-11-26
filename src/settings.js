@@ -1,11 +1,7 @@
 /* 設定（頻繁には切り替えない項目）とブラウザ保存データの管理 */
 const Settings = (() => {
-  const old = store.get('pv:stamp', null);
-  const BASE = { stampTop: '確認', stampName: '' };
   const DEF = {
-    wrap: false, showWs: false, unit: 'auto', numDelta: true, fontSize: 'm', persist: true,
-    dateFmt: 'yy', stampKind: 'date', stampSize: 'm', ovRes: 'std',
-    stampTop: old ? old.top : '確認', stampName: old ? old.name : ''
+    wrap: false, showWs: false, unit: 'auto', numDelta: true, fontSize: 'm', persist: true, ovRes: 'std', pageMatch: true
   };
   const cur = Object.assign({}, DEF, store.get('settings', {}));
   const subs = [];
@@ -35,12 +31,6 @@ ${chk('numDelta', '数字が変わったとき、差と増減率を表示する�
 <label class="setrow">文字の大きさ ${sel('fontSize', [['s', '小'], ['m', '標準'], ['l', '大']])}</label>
 <label class="setrow">重ね合わせの解像度 ${sel('ovRes', [['low', '軽量（〜1600px）'], ['std', '標準（〜2400px）'], ['high', '精細（〜4000px）']])}</label>
 <div class="muted" style="margin:2px 0 6px 0">A1・A0 などの大きな図面で効きます。重いときは「軽量」、細い線の違いを見落とすときは「精細」にしてください。</div>
-<h4 id="set-stamp">日付印</h4>
-<label class="setrow">印の種類 ${sel('stampKind', [['date', '日付印（上段・日付・氏名の3段）'], ['name', '認印（氏名のみ）']])}</label>
-<label class="setrow">日付の書き方 ${sel('dateFmt', [['yy', "西暦2桁（'26.11.22）"], ['yyyy', '西暦4桁（2026.11.22）'], ['wareki', '和暦（R8.11.22）']])}</label>
-<label class="setrow">大きさ ${sel('stampSize', [['s', '小'], ['m', '中'], ['l', '大']])}</label>
-${txt('stampTop', '上段（部署・役職など）', '例：総務課')}
-${txt('stampName', '氏名', '例：山田')}
 <h4 id="set-data">このブラウザに保存するデータ</h4>
 ${chk('persist', '注釈とページの回転を、このブラウザに自動で保存する')}
 <div class="muted" style="margin:2px 0 6px 22px">オフにすると、ファイルを閉じたときに注釈は消えます（必要なら「注釈を保存」でファイルにしてください）。</div>
@@ -92,7 +82,7 @@ ${chk('persist', '注釈とページの回転を、このブラウザに自動�
   /* 保存データをすべて削除したとき、開いている間の設定も初期値に戻す（保存はしない） */
   function resetAll() {
     for (const k of Object.keys(DEF)) {
-      const v = k in BASE ? BASE[k] : DEF[k];
+      const v = DEF[k];
       if (cur[k] === v) continue;
       cur[k] = v; subs.forEach(f => { try { f(k, v); } catch (e) { console.error(e); } });
     }

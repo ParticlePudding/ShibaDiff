@@ -46,9 +46,10 @@ async def main():
 
         # --- Office 文書の印刷（注釈付き）
         await t.load(SM + 'R12_経営企画部_経営企画部長/予算_部門集計_案.xlsx', SM + 'R12_経営企画部_経営企画部長/予算_部門集計_確定.xlsx')
-        await t.js("Settings.set('stampName','山田')"); await t.tab('page')
+        await t.tab('page')
         svg = t.page.locator('.pv-col[data-side="1"] svg').first; bb = await svg.bounding_box()
-        await t.click('[data-tool=stamp]'); await t.page.mouse.click(bb['x'] + bb['width'] * 0.75, bb['y'] + bb['height'] * 0.15)
+        await t.click('[data-tool=marker]'); await t.page.mouse.move(bb['x'] + bb['width'] * 0.6, bb['y'] + 80); await t.page.mouse.down()
+        await t.page.mouse.move(bb['x'] + bb['width'] * 0.8, bb['y'] + 80, steps=4); await t.page.mouse.up()
         await t.click('[data-tool=rect]'); await t.page.mouse.move(bb['x'] + 40, bb['y'] + 50); await t.page.mouse.down()
         await t.page.mouse.move(bb['x'] + 250, bb['y'] + 110, steps=4); await t.page.mouse.up()
         t.check('注釈が2件付いた', await t.js("Object.values(PV.st.ann[1]).flat().length") == 2)

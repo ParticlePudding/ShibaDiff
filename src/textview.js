@@ -620,10 +620,6 @@ const TV = (() => {
     download(`${baseName(S[0].name)}.diff`, bytes, 'text/plain');
     toast(`パッチを出力しました（git形式・${Enc.NAMES[enc]}）。適用: git apply / patch -p1`);
   }
-  async function sha256(bytes) {
-    try { if (!bytes || !crypto.subtle) return ''; const h = await crypto.subtle.digest('SHA-256', bytes); return Array.from(new Uint8Array(h), b => b.toString(16).padStart(2, '0')).join(''); }
-    catch (e) { return ''; }
-  }
   async function exportReport() {
     if (!S[0] || !S[1]) return toast('左右にファイルを読み込んでください');
     const A = L(0), B = L(1);
@@ -639,7 +635,7 @@ const TV = (() => {
     let cl = 0, dl = 0, il = 0; for (const r of st.rows) { if (r.t === 'c') cl++; else if (r.t === 'd') dl++; else if (r.t === 'i') il++; }
     const o = opts();
     const cond = [o.ws === 'change' ? '空白の量を無視' : o.ws === 'all' ? '空白を無視' : '', o.ignoreCase ? '大小文字無視' : '', o.blank ? '空行無視' : '', o.zen ? '全角半角無視' : '', o.fold ? '差分のみ表示' : ''].filter(Boolean).join('、') || 'なし（完全一致で比較）';
-    const [h0, h1] = await Promise.all([sha256(S[0].bytes), sha256(S[1].bytes)]);
+    const [h0, h1] = await Promise.all([Report.sha256(S[0].bytes), Report.sha256(S[1].bytes)]);
     const info = (s, h) => `${esc(s.name)}<br><span class="sub">${s.size ? fmtSize(s.size) + '・' : ''}更新 ${fmtDate(s.mtime)}${s.kind === 'text' ? '・' + (Enc.NAMES[s.enc] || s.enc) + '・' + (Enc.EOLNAME[s.eol] || '') : ''}${h ? `<br>SHA-256: ${h}` : ''}${s.dirty ? '<br><b style="color:#b42318">※ 未保存の編集を含む内容です（元のファイルとは異なります）</b>' : ''}</span>`;
     const css = `*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:"BIZ UDPGothic","Meiryo",sans-serif;margin:20px;color:#222}h1{font-size:18px;margin:0 0 8px}
@@ -679,7 +675,13 @@ tr.fold td{background:#eef3fb;color:#4c6a96;text-align:center;font-family:sans-s
   $('#searchBox').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); find(); } else if (e.key === 'Escape') { st.hit = -1; render(); e.target.blur(); } });
   $('#searchBox').addEventListener('input', () => { st.hit = -1; });
   $('#tPatch').onclick = exportPatch; $('#tReport').onclick = exportReport;
-  for (const id of ['#oWs', '#oCase', '#oBlank', '#oZen']) $(id).addEventListener('change', () => { saveOpts(); compare(); });
+  // 比較条件のうち、既定から変えている数をボタンに出す（たたんでいても条件が効いていることが分かるように）
+  function markOpts() {
+    const n = ($('#oWs').value !== 'none') + $('#oCase').checked + $('#oBlank').checked + $('#oZen').checked;
+    $('#oBadge').hidden = !n; $('#oBadge').textContent = n;
+  }
+  for (const id of ['#oWs', '#oCase', '#oBlank', '#oZen']) $(id).addEventListener('change', () => { saveOpts(); markOpts(); compare(); });
+  markOpts();
   $('#oFold').addEventListener('change', () => {
     saveOpts(); st.expanded.clear();
     const keepBlk = st.cur; buildView(); sizeSpacers(); st.cur = keepBlk;

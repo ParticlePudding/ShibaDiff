@@ -26,19 +26,16 @@ async def main():
         t.check('数字の差の札が出る', await t.js("document.querySelectorAll('.dnum').length") > 0)
         t.check('文字の大きさ（大）が反映される', await t.js("document.documentElement.dataset.fs") == 'l')
         await t.click('#btnSettings'); await t.page.select_option('[data-k=fontSize]','m'); await t.page.keyboard.press('Escape')
-        # stamp: wareki + name kind
+        # 注釈（日付印は廃止。付箋と枠を付けて保存データに出ることを確認する）
         await t.load(C+'10_PDF_テキスト/見積書_初回.pdf', C+'10_PDF_テキスト/見積書_再提出.pdf')
-        await t.tab('page'); await t.click('[data-tool=stamp]'); await t.page.wait_for_timeout(400)
-        t.check('初めて日付印を使うとき設定画面を開く', await t.js("$('#modal').classList.contains('on')"))
-        await t.page.fill('[data-k=stampTop]','品質保証課長'); await t.page.fill('[data-k=stampName]','山本'); await t.page.select_option('[data-k=dateFmt]','wareki')
-        await t.page.keyboard.press('Escape')
+        await t.tab('page')
+        t.check('日付印のツールがない', await t.js("!document.querySelector('[data-tool=stamp]') && !document.querySelector('#stampCfg')"))
         svg=t.page.locator('.pv-col[data-side="1"] svg').first; bb=await svg.bounding_box()
-        await t.page.mouse.click(bb['x']+bb['width']*0.8, bb['y']+60)
-        await t.click('#btnSettings'); await t.page.select_option('[data-k=stampKind]','name'); await t.page.select_option('[data-k=stampSize]','l'); await t.page.keyboard.press('Escape')
-        await t.click('[data-tool=stamp]'); await t.page.mouse.click(bb['x']+bb['width']*0.6, bb['y']+60)
-        st = await t.js("JSON.stringify((PV.st.ann[1][0]||[]).filter(a=>a.t==='stamp').map(a=>[a.kind,a.date,a.name,a.top,a.r]))")
-        t.check('日付印（和暦）と認印（大）を置ける', '"date","R' in st and '"name"' in st and '山本' in st and '品質保証課長' in st, st)
-        await t.page.wait_for_timeout(400); await t.page.screenshot(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out', 'numdelta.png'), clip={'x':bb['x']+bb['width']*0.45,'y':bb['y'],'width':bb['width']*0.55,'height':140})
+        await t.click('[data-tool=rect]'); await t.page.mouse.move(bb['x']+60, bb['y']+60); await t.page.mouse.down()
+        await t.page.mouse.move(bb['x']+200, bb['y']+120, steps=4); await t.page.mouse.up()
+        t.check('枠を付けられる', await t.js("(PV.st.ann[1][0]||[]).some(a=>a.t==='rect')"))
+        # 古い注釈ファイルに日付印が入っていても、読み込まずに捨てる
+        t.check('古い日付印の注釈は読み込まない', await t.js("PV.cleanAnnot({t:'stamp',x:10,y:10,name:'a'}) === null"))
         # data manager
         await t.click('#btnSettings'); await t.click('#setData'); await t.page.wait_for_timeout(400); await t.shot('10_data')
         n = await t.js("document.querySelectorAll('#dList [data-key]').length")
@@ -55,7 +52,7 @@ async def main():
         await t.page.keyboard.press('Escape')
         t.check('閉じたらフォーカスが元のボタンに戻る', await t.js("document.activeElement.id") == 'btnHelp')
         # slot keyboard
-        await t.tab('text'); await t.page.focus('.slot[data-side="0"]')
+        await t.tab('text'); await t.js("App.showSlots(true)"); await t.page.focus('.slot[data-side="0"]')
         # ファイル選択ダイアログ自体は headless Chrome で不安定なため、input の click が呼ばれたかで確認する
         await t.js("(()=>{window._pick=0;const i=document.querySelector('.slot[data-side=\"0\"] input[type=file]');i.click=()=>{window._pick++;};})()")
         await t.page.keyboard.press('Enter')

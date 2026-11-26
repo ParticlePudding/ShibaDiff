@@ -40,6 +40,41 @@ kbd{font-family:var(--mono);background:#f3f4f6;border:1px solid #cfd5dc;border-b
 #top .right button{background:transparent;color:#d6dde6;border-color:#4a5868}
 #top .right button:hover{background:#2a3644}
 
+/* header（1行にまとめる） */
+#top{gap:10px}
+#top .seg{display:flex;border:1px solid #4a5868;border-radius:6px;overflow:hidden;flex:none}
+#top .seg button{border:none;border-radius:0;background:transparent;color:#c9d3df;padding:4px 10px;font-size:12.5px}
+#top .seg button.on{background:#3b4a5c;color:#fff;font-weight:600}
+body[data-mode="folder"] #tabs,body[data-mode="folder"] #hdrFiles,body[data-mode="folder"] #slots{display:none!important}
+#hdrFiles{display:flex;align-items:center;gap:4px;min-width:0;flex:1 1 auto}
+#hdrFiles .hf{display:flex;align-items:center;gap:6px;min-width:0;max-width:260px;background:#2a3644;color:#e8edf3;border:1px solid #3d4b5b;padding:3px 8px;font-size:12.5px}
+#hdrFiles .hf:hover{background:#344356}
+#hdrFiles .hf .badge{flex:none;font-size:10.5px;font-weight:700;border-radius:4px;padding:0 6px;color:#fff;background:#c0504d}
+#hdrFiles .hf[data-side="1"] .badge{background:#3a8f4a}
+#hdrFiles .hf .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#hdrFiles .hf.empty .nm{color:#9fb0c2}
+.hdr-btn{background:transparent;color:#d6dde6;border-color:#4a5868;padding:3px 8px}
+.hdr-btn:hover{background:#2a3644}
+body.slots-closed #slots{display:none}
+#btnSlots{transition:transform .15s}
+body.slots-closed #btnSlots{transform:rotate(-90deg)}
+/* 全画面表示 */
+body.fullview #top,body.fullview #slots{display:none!important}
+#btnExitFull{position:fixed;top:6px;right:8px;z-index:45;background:rgba(29,39,51,.85);color:#fff;border-color:#4a5868;font-size:12px;padding:3px 10px;opacity:.55}
+#btnExitFull:hover{opacity:1}
+/* ドロップ先（左右どちらに入るか） */
+#dropOverlay{border:none;background:rgba(20,30,45,.18);display:none;padding:10px;gap:10px}
+#dropOverlay.on{display:flex}
+#dropOverlay .dz{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px dashed #8aa4c4;border-radius:12px;background:rgba(255,255,255,.55);color:#33475e;font-size:20px;transition:background .1s,border-color .1s}
+#dropOverlay .dz b{font-size:30px}
+#dropOverlay .dz[data-side="0"] b{color:#c0504d}
+#dropOverlay .dz[data-side="1"] b{color:#3a8f4a}
+#dropOverlay .dz small{font-size:13px}
+#dropOverlay .dz.hot{border-style:solid;border-color:var(--accent);background:rgba(232,240,254,.92);color:#1a3d6e}
+#dropOverlay .dz-both{display:none}
+#dropOverlay.both .dz[data-side]{display:none}
+#dropOverlay.both .dz-both{display:flex}
+
 /* file slots */
 #slots{display:flex;gap:8px;padding:8px 10px 6px;flex:none;align-items:stretch}
 .slot{flex:1;min-width:0;background:var(--panel);border:1.5px dashed var(--line2);border-radius:8px;padding:6px 10px;display:flex;flex-direction:column;gap:4px;cursor:pointer;transition:border-color .15s,background .15s}
@@ -129,7 +164,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .pv-empty{color:#e8ecf0;text-align:center;padding:60px 20px;font-size:14px;line-height:1.8}
 .pv-wrap[data-tool="select"] svg{cursor:default}
 .pv-wrap[data-tool="pen"] svg,.pv-wrap[data-tool="marker"] svg,.pv-wrap[data-tool="rect"] svg{cursor:crosshair}
-.pv-wrap[data-tool="note"] svg,.pv-wrap[data-tool="stamp"] svg{cursor:copy}
+.pv-wrap[data-tool="note"] svg{cursor:copy}
 .pv-wrap[data-tool="eraser"] svg{cursor:not-allowed}
 .pv-wrap[data-tool="select"] svg [data-i]{cursor:move}
 .pv-wrap[data-tool="eraser"] svg [data-i]{cursor:pointer}
@@ -202,8 +237,7 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 #busy div{background:#fff;padding:14px 22px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);display:flex;gap:10px;align-items:center}
 #busy div::before{content:"";width:16px;height:16px;border:3px solid #cdd7e3;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-#dropOverlay{position:fixed;inset:0;border:4px dashed var(--accent);background:rgba(31,111,235,.06);display:none;z-index:40;pointer-events:none}
-#dropOverlay.on{display:block}
+#dropOverlay{position:fixed;inset:0;z-index:40;pointer-events:none}
 
 #printArea{display:none}
 @media print{
@@ -245,6 +279,11 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 
 
 /* ---------- 狭い画面 ---------- */
+@media (max-width:1180px){
+  #top .brand .bt{display:none}
+  #hdrFiles .hf{max-width:170px}
+  #tabs button{padding:8px 11px 9px}
+}
 @media (max-width:760px){
   body{font-size:13px}
   #top{height:42px;gap:6px;padding:0 6px}
@@ -255,6 +294,10 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
   #top .right{gap:4px}
   #top .right button{padding:3px 7px;font-size:12px}
   #btnClear{display:none}
+  #top .seg button{padding:4px 6px;font-size:11.5px}
+  #hdrFiles{display:none}
+  #btnFull{display:none}
+  body.slots-closed #slots{display:grid}
 
   #slots{display:grid;grid-template-columns:1fr auto;gap:4px 6px;padding:6px 6px 5px}
   .slot[data-side="0"]{grid-column:1;grid-row:1}
@@ -305,3 +348,24 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
   #toast{bottom:20px;max-width:92vw;text-align:center}
 }
 .licenses { max-height: 60vh; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 0; padding: 8px; background: #f6f7f9; border: 1px solid #dde; }
+
+/* ツールバーのポップアップ（比較条件など） */
+details.pop{position:relative}
+details.pop>summary{list-style:none;cursor:pointer;border:1px solid var(--line2);border-radius:6px;padding:4px 10px;background:#fff;white-space:nowrap;user-select:none}
+details.pop>summary::-webkit-details-marker{display:none}
+details.pop>summary::after{content:' ▾';color:var(--muted)}
+details.pop[open]>summary{background:var(--accent-weak);border-color:var(--accent)}
+details.pop .pop-body{position:absolute;top:calc(100% + 4px);left:0;z-index:30;background:#fff;border:1px solid var(--line2);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.16);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;white-space:nowrap}
+.pop-badge{display:inline-block;min-width:16px;padding:0 5px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;text-align:center}
+.pop-badge[hidden]{display:none}
+
+/* 重ね合わせ：手のひらツール・パネル */
+.ov-view.hand,.ov-view.hand canvas{cursor:grab}
+.ov-view.panning,.ov-view.panning canvas{cursor:grabbing!important}
+.ov-view canvas.swipe{cursor:ew-resize}
+.ov-view:focus{outline:none}
+.ov-side [data-modes][hidden]{display:none!important}
+.ov-colors{display:flex;align-items:center;gap:6px}
+.ov-colors input[type=color]{width:34px;height:22px;padding:0;border:1px solid var(--line2);border-radius:4px;background:#fff}
+.toolbtn.on,#ovHand.on{background:var(--accent-weak);border-color:var(--accent);color:#123}
+.ov-ctl label{white-space:normal;line-height:1.45}
