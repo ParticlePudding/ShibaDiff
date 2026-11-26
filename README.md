@@ -4,7 +4,8 @@ WinMerge のテキスト比較と DocuWorks Viewer のページ表示・注釈�
 インストール不要で、ネットワークにつながらない環境でも動きます（外部との通信は Content-Security-Policy で禁止しています）。
 
 ## 使い方
-`dist/ShibaDiff.html` を Edge / Chrome で開き、比較したいファイルを左右にドロップします。
+`ShibaDiff.html` を Edge / Chrome で開き、比較したいファイルを左右にドロップします。
+ダウンロードして手元で開いても、GitHub Pages で公開したページを開いても同じように動きます（どちらでもファイルは外部に送信されません）。
 
 | 機能 | 内容 |
 |---|---|
@@ -23,7 +24,7 @@ WinMerge のテキスト比較と DocuWorks Viewer のページ表示・注釈�
 ## ビルド
 ```
 npm ci              # pdf.js を取得
-python3 build.py    # dist/ShibaDiff.html を生成
+python3 build.py    # ShibaDiff.html を生成
 ```
 ソースは `src/` にあり、`build.py` が CSS・JavaScript・pdf.js（ワーカー・日本語CMap込み）を1つのHTMLにまとめます。
 

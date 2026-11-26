@@ -80,7 +80,7 @@ html = f"""<!DOCTYPE html>
 </body>
 </html>
 """
-out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "dist", "ShibaDiff.html")
+out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "ShibaDiff.html")
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as f:
     f.write(html)
