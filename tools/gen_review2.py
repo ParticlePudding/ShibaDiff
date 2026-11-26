@@ -360,7 +360,10 @@ SPEC = [
 
 
 def main():
-    if os.path.exists(ROOT): shutil.rmtree(ROOT)
+    # 作り直すのはレビュアーのフォルダだけ（レビュー結果 _results などは消さない）
+    if os.path.exists(ROOT):
+        for n in os.listdir(ROOT):
+            if n.startswith('R') and os.path.isdir(os.path.join(ROOT, n)): shutil.rmtree(os.path.join(ROOT, n))
     G.CHROME_PDFS.clear()
     for no, role, dept, gen in SPEC:
         d = f'R{no:02d}_{dept}_{role}'
