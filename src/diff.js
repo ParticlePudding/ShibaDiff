@@ -177,17 +177,19 @@ const Diff = (() => {
   // 数字のまとまり（3桁区切りのカンマは、後ろがちょうど3桁のときだけ数字の一部とみなす。CSVの区切りと区別するため）
   // 符号は、直前が英数字でないときだけ数字の一部とみなす（2026-11-26 や ABC-123 のハイフンを負号と誤認しない）
   const NUM_RE = /(?:(?<![0-9０-９A-Za-zＡ-Ｚａ-ｚ])[-+−])?(?:[0-9０-９]{1,3}(?:[,，][0-9０-９]{3})+(?![0-9０-９])|[0-9０-９]+)(?:[.．][0-9０-９]+)?/gu;
-  function numberSpans(arr) {
+  // CSV では、カンマは区切りなので3桁区切りとみなさない（S12,300,156 を 12,300,156 と読まない）
+  const NUM_RE_CSV = /(?:(?<![0-9０-９A-Za-zＡ-Ｚａ-ｚ])[-+−])?[0-9０-９]+(?:[.．][0-9０-９]+)?/gu;
+  function numberSpans(arr, csv) {
     const s = arr.join(''), out = []; let cp = 0, last = 0;
-    for (const m of s.matchAll(NUM_RE)) {
+    for (const m of s.matchAll(csv ? NUM_RE_CSV : NUM_RE)) {
       cp += Array.from(s.slice(last, m.index)).length; last = m.index;
       const len = Array.from(m[0]).length; out.push({ st: cp, en: cp + len, text: m[0] });
     }
     return out;
   }
   // 変わった範囲が数字にかかっていたら、数字全体（1,200 など）まで広げる
-  function expandNumbers(arr, ranges, points) {
-    const nums = numberSpans(arr), out = [];
+  function expandNumbers(arr, ranges, points, csv) {
+    const nums = numberSpans(arr, csv), out = [];
     for (const [s, e] of ranges) {
       let a = s, b = e;
       for (const n of nums) if (n.st < e && n.en > s) { a = Math.min(a, n.st); b = Math.max(b, n.en); }
@@ -206,7 +208,7 @@ const Diff = (() => {
    * s1, s2 の違いを返す。unit: 'char' | 'word' | 'auto'
    * 戻り値 {a, b: 変わった範囲[[開始,終了]]（文字＝コードポイント単位）, pa, pb: 反対側で挿入・削除が起きた位置, A, B: 文字配列}
    */
-  function chars(s1, s2, unit = 'char') {
+  function chars(s1, s2, unit = 'char', csv = false) {
     const A = Array.from(s1), B = Array.from(s2);
     const u = unit === 'auto' ? (wordish(s1 + s2) ? 'word' : 'char') : unit;
     // 先頭・末尾の共通部分を先に除く（長い行でも違う部分だけを示せるように）
@@ -218,7 +220,7 @@ const Diff = (() => {
       while (s > 0 && isW(A[A.length - s]) && (isW(A[A.length - s - 1]) || isW(B[B.length - s - 1]))) s--;
     }
     const ma = A.length - s - p, mb = B.length - s - p;
-    if (ma > 6000 || mb > 6000 || ma * mb > 6e6) return { a: ma ? [[p, A.length - s]] : [], b: mb ? [[p, B.length - s]] : [], pa: ma ? [] : [p], pb: mb ? [] : [p], A, B };
+    if (ma > 6000 || mb > 6000 || ma * mb > 6e6) return { a: ma ? [[p, A.length - s]] : [], b: mb ? [[p, B.length - s]] : [], pa: ma ? [] : [p], pb: mb ? [] : [p], A, B, csv };
     const MA = A.slice(p, A.length - s), MB = B.slice(p, B.length - s);
     // 比較単位の列（1文字ずつ、または単語ずつ）とその長さ
     let ua, ub, la, lb;
@@ -247,27 +249,41 @@ const Diff = (() => {
         ia += run.d; ib += run.i;
       }
     }
-    const xa = expandNumbers(A, ra, pa), xb = expandNumbers(B, rb, pb);
-    return { a: xa.ranges, b: xb.ranges, pa: xa.points, pb: xb.points, A, B };
+    const xa = expandNumbers(A, ra, pa, csv), xb = expandNumbers(B, rb, pb, csv);
+    return { a: xa.ranges, b: xb.ranges, pa: xa.points, pb: xb.points, A, B, csv };
   }
 
   /* 数字の変化（差額・増減率）。変わった範囲にかかる数字どうしを順に対応付ける */
-  function numbersIn(arr, ranges) {
-    return numberSpans(arr).filter(n => ranges.some(([a, b]) => a < n.en && b > n.st)).map(n => {
+  // 量ではない数字（日付・時刻・番号）には差を付けない。％の値は「ポイント」で示す
+  const DATE_NEAR = /[年月日時分秒曜\/:：／]/;
+  function kindOf(arr, n) {
+    if (arr[0] === '=' && arr.slice(0, 5).join('') === '=====') return 'skip';           // 「===== ページ 3 =====」などの区切り
+    const b = arr[n.st - 1] || '', b2 = arr[n.st - 2] || '', a = arr[n.en] || '', a2 = arr[n.en + 1] || '';
+    if (DATE_NEAR.test(b) || DATE_NEAR.test(a)) return 'skip';                          // 2026/11/27、4月1日、12:30
+    if ((b === '-' || b === '－') && /[0-9０-９]/.test(b2)) return 'skip';               // 2026-11-27 の 11・27
+    if ((a === '-' || a === '－') && /[0-9０-９]/.test(a2)) return 'skip';
+    if (/[A-Za-zＡ-Ｚａ-ｚ_#№]/.test(b) || /^No\.?$/i.test(arr.slice(Math.max(0, n.st - 3), n.st).join('').trim())) return 'skip'; // S12、G4、v3、#12、No.5（記号・番号）
+    if (/[%％]/.test(a)) return 'pct';
+    return 'num';
+  }
+  function numbersIn(arr, ranges, csv) {
+    return numberSpans(arr, csv).filter(n => ranges.some(([a, b]) => a < n.en && b > n.st)).map(n => {
       const t = n.text.normalize('NFKC').replace(/[,，]/g, '').replace('−', '-');
-      return { st: n.st, en: n.en, v: parseFloat(t), dec: (t.split('.')[1] || '').length };
+      return { st: n.st, en: n.en, v: parseFloat(t), dec: (t.split('.')[1] || '').length, kind: kindOf(arr, n) };
     }).filter(n => isFinite(n.v));
   }
   function numberDeltas(cd) {
-    const na = numbersIn(cd.A, cd.a), nb = numbersIn(cd.B, cd.b);
+    const na = numbersIn(cd.A, cd.a, cd.csv), nb = numbersIn(cd.B, cd.b, cd.csv);
     if (!na.length || na.length !== nb.length) return [];
     const res = [];
     nb.forEach((n, k) => {
       const o = na[k], d = n.v - o.v; if (!d) return;
+      if (n.kind === 'skip' || o.kind === 'skip') return;
       const dec = Math.max(n.dec, o.dec);
       const abs = Math.abs(d).toLocaleString('ja-JP', { minimumFractionDigits: dec, maximumFractionDigits: dec });
       let t = (d > 0 ? '+' : '−') + abs;
-      if (o.v !== 0) t += ` / ${d > 0 ? '+' : '−'}${Math.abs(d / o.v * 100).toFixed(1)}%`;
+      if (n.kind === 'pct' && o.kind === 'pct') t += 'ポイント';
+      else if (o.v !== 0) t += ` / ${d > 0 ? '+' : '−'}${Math.abs(d / o.v * 100).toFixed(1)}%`;
       res.push({ at: n.en, text: t });
     });
     return res;

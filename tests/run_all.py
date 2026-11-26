@@ -3,7 +3,7 @@
 import os, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TESTS = ['test_regression.py', 'test_fixes.py', 'test_round1.py', 'test_review.py', 'test_overlay_align.py', 'test_security.py', 'test_ui_feedback.py', 'test_ov_scroll.py', 'test_reports.py']
+TESTS = ['test_regression.py', 'test_fixes.py', 'test_round1.py', 'test_review.py', 'test_overlay_align.py', 'test_security.py', 'test_ui_feedback.py', 'test_ov_scroll.py', 'test_reports.py', 'test_review2_fixes.py']
 
 if not os.path.isdir(os.path.join(os.path.dirname(HERE), 'samples')):
     sys.exit('samples/ がありません。先に python3 tools/gen_samples.py を実行してください')

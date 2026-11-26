@@ -57,7 +57,8 @@ const FD = (() => {
     const content = $('#fdContent').checked;
     st.rows = paths.map(p => {
       const a = A.get(p), b = B.get(p);
-      return { path: p, a, b, st: !a ? 'right' : !b ? 'left' : a.size !== b.size ? 'diff' : (content ? 'wait' : 'same') };
+      return { path: p, a, b, st: !a ? 'right' : !b ? 'left' : a.size !== b.size ? 'diff' : (content ? 'wait' : 'size') };
+      // サイズだけで判定するときは、大きさが同じでも中身は確かめていないので「同一」とはしない（「サイズ同じ」）
     });
     st.sel = -1; render();
     let done = 0; const todo = st.rows.filter(r => r.st === 'wait');
@@ -70,10 +71,10 @@ const FD = (() => {
     }
     st.running = false; render();
   }
-  const ST = { same: ['同一', 'st-same'], diff: ['相違', 'st-diff'], left: ['左のみ', 'st-left'], right: ['右のみ', 'st-right'], wait: ['比較中', 'st-wait'] };
-  const ORDER = { diff: 0, left: 1, right: 2, wait: 3, same: 4 };
+  const ST = { same: ['同一', 'st-same'], size: ['サイズ同じ（内容は未確認）', 'st-size'], diff: ['相違', 'st-diff'], left: ['左のみ', 'st-left'], right: ['右のみ', 'st-right'], wait: ['比較中', 'st-wait'] };
+  const ORDER = { diff: 0, left: 1, right: 2, wait: 3, size: 4, same: 5 };
   function render() {
-    const show = new Set($$('.fdFilter').filter(c => c.checked).map(c => c.value)); show.add('wait');
+    const show = new Set($$('.fdFilter').filter(c => c.checked).map(c => c.value)); show.add('wait'); if (show.has('same')) show.add('size');
     const { k, d } = st.sort;
     const val = r => k === 'path' ? r.path : k === 'st' ? ORDER[r.st] : k === 'ls' ? (r.a ? r.a.size : -1) : k === 'rs' ? (r.b ? r.b.size : -1) : k === 'lm' ? (r.a ? r.a.lastModified : 0) : (r.b ? r.b.lastModified : 0);
     const rows = st.rows.map((r, i) => ({ r, i })).filter(x => show.has(x.r.st)).sort((x, y) => { const a = val(x.r), b = val(y.r); return (a < b ? -1 : a > b ? 1 : x.r.path < y.r.path ? -1 : 1) * d; });
@@ -85,9 +86,9 @@ const FD = (() => {
         `<td class="num">${r.a ? fmtSize(r.a.size) : ''}</td><td class="num">${r.b ? fmtSize(r.b.size) : ''}</td>` +
         `<td${newer === 0 ? ' style="font-weight:700"' : ''}>${r.a ? fmtDate(r.a.lastModified) : ''}</td><td${newer === 1 ? ' style="font-weight:700"' : ''}>${r.b ? fmtDate(r.b.lastModified) : ''}</td></tr>`;
     }).join('');
-    const c = { same: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
+    const c = { same: 0, size: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
     if (!st.running) $('#fdStatus').innerHTML = st.rows.length
-      ? `全 <b>${fmtNum(st.rows.length)}</b> ファイル　<span class="st st-diff">相違 ${c.diff}</span> <span class="st st-left">左のみ ${c.left}</span> <span class="st st-right">右のみ ${c.right}</span> <span class="st st-same">同一 ${c.same}</span>　<span class="muted">（更新日時が新しい方を太字で表示）</span>`
+      ? `全 <b>${fmtNum(st.rows.length)}</b> ファイル　<span class="st st-diff">相違 ${c.diff}</span> <span class="st st-left">左のみ ${c.left}</span> <span class="st st-right">右のみ ${c.right}</span> <span class="st st-same">同一 ${c.same}</span>${c.size ? ` <span class="st st-size">サイズ同じ ${c.size}</span>` : ''}　<span class="muted">（更新日時が新しい方を太字で表示）</span>`
       : '左右にフォルダを指定して「比較」を押してください';
     $$('#fdTable th').forEach(th => { th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.k === k ? (d > 0 ? ' ▲' : ' ▼') : ''); });
   }
@@ -116,7 +117,8 @@ const FD = (() => {
   const dt = f => f && f.lastModified ? fmtDate(f.lastModified) : '';
   $('#fdCsv').onclick = () => {
     if (!st.rows.length) return toast('先にフォルダを比較してください');
-    const q = v => `"${String(v).replace(/"/g, '""')}"`;
+    // 表計算ソフトで数式として実行されないよう、= + - @ タブ CR で始まる値の先頭に ' を付ける（CSV インジェクション対策）
+    const q = v => { let t = String(v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
     const lines = [['ファイル', '状態', '左サイズ', '右サイズ', '左 更新日時', '右 更新日時'].map(q).join(',')];
     for (const r of ROWS_SORTED()) lines.push([r.path, ST[r.st][0], r.a ? r.a.size : '', r.b ? r.b.size : '', dt(r.a), dt(r.b)].map(q).join(','));
     // Excel で文字化けしないよう、BOM 付き UTF-8・CRLF にする
@@ -129,8 +131,8 @@ const FD = (() => {
         { k: 'dates', label: '更新日時', type: 'check', def: true }, { k: 'sizes', label: 'サイズ', type: 'check', def: true }],
       [{ label: '出力', value: 'ok', primary: true }]);
     if (!o) return;
-    const c = { same: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
-    const order = { diff: 0, left: 1, right: 2, wait: 3, same: 4 };
+    const c = { same: 0, size: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
+    const order = { diff: 0, left: 1, right: 2, wait: 3, size: 4, same: 5 };
     const rows = ROWS_SORTED().filter(r => o.rows === 'all' || r.st !== 'same').sort((x, y) => order[x.st] - order[y.st]);
     const sz = o.sizes, dts = o.dates;
     const body = `<table class="files"><tr><th>左</th><td>${esc(st.names[0])}</td></tr><tr><th>右</th><td>${esc(st.names[1])}</td></tr></table>` +
@@ -139,8 +141,8 @@ const FD = (() => {
       (o.rows === 'diff' && c.same ? `<p class="sub">同一の ${c.same} ファイルは省略しています。</p>` : '');
     const html = Report.page({
       title: `フォルダ比較レポート - ${st.names[0]} / ${st.names[1]}`, heading: 'フォルダ比較レポート',
-      meta: `<b>全 ${fmtNum(st.rows.length)} ファイル</b>　相違 ${c.diff}・左のみ ${c.left}・右のみ ${c.right}・同一 ${c.same}${c.wait ? `・比較中 ${c.wait}` : ''}<br>比較方法: ${$('#fdContent').checked ? '内容まで比較' : 'サイズだけで判定'}`,
-      body, css: '.tag.wait{background:#888}'
+      meta: `<b>全 ${fmtNum(st.rows.length)} ファイル</b>　相違 ${c.diff}・左のみ ${c.left}・右のみ ${c.right}・同一 ${c.same}${c.size ? `・サイズ同じ（内容は未確認）${c.size}` : ''}${c.wait ? `・比較中 ${c.wait}` : ''}<br>比較方法: ${$('#fdContent').checked ? '内容まで比較' : 'サイズだけで判定'}`,
+      body, css: '.tag.wait{background:#888}.tag.size{background:#8a6d00}'
     });
     download(`フォルダ比較レポート_${st.names[0] || '左'}.html`, html, 'text/html;charset=utf-8');
   };

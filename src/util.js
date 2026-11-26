@@ -109,8 +109,12 @@ function b64ToBytes(b64) {
   return u;
 }
 /* PDFの抽出文字に混ざる「見た目が同じ別の文字」（康熙部首・CJK部首補助・互換漢字など）を通常の文字にそろえる */
+// CJK部首補助（U+2E80–2EFF）は NFKC では通常の漢字にならない（例：⻭ U+2EED → 歯、⻑ → 長）。
+// Unicode の EquivalentUnifiedIdeograph.txt から作った対応表で置き換える
+const RADICAL_SRC = '⺁⺂⺃⺄⺅⺆⺇⺈⺉⺊⺋⺌⺍⺎⺏⺐⺑⺒⺓⺔⺕⺖⺗⺘⺙⺛⺜⺝⺞⺟⺠⺡⺢⺣⺤⺥⺦⺧⺨⺩⺪⺫⺬⺭⺮⺯⺰⺱⺲⺳⺴⺵⺶⺷⺸⺹⺺⺻⺼⺽⺾⺿⻀⻁⻂⻃⻄⻅⻆⻇⻈⻉⻊⻋⻌⻍⻎⻏⻐⻑⻒⻓⻔⻕⻖⻗⻘⻙⻚⻛⻜⻝⻞⻟⻠⻡⻢⻣⻤⻥⻦⻧⻨⻩⻪⻫⻬⻭⻮⻯⻰⻱⻲⻳', RADICAL_DST = '厂乛乚乙亻冂𠘨刀刂卜㔾小小兀尣尢𡯂巳幺彑𫜹忄心扌攵旡日月歺母民氵氺灬爫爫丬牛犭王𤴔目示礻𥫗糹纟罓罒㓁冗𦉫羊𦍌𦍋耂肀聿肉𦥑艹艹艹虎衤覀西见角𧢲讠贝𧾷车辶辶辶邑钅長镸长门𨸏阝雨青韦页风飞食𩙿飠饣𩠐马骨鬼鱼鸟卤麦黄黾斉齐歯齿竜龙龜亀龟';
+const RADICAL_MAP = (() => { const m = new Map(), a = Array.from(RADICAL_SRC), b = Array.from(RADICAL_DST); a.forEach((c, i) => m.set(c, b[i])); return m; })();
 function normCJK(s) {
-  return s.replace(/[\u2E80-\u2FDF\uF900-\uFAFF\u2027\u2F00-\u2FD5]/g, c => (c === '\u2027' ? '・' : c.normalize('NFKC')));
+  return s.replace(/[\u2E80-\u2FDF\uF900-\uFAFF\u2027]/g, c => (c === '\u2027' ? '・' : RADICAL_MAP.get(c) || c.normalize('NFKC')));
 }
 function extOf(name) { const m = /\.([^.\\/]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : ''; }
 function baseName(name) { return (name || '').replace(/\.[^.\\/]+$/, ''); }

@@ -30,7 +30,7 @@ async def main():
 
         # --- 英数字だけのファイル：日本語が入っていなければ文字コードを聞かない／改行の混在は確認する
         await t.load(W + 'R08/ascii_l.ini', W + 'R08/mixed.ini')
-        await t.click('#tAllToL'); await t.click('.slot[data-side="0"] button[data-act=save]'); await t.page.wait_for_timeout(300)
+        await t.click('#tAllToL'); await t.click('#modal.on .foot button.primary'); await t.click('.slot[data-side="0"] button[data-act=save]'); await t.page.wait_for_timeout(300)
         t.check('英数字のみの保存で文字コードを聞かない', not await t.js("$('#modal').classList.contains('on')"))
         await t.page.keyboard.press('Escape')
         await t.click('.slot[data-side="1"] button[data-act=save]'); await t.page.wait_for_timeout(300)

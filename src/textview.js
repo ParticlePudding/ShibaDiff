@@ -158,7 +158,9 @@ const TV = (() => {
     for (const p of panes) { const sp = $('.spacer', p); sp.style.height = h + 'px'; sp.style.width = w + 'px'; }
   }
 
-  const getCd = r => r.cd || (r.cd = Diff.chars(L(0)[r.a], L(1)[r.b], Settings.get('unit')));
+  // CSV・TSV では、カンマを3桁区切りとみなさない
+  const isCsv = () => [0, 1].some(i => S[i] && /\.(csv|tsv)$/i.test(S[i].name || ''));
+  const getCd = r => r.cd || (r.cd = Diff.chars(L(0)[r.a], L(1)[r.b], Settings.get('unit'), isCsv()));
   /* 文字列を HTML に（設定により空白・タブを記号で表示） */
   function txt(str) {
     const h = esc(str);
@@ -467,9 +469,13 @@ const TV = (() => {
     App.afterEdit(dir === 0 ? 1 : 0); compare(true);
     if (st.blocks.length) go(Math.min(st.cur, st.blocks.length - 1));
   }
-  function copyAll(dir) {
+  async function copyAll(dir) {
     if (!canMerge()) return;
     if (!st.blocks.length) return toast('差分はありません');
+    const to = dir === 0 ? '右' : '左', from = dir === 0 ? '左' : '右';
+    const ok = await modal({ title: `すべての差分を${to}へコピー`, html: `${st.blocks.length} 箇所の差分すべてを、${from}の内容で${to}に上書きします。<br>${to}は${from}と同じ内容になり、比較結果は「同一」になります（${to}のファイルはまだ保存されません）。<br><span class="muted">元に戻す（Ctrl+Z）で戻せます。</span>`,
+      buttons: [{ label: 'キャンセル', value: false }, { label: `${to}へコピーする`, primary: true, value: true }] });
+    if (!ok) return;
     pushUndo();
     for (let i = st.blocks.length - 1; i >= 0; i--) applyCopy(dir, st.blocks[i]);
     App.afterEdit(dir === 0 ? 1 : 0); compare(true);
@@ -545,6 +551,9 @@ const TV = (() => {
       msg = `<b style="color:#21752f">✓ ${same ? '完全に同一です' : (ignored ? '比較オプションの範囲で同一です' : 'テキスト内容は同一です')}</b>`;
       if (!same && !ignored && S[0].kind === S[1].kind && S[0].kind === 'text' && (S[0].enc !== S[1].enc || S[0].eol !== S[1].eol)) msg += '<span>（文字コードまたは改行コードが異なります）</span>';
       if (!same && S[0].kind === 'text' && S[1].kind === 'text' && S[0].lines.length && (S[0].finalNL !== false) !== (S[1].finalNL !== false)) msg += '<span>（末尾の改行の有無が異なります）</span>';
+      // 差分をコピーした・編集した結果の「同一」は、元のファイルが同一という意味ではないことを示す
+      const ed = [0, 1].filter(i => S[i].dirty);
+      if (ed.length) msg += `<span style="color:#b45309">（${ed.map(i => i ? '右' : '左').join('・')}は編集後・未保存の内容です。元のファイルどうしの結果ではありません。元に戻す：Ctrl+Z）</span>`;
       }
     } else {
       let dl = 0, il = 0, cl = 0;

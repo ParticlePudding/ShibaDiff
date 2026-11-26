@@ -284,9 +284,12 @@ const PV = (() => {
   }
 
   /* ---------- scroll / page indicator / sync ---------- */
+  // 今のページ＝表示領域の上端から PEEK px 下にあるページ。ページへ移動したとき（ページの上端の 10px 上を表示）に、
+  // 前のページと判定しないよう、移動の余白（10px）より大きくする
+  const PEEK = 16;
   function currentPage(side) {
     const sd = st.sides[side]; if (!sd) return { i: 0, f: 0 };
-    const sc = scrollEl(side), y = sc.scrollTop + 8;
+    const sc = scrollEl(side), y = sc.scrollTop + PEEK;
     let lo = 0, hi = sd.slots.length - 1, best = 0;
     while (lo <= hi) { const m = (lo + hi) >> 1; if (sd.slots[m].slot.offsetTop <= y) { best = m; lo = m + 1; } else hi = m - 1; }
     const s = sd.slots[best].slot;
@@ -311,7 +314,7 @@ const PV = (() => {
       const o = 1 - side, osd = st.sides[o]; if (!osd || $('#pvShow').value !== 'both') return;
       const j = PageMatch.other(side, cp.i, osd.slots.length), os = osd.slots[j].slot, osc = scrollEl(o);
       const before = { top: osc.scrollTop, left: osc.scrollLeft };
-      osc.scrollTop = os.offsetTop - 8 + cp.f * (os.offsetHeight + 14);
+      osc.scrollTop = os.offsetTop - PEEK + cp.f * (os.offsetHeight + 14);
       const r = sc.scrollWidth - sc.clientWidth, or = osc.scrollWidth - osc.clientWidth;
       if (r > 0 && or > 0) osc.scrollLeft = sc.scrollLeft / r * or;
       // 実際に設定された位置（端では切り詰められる）を覚えておき、その scroll イベントだけを無視する。
@@ -345,7 +348,7 @@ const PV = (() => {
   function relayoutKeep(side) {
     if (!st.sides[side]) return;
     const cp = currentPage(side); layout(side);
-    const s = st.sides[side].slots[cp.i].slot; scrollEl(side).scrollTop = s.offsetTop - 8 + cp.f * (s.offsetHeight + 14);
+    const s = st.sides[side].slots[cp.i].slot; scrollEl(side).scrollTop = s.offsetTop - PEEK + cp.f * (s.offsetHeight + 14);
   }
 
   /* ---------- toolbar ---------- */

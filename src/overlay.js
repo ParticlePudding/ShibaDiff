@@ -36,6 +36,9 @@ const OV = (() => {
   // 「標準」で描いた場合に対する倍率。許容幅や変更箇所のます目をこの倍率で換算し、解像度を変えても同じ実寸で判定する
   // （A4 などの小さなページは解像度の上限に届かないので、どの設定でも 1）
   const resFactor = (pl, pr) => renderWidth(pl, pr) / widthFor(pl, pr, RES.std);
+  // ずれの許容の倍率：解像度の倍率と、描画の細かさ（1pt あたり何画素か ÷ 2。A4 では 1）の小さい方。
+  // A1 などの大きなページは標準でも 1pt が2画素未満になるので、許容（太らせる量）も細かくし、小さな数字の変更を見落とさないようにする
+  const tolFactor = (pl, pr) => Math.min(resFactor(pl, pr), renderWidth(pl, pr) / Math.max(pl ? pl.w : 0, pr ? pr.w : 0) / 2);
 
   function fillSelect(sel, n, v) {
     // 対応するページがない側（挿入・削除されたページ）は「—」にする
@@ -85,7 +88,7 @@ const OV = (() => {
     // ずれの許容（px）：スキャン画像は既定で2px、CADやWordから作ったPDFは0px（小さな変更を見落とさないため）
     // 許容幅は「標準（2400px）での px」として扱い、解像度に合わせて換算する（どの解像度でも同じ実寸の幅になるように）
     const tolSet = +$('#ovTolPx').value || 0, tol = tolSet > 0;
-    const rad = tol ? Math.max(1, Math.round(tolSet * o.resF)) : 0;
+    const rad = tol ? Math.max(1, Math.round(tolSet * (o.tolF || o.resF))) : 0;
     // スキャン画像は2段階のしきい値で比べる：片側に「はっきり濃い」画素（STRONG 未満）があり、
     // 反対側の近く（許容幅の中）に「薄くても」インク（WEAK 未満）が1つもないときだけ差分にする。
     // 縮小や回転で細い線が薄くなっても、消えたとは判定しない（大きな図面のスキャンで誤検出が多発するのを防ぐ）
@@ -318,7 +321,7 @@ const OV = (() => {
   // 描画・位置合わせ・差分の計算。途中で状態が変わったら（世代番号が進んだら）null を返す
   async function prepare(pl, pr, l, r, gen) {
     const pgL = pl && l >= 0 ? pl[l] : null, pgR = pr && r >= 0 ? pr[r] : null;
-    const W = renderWidth(pgL, pgR), scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0), resF = resFactor(pgL, pgR);
+    const W = renderWidth(pgL, pgR), scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0), resF = resFactor(pgL, pgR), tolF = tolFactor(pgL, pgR);
     const [cl, cr] = await Promise.all([pgL ? renderAt(0, l, W) : null, pgR ? renderAt(1, r, W) : null]);
     if (gen !== st.gen) return null;
     // 位置合わせ：手動・自動で決めた量をページの組ごとに覚える。スキャンは初回に自動で合わせる
@@ -334,7 +337,7 @@ const OV = (() => {
     const [dx, dy, ang] = off;
     let res = null;
     if (cl && cr && (st.mode === 'diff' || (st.mode === 'side' && ($('#ovSideHl').checked || $('#ovBoxes').checked)))) {
-      res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx, dy, ang, resF });
+      res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx, dy, ang, resF, tolF });
       if (gen !== st.gen) return null;
     }
     return { l, r, cl, cr, dx, dy, ang, res, autoMsg, scale, resF, both: !!(pl && pr) };
@@ -644,7 +647,7 @@ const OV = (() => {
     const key = `${p.l}:${p.r}`;
     let off = st.align.get(key);
     if (!off) { off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null; if (scanMode()) st.align.set(key, off); }
-    const res = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]) });
+    const res = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]), tolF: tolFactor(pl[p.l], pr[p.r]) });
     return { ...p, kind: 'pair', regs: res.regions.length, pct: res.ink ? res.changed / res.ink * 100 : 0, res, off };
   }
   async function scan() {
