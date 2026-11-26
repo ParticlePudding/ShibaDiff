@@ -2,7 +2,7 @@
 const OV = (() => {
   const view = $('#ovView');
   const st = {
-    mode: 'diff', l: 0, r: 0, dx: 0, dy: 0, ang: 0, zoom: 'fit', regions: [], regIdx: -1, cache: new Map(),
+    mode: 'diff', l: 0, r: 0, dx: 0, dy: 0, ang: 0, resF: 1, zoom: 'fit', regions: [], regIdx: -1, cache: new Map(),
     blink: 0, blinkOn: false, dirty: true, out: null, base: null, cl: null, cr: null, scanning: false, gen: 0,
     align: new Map() // ページの組み合わせごとの位置合わせ量 "l:r" -> [dx, dy]
   };
@@ -19,13 +19,23 @@ const OV = (() => {
     const cv = document.createElement('canvas');
     await pg.draw(cv, W / pg.w);
     st.cache.set(key, cv);
-    while (st.cache.size > 10) st.cache.delete(st.cache.keys().next().value);
+    // 描画結果は10件まで、かつ合計 6000万画素（約240MB）までに抑える（大きな図面でメモリを使いすぎないように）
+    const px = () => { let n = 0; for (const c of st.cache.values()) n += c.width * c.height; return n; };
+    while (st.cache.size > 10 || (st.cache.size > 2 && px() > 60e6)) {
+      const k = st.cache.keys().next().value, c = st.cache.get(k); st.cache.delete(k); c.width = c.height = 0;
+    }
     return cv;
   }
-  function renderWidth(pl, pr) {
+  // 描画の幅の上限（解像度の設定）。A0 などの大きな図面は上限で頭打ちになるので、軽量にすると速く、精細にすると細い線まで拾える
+  const RES = { low: 1600, std: 2400, high: 4000 };
+  function widthFor(pl, pr, max) {
     const w = Math.max(pl ? pl.w : 0, pr ? pr.w : 0);
-    return Math.round(Math.max(900, Math.min(2400, w * 2)));
+    return Math.round(Math.max(Math.min(900, max), Math.min(max, w * 2)));
   }
+  const renderWidth = (pl, pr) => widthFor(pl, pr, RES[Settings.get('ovRes')] || RES.std);
+  // 「標準」で描いた場合に対する倍率。許容幅や変更箇所のます目をこの倍率で換算し、解像度を変えても同じ実寸で判定する
+  // （A4 などの小さなページは解像度の上限に届かないので、どの設定でも 1）
+  const resFactor = (pl, pr) => renderWidth(pl, pr) / widthFor(pl, pr, RES.std);
 
   function fillSelect(sel, n, v) {
     sel.innerHTML = Array.from({ length: n }, (_, i) => `<option value="${i}">${i + 1} / ${n}</option>`).join('');
@@ -48,32 +58,43 @@ const OV = (() => {
     return g;
   }
 
-  function diffImage(cl, cr, thr, faint) {
-    const W = Math.max(cl.width, cr.width + Math.max(0, st.dx)), H = Math.max(cl.height, cr.height + Math.max(0, st.dy));
-    const a = lumData(cl, W, H), b = lumData(cr, W, H, st.dx, st.dy, st.ang);
+  // 大きな図面でも画面が固まらないよう、段階ごと・一定の行ごとに画面へ制御を返す
+  // o：位置合わせ量と解像度の倍率 {dx, dy, ang, resF}。途中で制御を返すので、共有の状態ではなく引数で受け取る
+  async function diffImage(cl, cr, thr, faint, o) {
+    const W = Math.max(cl.width, cr.width + Math.max(0, o.dx)), H = Math.max(cl.height, cr.height + Math.max(0, o.dy));
+    const a = lumData(cl, W, H); await sleep(0);
+    const b = lumData(cr, W, H, o.dx, o.dy, o.ang); await sleep(0);
     // ずれの許容（px）：スキャン画像は既定で2px、CADやWordから作ったPDFは0px（小さな変更を見落とさないため）
-    const rad = +$('#ovTolPx').value || 0, tol = rad > 0;
-    // スキャン画像は濃淡（にじみ・かすれ）の差を拾わないよう白黒に二値化してから比べる
-    if (scanMode() && tol) for (const g of [a, b]) for (let i = 0; i < g.length; i++) g[i] = g[i] < 170 ? 0 : 255;
-    const mf = g => { let o = g; for (let k = 0; k < rad; k++) o = minFilter(o, W, H); return o; };
-    const aMin = tol ? mf(a) : a, bMin = tol ? mf(b) : b;
+    // 許容幅は「標準（2400px）での px」として扱い、解像度に合わせて換算する（どの解像度でも同じ実寸の幅になるように）
+    const tolSet = +$('#ovTolPx').value || 0, tol = tolSet > 0;
+    const rad = tol ? Math.max(1, Math.round(tolSet * o.resF)) : 0;
+    // スキャン画像は2段階のしきい値で比べる：片側に「はっきり濃い」画素（STRONG 未満）があり、
+    // 反対側の近く（許容幅の中）に「薄くても」インク（WEAK 未満）が1つもないときだけ差分にする。
+    // 縮小や回転で細い線が薄くなっても、消えたとは判定しない（大きな図面のスキャンで誤検出が多発するのを防ぐ）
+    const scan = scanMode() && tol, STRONG = 170, WEAK = Math.min(250, STRONG + thr);
+    const mf = async g => { let o = g; for (let k = 0; k < rad; k++) { o = minFilter(o, W, H); await sleep(0); } return o; };
+    const aMin = tol ? await mf(a) : a, bMin = tol ? await mf(b) : b;
     const img = new ImageData(W, H), d = img.data;
-    const CELL = 16, gw = Math.ceil(W / CELL), gh = Math.ceil(H / CELL), grid = new Uint16Array(gw * gh);
+    // 変更箇所をまとめるます目も、標準での 16px を解像度に合わせて換算する（解像度で箇所の数が変わらないように）
+    const CELL = Math.max(8, Math.round(16 * o.resF)), gw = Math.ceil(W / CELL), gh = Math.ceil(H / CELL), grid = new Uint16Array(gw * gh);
     let changed = 0, ink = 0;
     for (let y = 0, j = 0; y < H; y++) {
+      if (y && !(y % 400)) await sleep(0);
       const gy = (y / CELL | 0) * gw;
       for (let x = 0; x < W; x++, j++) {
         const ga = a[j], gb = b[j], k = j * 4;
         if (ga < 200 || gb < 200) ink++;
-        if (ga + thr < bMin[j]) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; changed++; grid[gy + (x / CELL | 0)]++; }
-        else if (gb + thr < aMin[j]) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; changed++; grid[gy + (x / CELL | 0)]++; }
+        if (scan ? (ga < STRONG && bMin[j] >= WEAK) : (ga + thr < bMin[j])) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; changed++; grid[gy + (x / CELL | 0)]++; }
+        else if (scan ? (gb < STRONG && aMin[j] >= WEAK) : (gb + thr < aMin[j])) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; changed++; grid[gy + (x / CELL | 0)]++; }
         else { const m = Math.min(ga, gb), v = faint ? 255 - ((255 - m) * 0.32 | 0) : m; d[k] = d[k + 1] = d[k + 2] = v; }
         d[k + 3] = 255;
       }
     }
     // regions: connected components of changed cells (with 1-cell dilation)
     const mark = new Uint8Array(gw * gh);
-    for (let i = 0; i < grid.length; i++) if (grid[i] >= 3) mark[i] = 1;
+    // ます目の画素数の下限も解像度に合わせて換算する（軽量で小さな文字の変更を落とさないように）
+    const cellMin = Math.max(2, Math.round(3 * o.resF)), regMin = Math.max(4, Math.round(8 * o.resF));
+    for (let i = 0; i < grid.length; i++) if (grid[i] >= cellMin) mark[i] = 1;
     const seen = new Uint8Array(gw * gh), regions = [];
     for (let i = 0; i < mark.length; i++) {
       if (!mark[i] || seen[i]) continue;
@@ -86,7 +107,7 @@ const OV = (() => {
           const n = yy * gw + xx; if (mark[n] && !seen[n]) { seen[n] = 1; q.push(n); }
         }
       }
-      if (cnt < 8) continue;
+      if (cnt < regMin) continue;
       regions.push({ x: x0 * CELL - 6, y: y0 * CELL - 6, w: (x1 - x0 + 1) * CELL + 12, h: (y1 - y0 + 1) * CELL + 12 });
     }
     regions.sort((p, q) => (Math.abs(p.y - q.y) < 30 ? p.x - q.x : p.y - q.y));
@@ -113,7 +134,7 @@ const OV = (() => {
 
   /* ---- auto alignment ---- */
   /* 自動位置合わせ：平行移動と回転（±1.2°）を推定して [dx, dy, ang] を返す */
-  function autoAlign(cl, cr) {
+  async function autoAlign(cl, cr) {
     const W2 = Math.max(cl.width, cr.width), H2 = Math.max(cl.height, cr.height);
     const ink = (cv, f, ang) => {
       const w = Math.ceil(W2 / f), h = Math.ceil(H2 / f);
@@ -135,26 +156,35 @@ const OV = (() => {
       }
       return n ? s / n : 1e9;
     };
-    const search = (f, angs, cx, cy, R, step) => {
+    // 角度ごとに処理を区切って画面に制御を返す（大きな図面で画面が固まらないように）
+    const search = async (f, angs, cx, cy, R, step) => {
       const A = ink(cl, f, 0); let best = { s: 1e18 };
       for (const ang of angs) {
+        await sleep(0);
         const B = ink(cr, f, ang);
-        for (let dy = cy - R; dy <= cy + R; dy++) for (let dx = cx - R; dx <= cx + R; dx++) {
-          const sc = score(A.g, B.g, A.w, A.h, dx, dy, step);
-          if (sc < best.s) best = { s: sc, dx, dy, ang };
+        for (let dy = cy - R; dy <= cy + R; dy++) {
+          await sleep(0); // 1行ごとに区切る
+          for (let dx = cx - R; dx <= cx + R; dx++) {
+            const sc = score(A.g, B.g, A.w, A.h, dx, dy, step);
+            if (sc < best.s) best = { s: sc, dx, dy, ang };
+          }
         }
       }
       return best;
     };
     const range = (c, r, st) => { const o = []; for (let v = c - r; v <= c + r + 1e-9; v += st) o.push(Math.round(v * 100) / 100); return o; };
-    // 1) 1/4 に縮小して平行移動だけを ±14 で探す
-    let b = search(4, [0], 0, 0, 14, 1);
-    // 2) 1/3 で回転 -1.2～1.2°（0.1°刻み）と平行移動 ±3 を探す
-    b = search(3, range(0, 1.2, 0.1), Math.round(b.dx * 4 / 3), Math.round(b.dy * 4 / 3), 3, 2);
-    // 3) 1/3 で回転を 0.02° 刻みで詰める
-    b = search(3, range(b.ang, 0.06, 0.02), b.dx, b.dy, 1, 2);
+    // 粗い段階は、描画の幅によらず同じくらいの大きさ（幅 600〜800px）に縮小して探す。
+    // 探す範囲は「標準（2400px）で ±56px」に相当する実寸にそろえる（精細で遅くならないように）
+    const big = Math.max(1, W2 / 2400), f1 = Math.max(4, Math.round(W2 / 600)), f2 = Math.max(3, Math.round(W2 / 800));
+    const R1 = Math.ceil(56 * big / f1);
+    // 1) 縮小して平行移動だけを探す
+    let b = await search(f1, [0], 0, 0, R1, 1);
+    // 2) 回転 -1.2～1.2°（0.1°刻み）と平行移動 ±3 を探す
+    b = await search(f2, range(0, 1.2, 0.1), Math.round(b.dx * f1 / f2), Math.round(b.dy * f1 / f2), 3, 2);
+    // 3) 回転を 0.02° 刻みで詰める
+    b = await search(f2, range(b.ang, 0.06, 0.02), b.dx, b.dy, 1, 2);
     // 4) 原寸で平行移動 ±3
-    b = search(1, [b.ang], b.dx * 3, b.dy * 3, 3, 3);
+    b = await search(1, [b.ang], b.dx * f2, b.dy * f2, 3, 3);
     return [b.dx, b.dy, Math.abs(b.ang) < 0.01 ? 0 : b.ang];
   }
 
@@ -191,7 +221,7 @@ const OV = (() => {
     fillSelect($('#ovLPage'), pl ? pl.length : 0, st.l); fillSelect($('#ovRPage'), pr ? pr.length : 0, st.r);
     if (!pl && !pr) { view.innerHTML = '<div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します<br><span style="font-size:12.5px">スキャン画像（PNG/JPEG）同士や、PDFとスキャン画像の比較にも使えます</span></div>'; $('#ovStats').textContent = '—'; return; }
     const pgL = pl && pl[st.l], pgR = pr && pr[st.r];
-    const W = renderWidth(pgL, pgR); st.scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0);
+    const W = renderWidth(pgL, pgR); st.scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0); st.resF = resFactor(pgL, pgR);
     let cl, cr;
     try {
       [cl, cr] = await Promise.all([pgL ? renderAt(0, st.l, W) : null, pgR ? renderAt(1, st.r, W) : null]);
@@ -201,10 +231,20 @@ const OV = (() => {
     // 位置合わせ：手動・自動で決めた量をページの組ごとに覚える。スキャンは初回に自動で合わせる
     let autoMsg = '';
     if (st.align.has(pairKey())) [st.dx, st.dy, st.ang] = st.align.get(pairKey());
-    else if (cl && cr && scanMode()) { [st.dx, st.dy, st.ang] = autoAlign(cl, cr); st.align.set(pairKey(), [st.dx, st.dy, st.ang]); autoMsg = `<br><span class="muted">スキャン画像のため自動で位置合わせしました（X ${st.dx} / Y ${st.dy}px${st.ang ? ` / 回転 ${st.ang}°` : ''}）</span>`; }
+    else if (cl && cr && scanMode()) {
+      $('#ovStats').innerHTML = '<span class="muted">位置を合わせています…</span>';
+      const off = await withBusy('スキャン画像の位置を合わせています…', () => autoAlign(cl, cr));
+      if (gen !== st.gen) return;
+      [st.dx, st.dy, st.ang] = off; st.align.set(pairKey(), [st.dx, st.dy, st.ang]); autoMsg = `<br><span class="muted">スキャン画像のため自動で位置合わせしました（X ${st.dx} / Y ${st.dy}px${st.ang ? ` / 回転 ${st.ang}°` : ''}）</span>`; }
     else { st.dx = 0; st.dy = 0; st.ang = 0; }
     showOffset();
     if (gen !== st.gen) return;
+    // 差分画像は表示を消す前に計算する（計算中も前の結果を見られるように）
+    let res = null;
+    if (cl && cr && st.mode === 'diff') {
+      res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx: st.dx, dy: st.dy, ang: st.ang, resF: st.resF });
+      if (gen !== st.gen) return;
+    }
     view.innerHTML = '';
     if (!cl || !cr || st.mode === 'side') {
       const pair = document.createElement('div'); pair.className = 'pair';
@@ -219,7 +259,6 @@ const OV = (() => {
     const c = out.getContext('2d');
     st.out = out;
     if (st.mode === 'diff') {
-      const res = diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked);
       st.base = res; st.regions = res.regions; st.regIdx = -1;
       drawBoxes();
       const pct = res.ink ? res.changed / res.ink * 100 : 0;
@@ -282,9 +321,9 @@ const OV = (() => {
       const a = await renderAt(0, i, W), b = await renderAt(1, i, W);
       const key = `${i}:${i}`;
       let off = st.align.get(key);
-      if (!off) { off = scanMode() ? autoAlign(a, b) : [0, 0, 0]; if (scanMode()) st.align.set(key, off); }
-      const save = [st.dx, st.dy, st.ang]; [st.dx, st.dy, st.ang] = off;
-      const r = diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked); [st.dx, st.dy, st.ang] = save;
+      if (!off) { off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (!st.scanning) break; if (scanMode()) st.align.set(key, off); }
+      const r = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[i], pr[i]) });
+      if (!st.scanning) break;
       rows.push({ i, pct: r.ink ? r.changed / r.ink * 100 : 0, regs: r.regions.length });
       await sleep(0);
     }
@@ -340,6 +379,17 @@ const OV = (() => {
   };
   $('#ovRegPrev').onclick = () => gotoRegion(-1); $('#ovRegNext').onclick = () => gotoRegion(1);
   $('#ovScan').onclick = scan;
+  const resSel = $('#ovRes'); resSel.value = Settings.get('ovRes');
+  resSel.onchange = () => Settings.set('ovRes', resSel.value);
+  Settings.on(k => {
+    if (k !== 'ovRes') return;
+    resSel.value = Settings.get('ovRes');
+    // 解像度が変わると画素単位の位置合わせ量も変わるので、描画と位置合わせをやり直す。
+    // 実行中の描画・位置合わせは世代番号を進めて捨てる（古い解像度の位置合わせ量を保存しないように）
+    st.gen++; st.scanning = false;
+    st.cache.clear(); st.align.clear(); $('#ovScanRes').innerHTML = ''; st.dirty = true;
+    if (App.tab === 'overlay') update();
+  });
   const zs = $('#ovZoom');
   zs.onchange = () => { st.zoom = zs.value; update(); };
   const ZS = ['0.5', '0.75', '1', '1.5', '2'];
@@ -350,6 +400,7 @@ const OV = (() => {
   function activate() { if (st.dirty) update(); }
   function deactivate() { stopBlink(); }
   function invalidate() {
+    st.gen++; st.scanning = false; // 実行中の描画・位置合わせ・一括チェックは捨てる（前のファイルの結果を残さないように）
     st.l = 0; st.r = 0; st.cache.clear(); st.dirty = true; $('#ovScanRes').innerHTML = '';
     // ファイルが変わったら位置合わせ量を必ず0に戻す
     st.align.clear(); st.dx = 0; st.dy = 0; st.ang = 0; showOffset();

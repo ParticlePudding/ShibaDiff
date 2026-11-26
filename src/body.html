@@ -165,6 +165,7 @@
           <div>差分の感度 <input type="range" id="ovThr" min="5" max="160" value="60"></div>
           <label><input type="checkbox" id="ovBoxes" checked>変更箇所を枠で囲む</label>
           <label><input type="checkbox" id="ovFaint" checked>共通部分を薄く表示</label>
+          <div title="大きな図面（A1・A0 など）で描く細かさ。軽量は速く、精細は細い線まで比べられます">解像度 <select id="ovRes" aria-label="重ね合わせの解像度"><option value="low">軽量（〜1600px）</option><option value="std">標準（〜2400px）</option><option value="high">精細（〜4000px）</option></select></div>
           <div title="スキャンなどの細かなずれを差分として扱わない幅">ずれの許容 <b id="ovTolVal">0</b> px <input type="range" id="ovTolPx" min="0" max="5" step="1" value="0" aria-label="ずれの許容（ピクセル）"></div>
         </div>
         <h4>位置合わせ（右をずらす・回す）</h4>

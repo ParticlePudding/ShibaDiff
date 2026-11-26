@@ -4,7 +4,7 @@ const Settings = (() => {
   const BASE = { stampTop: '確認', stampName: '' };
   const DEF = {
     wrap: false, showWs: false, unit: 'auto', numDelta: true, fontSize: 'm', persist: true,
-    dateFmt: 'yy', stampKind: 'date', stampSize: 'm',
+    dateFmt: 'yy', stampKind: 'date', stampSize: 'm', ovRes: 'std',
     stampTop: old ? old.top : '確認', stampName: old ? old.name : ''
   };
   const cur = Object.assign({}, DEF, store.get('settings', {}));
@@ -33,6 +33,8 @@ ${chk('showWs', '空白・タブ・改行を記号で表示する（半角空白
 <label class="setrow">行の中の違いの単位 ${sel('unit', [['auto', '自動（英文は単語、和文は文字）'], ['char', '1文字ずつ'], ['word', '単語ずつ']])}</label>
 ${chk('numDelta', '数字が変わったとき、差と増減率を表示する（例：+50,000 / +10.0%）')}
 <label class="setrow">文字の大きさ ${sel('fontSize', [['s', '小'], ['m', '標準'], ['l', '大']])}</label>
+<label class="setrow">重ね合わせの解像度 ${sel('ovRes', [['low', '軽量（〜1600px）'], ['std', '標準（〜2400px）'], ['high', '精細（〜4000px）']])}</label>
+<div class="muted" style="margin:2px 0 6px 0">A1・A0 などの大きな図面で効きます。重いときは「軽量」、細い線の違いを見落とすときは「精細」にしてください。</div>
 <h4 id="set-stamp">日付印</h4>
 <label class="setrow">印の種類 ${sel('stampKind', [['date', '日付印（上段・日付・氏名の3段）'], ['name', '認印（氏名のみ）']])}</label>
 <label class="setrow">日付の書き方 ${sel('dateFmt', [['yy', "西暦2桁（'26.11.22）"], ['yyyy', '西暦4桁（2026.11.22）'], ['wareki', '和暦（R8.11.22）']])}</label>

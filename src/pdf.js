@@ -1,13 +1,21 @@
 /* pdf.js 連携（ライブラリとワーカーはHTML内に埋め込み済み） */
 const PDF = (() => {
-  let libP = null, cmaps = null;
+  let libP = null, cmaps = null, classicUrl = null;
   function lib() {
     if (!libP) libP = new Promise((res, rej) => {
       const done = () => {
         try {
           const L = window.pdfjsLib;
           const src = document.getElementById('pdfjs-worker').textContent;
-          L.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+          const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+          L.GlobalWorkerOptions.workerSrc = url;
+          // ワーカーはこちらで作って渡す。pdf.js に任せると、file:// で開いたとき（オリジンが null）に
+          // ワーカーの起動に失敗し、メインスレッドで処理する「fake worker」になって画面が固まるため。
+          // オリジンが null だとモジュール形式のワーカーは起動できないので、末尾の export を外して通常のスクリプトにする
+          // （ワーカー側は、ワーカー内で読み込まれると自動で待ち受けを始める）
+          const classic = src.replace(/export\s*\{\s*([\w$]+)\s+as\s+WorkerMessageHandler\s*\}\s*;?\s*$/, 'self.pdfjsWorker = { WorkerMessageHandler: $1 };');
+          // ワーカーは文書ごとに作る（左右の文書の読み込み・描画を並行して進められるように）。作れなければ pdf.js に任せる
+          if (classic !== src) classicUrl = URL.createObjectURL(new Blob([classic], { type: 'text/javascript' }));
           res(L);
         } catch (e) { rej(e); }
       };
@@ -30,15 +38,26 @@ const PDF = (() => {
   }
   async function open(bytes, password) {
     const L = await lib();
+    // 文書ごとのワーカー（文書を閉じたら終了させる）
+    let raw = null, worker = null;
+    if (classicUrl) {
+      try { raw = new Worker(classicUrl); worker = new L.PDFWorker({ port: raw }); }
+      catch (e) { console.warn('PDFのワーカーを起動できません', e); if (raw) raw.terminate(); raw = worker = null; }
+    }
+    const stop = () => { try { if (worker) worker.destroy(); } catch (e) { } if (raw) raw.terminate(); raw = worker = null; };
     const task = L.getDocument({
       data: bytes.slice(), CMapReaderFactory: CMapFactory, cMapPacked: true, useWorkerFetch: false,
-      isEvalSupported: false, password, disableFontFace: false, useSystemFonts: true
+      isEvalSupported: false, password, disableFontFace: false, useSystemFonts: true, ...(worker ? { worker } : {})
     });
     task.onPassword = async (updatePw, reason) => {
       const pw = await askText(reason === 2 ? 'パスワードが違います。もう一度入力してください' : 'このPDFはパスワードで保護されています', '', { label: 'パスワード' });
       if (pw == null) { task.destroy(); } else updatePw(pw);
     };
-    return task.promise;
+    let doc;
+    try { doc = await task.promise; } catch (e) { stop(); throw e; }
+    const destroy = doc.destroy.bind(doc);
+    doc.destroy = async () => { try { await destroy(); } finally { stop(); } };
+    return doc;
   }
   async function text(doc, onProgress) {
     const out = [];
