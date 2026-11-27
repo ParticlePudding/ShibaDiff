@@ -457,11 +457,16 @@ const PV = (() => {
       pushHist(side); st.ann[side] = {}; st.sel = null; saveAnn(side); st.sides[side] && st.sides[side].slots.forEach((_, i) => drawAnn(side, i));
     };
   });
-  let resizeTimer = 0;
-  window.addEventListener('resize', () => {
-    if (App.tab !== 'page' || !/^fit/.test(st.zoom)) return;
-    clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { relayoutKeep(0); relayoutKeep(1); }, 120);
+  // 左右の表示領域の幅が変わったら（ウィンドウ、ファイル欄の開閉、左右・片側の切り替え、タブを開いた直後など）、
+  // 「幅に合わせる」「ページ全体」の大きさを合わせ直す
+  let resizeTimer = 0; const lastW = [0, 0];
+  const ro = new ResizeObserver(() => {
+    clearTimeout(resizeTimer); resizeTimer = setTimeout(() => {
+      if (App.tab !== 'page' || !/^fit/.test(st.zoom)) return;
+      [0, 1].forEach(side => { const w = scrollEl(side).clientWidth; if (w && w !== lastW[side]) { lastW[side] = w; relayoutKeep(side); } });
+    }, 80);
   });
+  [0, 1].forEach(side => ro.observe(scrollEl(side)));
   function relayoutKeep(side) {
     if (!st.sides[side]) return;
     const cp = currentPage(side); layout(side);

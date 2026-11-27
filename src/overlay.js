@@ -264,6 +264,8 @@ const OV = (() => {
   }
   function placeCanvas(el, half = false) {
     el.dataset.half = half ? '1' : '';
+    // 表示領域が見えていない（幅0）間は大きさを決めない。見えたときに ResizeObserver が合わせる
+    if (!view.clientWidth && (st.zoom === 'fit' || st.zoom === 'fith')) { lastVW = 0; return; }
     const [w, h] = dims(el), cw = cssWidth(el, half);
     el.style.width = cw + 'px'; el.style.height = (h / w * cw) + 'px';
   }
@@ -989,7 +991,16 @@ const OV = (() => {
   // ＋／－は今の倍率から 1.25 倍ずつ（幅・縦に合わせているときも、その倍率から）
   $('#ovZIn').onclick = () => zoomBy(1.25);
   $('#ovZOut').onclick = () => zoomBy(1 / 1.25);
-  let rt = 0; window.addEventListener('resize', () => { if (App.tab === 'overlay' && (st.zoom === 'fit' || st.zoom === 'fith')) { clearTimeout(rt); rt = setTimeout(() => { sized().forEach(c => placeCanvas(c, c.dataset.half === '1')); }, 100); } });
+  // 表示領域の大きさが変わったら（ウィンドウ、ファイル欄の開閉、タブの切り替え直後、全画面など）、
+  // 「幅に合わせる」「縦に合わせる」の大きさを合わせ直す。描き直さず、大きさだけを変える
+  let lastVW = 0, lastVH = 0, rt = 0;
+  const refit = () => {
+    const w = view.clientWidth, h = view.clientHeight;
+    if (!w || (w === lastVW && h === lastVH)) return;
+    lastVW = w; lastVH = h;
+    if (st.zoom === 'fit' || st.zoom === 'fith') sized().forEach(c => placeCanvas(c, c.dataset.half === '1'));
+  };
+  new ResizeObserver(() => { cancelAnimationFrame(rt); rt = requestAnimationFrame(refit); }).observe(view);
 
   showPanelFor(st.mode);
   st.scroll = !!Settings.get('ovScroll');

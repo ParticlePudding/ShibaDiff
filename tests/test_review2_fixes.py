@@ -101,6 +101,21 @@ async def main():
         await t.page.wait_for_timeout(500)
         ck('紙のスキャン（文字のないPDF）では、色の比較は既定でオフ', not await t.js("$('#ovColor').checked"))
 
+        # ---- 開いた直後にページが小さく表示されない（ファイル欄を開いたまま読み込み → テキスト → 重ね合わせ） ----
+        small = []
+        for k in range(4):
+            pair = ('R15', '決裁文書_起案時_スキャン.pdf', '決裁文書_決裁後_スキャン.pdf') if k % 2 == 0 else ('R19', '登録画面_v1.png', '登録画面_v2.png')
+            await t.tab('text'); await t.js("App.showSlots(true)")
+            await t.load(os.path.join(D, pair[0], pair[1]), os.path.join(D, pair[0], pair[2]))
+            await t.tab('text'); await t.js("App.showSlots(true)")
+            await t.page.click('#tabs button[data-tab=overlay]'); await t.page.wait_for_timeout(2500)
+            small.append(await t.js("(() => { const c = document.querySelector('#ovView canvas'); return c ? Math.round(c.getBoundingClientRect().width / document.querySelector('#ovView').clientWidth * 100) : 0; })()"))
+        ck('重ね合わせを開いた直後も「幅に合わせる」の大きさ', all(x >= 90 for x in small), small)
+        await t.tab('page'); await t.page.wait_for_timeout(1200)
+        await t.js("App.showSlots(false)"); await t.page.wait_for_timeout(600)
+        pw = await t.js("(() => { const sc = document.querySelector('.pv-col[data-side=\"0\"] .pv-scroll') || document.querySelector('.pv-col[data-side=\"0\"]'); const pg = document.querySelector('.pv-col[data-side=\"0\"] .pv-page'); return Math.round(pg.getBoundingClientRect().width / sc.clientWidth * 100); })()")
+        ck('ページ表示も、表示領域の幅が変わると「幅に合わせる」を合わせ直す', pw >= 85, pw)
+
         # ---- ヘッダのファイル名：左右の違う部分（v3／v4_提出版）が見える ----
         await t.load(os.path.join(D, 'R10', 'ノース様提案_v3.pptx'), os.path.join(D, 'R10', 'ノース様提案_v4_提出版.pptx'))
         names = lambda: t.js("[...document.querySelectorAll('#hdrFiles .nm')].map(e => e.textContent)")
