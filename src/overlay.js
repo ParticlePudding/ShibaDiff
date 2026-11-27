@@ -1024,6 +1024,8 @@ const OV = (() => {
   st.gen0 = 0;
   function invalidate() {
     dropSlots(); st.cur = null; st.gen0++; rcache.clear();
+    // ファイルが変わったら、前の組の結果（件数・一覧）は出さない（新しい組の結果が出るまで「比較しています」）
+    $('#ovStats').innerHTML = '<span class="muted">比較しています…</span>'; $('#ovNotes').innerHTML = '';
     st.gen++; st.scanning = false; // 実行中の描画・位置合わせ・一括チェックは捨てる（前のファイルの結果を残さないように）
     st.l = 0; st.r = 0; st.cache.clear(); st.dirty = true; $('#ovScanRes').innerHTML = '';
     // ファイルが変わったら位置合わせ量を必ず0に戻す
