@@ -478,3 +478,4 @@ button:has(>.ic),summary:has(>.ic){display:inline-flex;align-items:center;justif
 .nonl{display:inline-block;margin-left:8px;padding:0 5px;border:1px solid #d97706;border-radius:3px;color:#b45309;background:#fff7ed;font-size:10.5px;line-height:15px;font-family:sans-serif;vertical-align:1px;white-space:nowrap}
 .nt-hint2{font-size:11px;margin-top:2px}
 .nt-item.nt-eol{cursor:default}
+.datatbl th.num,.datatbl td.num{text-align:right;white-space:nowrap}

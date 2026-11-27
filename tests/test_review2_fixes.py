@@ -132,6 +132,15 @@ async def main():
         ck('レポート：見出しに注記、変更点の一覧に「末尾の改行」とコメント', '末尾の改行の有無も異なります' in h and '末尾の改行' in h and 'エディタの設定で末尾改行を付ける' in h)
         await t.click('#tNotes')
 
+        # ---- 保存データの画面：説明・名前・大きさ ----
+        await t.js("Settings.set('persist', true); localStorage.setItem('doccmp:pv:toolColor', '{}'); Notes.set('t:abc:0', {st: 'ok', text: 'x'})")
+        await t.js("setTimeout(() => Settings.openData(), 0)"); await t.page.wait_for_timeout(400)
+        dt = await t.page.inner_text('#modal')
+        ck('保存データ：廃止した日付印の説明がない', '日付印の氏名' not in dt)
+        ck('保存データ：変更点のコメント・道具ごとの色に日本語の名前', '変更点のコメント' in dt and '注釈の道具ごとの色' in dt and 'pv:toolColor' not in dt, dt[:200])
+        ck('保存データ：「保存の大きさ」の列', '保存の大きさ' in dt)
+        await t.page.keyboard.press('Escape'); await t.js("Notes.clear(); Settings.set('persist', false); localStorage.removeItem('doccmp:pv:toolColor')")
+
         # ---- 全画面：「全画面を終える」がツールバーのボタンに重ならない ----
         overlap = '''(() => { const b = document.querySelector('#btnExitFull'), r = b.getBoundingClientRect();
           if (b.hidden || !r.width || r.right > innerWidth + 1) return 'hidden-or-out';

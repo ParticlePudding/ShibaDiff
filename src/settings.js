@@ -74,10 +74,15 @@ ${txt('author', 'コメントの記入者名', '例：山田（空欄なら記�
     if (k.startsWith('doccmp:ann:')) {
       const [name, size, mt] = k.slice(11).split('|');
       let n = 0; try { const o = JSON.parse(raw); for (const v of Object.values(o)) if (Array.isArray(v)) n += v.length; } catch (e) { }
-      return { kind: '注釈', name, detail: `${n} 件・${fmtSize(+size)}・更新 ${fmtDate(+mt)}`, bytes: raw.length };
+      return { kind: '注釈', name, detail: `${n} 件（文書 ${fmtSize(+size)}・文書の更新日時 ${fmtDate(+mt)}）`, bytes: raw.length };
+    }
+    if (k.startsWith('doccmp:notes:')) {
+      const [l, r] = k.slice(13).split('||').map(x => (x || '').split('|')[0]);
+      let n = 0; try { n = Object.keys(JSON.parse(raw)).length; } catch (e) { }
+      return { kind: '変更点のコメント', name: `${l} ／ ${r}`, detail: `${n} 件`, bytes: raw.length };
     }
     if (k.startsWith('doccmp:rot:')) { const [name] = k.slice(11).split('|'); return { kind: 'ページの回転', name, detail: raw + '°', bytes: raw.length }; }
-    const names = { 'doccmp:settings': '設定', 'doccmp:textopts': 'テキスト比較の比較条件', 'doccmp:tvLayout': '左右表示／一列表示', 'doccmp:pv:color': '注釈の色', 'doccmp:pv:width': '注釈の線の太さ', 'doccmp:pv:zoom': 'ページ表示の倍率', 'doccmp:pv:stamp': '日付印（旧形式）' };
+    const names = { 'doccmp:settings': '設定', 'doccmp:textopts': 'テキスト比較の比較条件', 'doccmp:tvLayout': '左右表示／一列表示', 'doccmp:pv:color': '注釈の色（旧形式）', 'doccmp:pv:toolColor': '注釈の道具ごとの色', 'doccmp:pv:width': '注釈の線の太さ', 'doccmp:pv:zoom': 'ページ表示の倍率', 'doccmp:pv:stamp': '日付印（旧形式・使っていません）', 'doccmp:pvChanges': 'ページ表示で変更箇所を表示するか', 'doccmp:tvNotes': 'テキスト比較の変更点一覧を開くか' };
     const rep = { text: 'テキスト比較', overlay: '重ね合わせ比較', page: 'ページ表示・注釈', folder: 'フォルダ比較' };
     const m = /^doccmp:report:(\w+)$/.exec(k);
     if (m) return { kind: '設定', name: `レポートの出力設定（${rep[m[1]] || m[1]}）`, detail: '', bytes: raw.length };
@@ -98,12 +103,12 @@ ${txt('author', 'コメントの記入者名', '例：山田（空欄なら記�
   }
   function openData() {
     const rows = () => allKeys().map(k => ({ k, ...describe(k) }));
-    const table = list => list.length ? `<table class="datatbl"><thead><tr><th><input type="checkbox" id="dAll" aria-label="すべて選択"></th><th>種類</th><th>内容</th><th>詳細</th></tr></thead><tbody>` +
-      list.map(r => `<tr><td><input type="checkbox" data-key="${esc(r.k)}" aria-label="${esc(r.name)} を選択"></td><td>${r.kind}</td><td class="nm">${esc(r.name)}</td><td class="muted">${esc(r.detail)}</td></tr>`).join('') + '</tbody></table>'
+    const table = list => list.length ? `<table class="datatbl"><thead><tr><th><input type="checkbox" id="dAll" aria-label="すべて選択"></th><th>種類</th><th>内容</th><th>詳細</th><th class="num">保存の大きさ</th></tr></thead><tbody>` +
+      list.map(r => `<tr><td><input type="checkbox" data-key="${esc(r.k)}" aria-label="${esc(r.name)} を選択"></td><td>${r.kind}</td><td class="nm">${esc(r.name)}</td><td class="muted">${esc(r.detail)}</td><td class="num">${fmtSize(r.bytes * 2)}</td></tr>`).join('') + '</tbody></table>'
       : '<p class="muted">このブラウザに保存されているデータはありません。</p>';
     return modal({
       title: '保存されているデータ', wide: true,
-      html: `<p>このツールがブラウザ（localStorage）に保存しているデータの一覧です。ファイルの中身そのものは保存していません。<br>注釈には付箋の文字や日付印の氏名が含まれます。共用のPCでは、使い終わったら削除してください。</p><div id="dList"></div>`,
+      html: `<p>このツールがブラウザ（localStorage）に保存しているデータの一覧です。ファイルの中身そのものは保存していません。<br>注釈には付箋の文字が、変更点のコメントにはひとことと記入者名が含まれます。共用のPCでは、使い終わったら削除してください（注釈・コメントの自動保存は、設定で既定はオフです）。<br><span class="muted">「保存の大きさ」は、このブラウザに保存しているデータの大きさです（文書のファイルの大きさではありません）。</span></p><div id="dList"></div>`,
       buttons: [{ label: '選択したものを削除', value: 'sel' }, { label: 'すべて削除', value: 'all' }, { label: '閉じる', primary: true, value: null }],
       onOpen: m => {
         const draw = () => {
