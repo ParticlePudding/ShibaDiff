@@ -708,6 +708,8 @@ const PV = (() => {
     }
     for (const s of [0, 1]) if (st.dirty[s]) build(s);
     else relayoutKeep(s);
+    // 他のタブにいる間は変更箇所を調べないので、開いたときに描く
+    setTimeout(() => { if (App.tab === 'page') redrawChanges(); }, 0);
   }
   function invalidate(side) {
     st.dirty[side] = true;
