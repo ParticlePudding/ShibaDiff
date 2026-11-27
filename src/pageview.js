@@ -238,7 +238,7 @@ const PV = (() => {
   async function drawChanges(side, i) {
     const sd = st.sides[side]; if (!sd || !sd.slots[i]) return;
     const s = sd.slots[i];
-    if (!st.showChg || !st.sides[0] || !st.sides[1] || !s.visible) { if (!st.showChg) s.chg.innerHTML = ''; return; }
+    if (!st.showChg || !st.sides[0] || !st.sides[1] || !s.visible || App.tab !== 'page') { if (!st.showChg) s.chg.innerHTML = ''; return; }
     const p = pairOf(side, i); if (!p) { s.chg.innerHTML = ''; return; }
     const info = await OV.regionsFor(p.l, p.r);
     if (!info || st.sides[side] !== sd || !st.showChg) return;

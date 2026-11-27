@@ -11,7 +11,7 @@ D = os.path.join(O, 'r2')
 def make():
     """必要なレビュー用データだけをテストの出力先に作る"""
     R2.ROOT = D; R2.G.ROOT = D
-    for f in (R2.r06, R2.r15, R2.r16): f(f.__name__.upper())
+    for f in (R2.r06, R2.r15, R2.r16, R2.r19): f(f.__name__.upper())
     d = os.path.join(D, 'FD')
     for side, ini in (('L', '[db]\nhost=db01\n'), ('R', '[db]\nhost=db02\n')):
         os.makedirs(os.path.join(d, side), exist_ok=True)
@@ -75,6 +75,19 @@ async def main():
         await t.wait_for("OV.st.cur && OV.st.cur.regions && !document.querySelector('#busy').classList.contains('on')", 120); await t.page.wait_for_timeout(1500)
         regs = await t.js("OV.st.cur.regions.map(r => [r.x, r.y])")
         ck('A1（標準）：寸法 1200→1250 の位置（右の部品の寸法）に枠が付く', any(1150 < x < 1300 and 220 < y < 520 for x, y in regs), regs)
+        # ---- 色だけの変更（水色→濃い青のボタン） ----
+        await t.load(os.path.join(D, 'R19', '登録画面_v1.png'), os.path.join(D, 'R19', '登録画面_v2.png'))
+        if await t.js('App.tab') != 'overlay': await t.tab('overlay')
+        await t.wait_for("OV.st.cur && OV.st.cur.regions && OV.st.cur.l === 0", 60); await t.page.wait_for_timeout(800)
+        btn = lambda: t.js("OV.st.cur.regions.some(r => r.x < 120 && r.y > 480 && r.y < 600 && r.w > 150)")
+        ck('画像：色の違いの検出は既定でオン', await t.js("$('#ovColor').checked"))
+        ck('ボタンの色だけの変更に枠が付く（紫）', await btn() and await t.js("OV.st.cur.base.mask.includes(3)"))
+        await t.click('#ovColor'); await t.page.wait_for_timeout(1500)
+        ck('「色の違いも検出」を外すと、色だけの変更は拾わない', not await btn())
+        await t.load(os.path.join(D, 'R15', '決裁文書_起案時_スキャン.pdf'), os.path.join(D, 'R15', '決裁文書_決裁後_スキャン.pdf'))
+        await t.page.wait_for_timeout(500)
+        ck('紙のスキャン（文字のないPDF）では、色の比較は既定でオフ', not await t.js("$('#ovColor').checked"))
+
         # ---- 390px 幅 ----
         await t.page.set_viewport_size({'width': 390, 'height': 800}); await t.page.wait_for_timeout(500)
         w = await t.js("Math.min(...[...document.querySelectorAll('#tabs button')].map(b => b.getBoundingClientRect().width))")

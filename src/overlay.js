@@ -70,21 +70,26 @@ const OV = (() => {
     ctx.save(); ctx.translate(dx + cv.width / 2, dy + cv.height / 2); ctx.rotate(ang * Math.PI / 180);
     ctx.drawImage(cv, -cv.width / 2, -cv.height / 2); ctx.restore();
   }
-  function lumData(cv, W, H, dx = 0, dy = 0, ang = 0) {
+  // 明るさの配列。rgb を渡すと、色の比較用に RGBA の画素もそこに入れる
+  function lumData(cv, W, H, dx = 0, dy = 0, ang = 0, rgb = null) {
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const x = c.getContext('2d', { willReadFrequently: true });
     x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); drawR(x, cv, dx, dy, ang);
     const d = x.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
     for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    if (rgb) rgb.d = d;
     return g;
   }
+  // 色の違いを調べるか（パネルのチェック）。既定は、紙のスキャン（文字のないPDF）だけオフ
+  const colorCheck = () => $('#ovColor').checked;
 
   // 大きな図面でも画面が固まらないよう、段階ごと・一定の行ごとに画面へ制御を返す
   // o：位置合わせ量と解像度の倍率 {dx, dy, ang, resF}。途中で制御を返すので、共有の状態ではなく引数で受け取る
   async function diffImage(cl, cr, thr, faint, o) {
     const W = Math.max(cl.width, cr.width + Math.max(0, o.dx)), H = Math.max(cl.height, cr.height + Math.max(0, o.dy));
-    const a = lumData(cl, W, H); await sleep(0);
-    const b = lumData(cr, W, H, o.dx, o.dy, o.ang); await sleep(0);
+    const col = o.color !== undefined ? o.color : colorCheck(), ca = {}, cb = {};
+    const a = lumData(cl, W, H, 0, 0, 0, col ? ca : null); await sleep(0);
+    const b = lumData(cr, W, H, o.dx, o.dy, o.ang, col ? cb : null); await sleep(0);
     // ずれの許容（px）：スキャン画像は既定で2px、CADやWordから作ったPDFは0px（小さな変更を見落とさないため）
     // 許容幅は「標準（2400px）での px」として扱い、解像度に合わせて換算する（どの解像度でも同じ実寸の幅になるように）
     const tolSet = +$('#ovTolPx').value || 0, tol = tolSet > 0;
@@ -95,7 +100,34 @@ const OV = (() => {
     const scan = scanMode() && tol, STRONG = 170, WEAK = Math.min(250, STRONG + thr);
     const mf = async g => { let o = g; for (let k = 0; k < rad; k++) { o = minFilter(o, W, H); await sleep(0); } return o; };
     const aMin = tol ? await mf(a) : a, bMin = tol ? await mf(b) : b;
-    const img = new ImageData(W, H), d = img.data, mask = new Uint8Array(W * H); // mask: 1=左だけ 2=右だけ
+    const img = new ImageData(W, H), d = img.data, mask = new Uint8Array(W * H); // mask: 1=左だけ 2=右だけ 3=色が変わった
+    // 色の変化：どちらかが白でなく、どちらかに色が付いている画素で、色の差（人の目の感じ方に寄せた重み付きの距離）が大きいもの。
+    // 明るさが同じくらいの別の色（水色→青、赤→緑）への変更は、明るさだけの比較では見つからないため
+    let cm = null;
+    if (col) {
+      cm = new Uint8Array(W * H);
+      const da = ca.d, db = cb.d, T = Math.max(40, thr), T2 = T * T * 9;
+      const cdist = (p, i, q, k) => { const dr = p[i] - q[k], dg = p[i + 1] - q[k + 1], dbb = p[i + 2] - q[k + 2]; return dr * dr * 2 + dg * dg * 4 + dbb * dbb * 3; };
+      const near = (p, i, q, x, y) => {
+        for (let yy = Math.max(0, y - rad); yy <= Math.min(H - 1, y + rad); yy++) for (let xx = Math.max(0, x - rad); xx <= Math.min(W - 1, x + rad); xx++) if (cdist(p, i, q, (yy * W + xx) * 4) <= T2) return true;
+        return false;
+      };
+      for (let j = 0, i = 0; j < cm.length; j++, i += 4) {
+        if (a[j] > 235 && b[j] > 235) continue;
+        // 灰色どうし（白黒の文書・スキャン）は調べない。濃さの違いは明るさの比較（とスキャンの2段階のしきい値）に任せる
+        const sa = Math.max(da[i], da[i + 1], da[i + 2]) - Math.min(da[i], da[i + 1], da[i + 2]), sb = Math.max(db[i], db[i + 1], db[i + 2]) - Math.min(db[i], db[i + 1], db[i + 2]);
+        if (sa < 40 && sb < 40) continue;
+        if (cdist(da, i, db, i) <= T2) continue;
+        // ずれの許容：相手の近く（許容の半径の中）に同じような色があれば、ずれとみなして色の変化にしない（両方向で確かめる）
+        if (rad) { const x = j % W, y = (j / W) | 0; if (near(da, i, db, x, y) && near(db, i, da, x, y)) continue; }
+        cm[j] = 1;
+      }
+      await sleep(0);
+      // 線の縁（1〜2px）のにじみ・わずかなずれで出る色の差は捨てる：上下左右も色が変わっている画素だけを残す
+      const er = new Uint8Array(W * H);
+      for (let y = 1; y < H - 1; y++) for (let x = 1, j = y * W + 1; x < W - 1; x++, j++) if (cm[j] && cm[j - 1] && cm[j + 1] && cm[j - W] && cm[j + W]) er[j] = 1;
+      cm = er; await sleep(0);
+    }
     // 変更箇所をまとめるます目も、標準での 16px を解像度に合わせて換算する（解像度で箇所の数が変わらないように）
     const CELL = Math.max(8, Math.round(16 * o.resF)), gw = Math.ceil(W / CELL), gh = Math.ceil(H / CELL), grid = new Uint16Array(gw * gh);
     let changed = 0, ink = 0;
@@ -107,6 +139,7 @@ const OV = (() => {
         if (ga < 200 || gb < 200) ink++;
         if (scan ? (ga < STRONG && bMin[j] >= WEAK) : (ga + thr < bMin[j])) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; mask[j] = 1; changed++; grid[gy + (x / CELL | 0)]++; }
         else if (scan ? (gb < STRONG && aMin[j] >= WEAK) : (gb + thr < aMin[j])) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; mask[j] = 2; changed++; grid[gy + (x / CELL | 0)]++; }
+        else if (cm && cm[j]) { d[k] = 156; d[k + 1] = 54; d[k + 2] = 181; mask[j] = 3; changed++; grid[gy + (x / CELL | 0)]++; }
         else { const m = Math.min(ga, gb), v = faint ? 255 - ((255 - m) * 0.32 | 0) : m; d[k] = d[k + 1] = d[k + 2] = v; }
         d[k + 3] = 255;
       }
@@ -308,6 +341,7 @@ const OV = (() => {
         const im = c.getImageData(0, 0, cv.width, cv.height), d = im.data, m = sd.res.mask, want = k + 1;
         const col = k ? [26, 115, 232] : [229, 50, 45];
         for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
+        else if (m[j] === 3) { const q = j * 4; d[q] = (d[q] + 156) >> 1; d[q + 1] = (d[q + 1] + 54) >> 1; d[q + 2] = (d[q + 2] + 181) >> 1; } // 色の変化：その色を残して紫を混ぜる
         c.putImageData(im, 0, 0);
       }
       if (boxes) drawBoxesOn(c, v.regions, v.regIdx, v.noteIds);
@@ -322,18 +356,21 @@ const OV = (() => {
 
   /* ---- 1組のページを描く（1ページ表示・全ページ表示で共通） ---- */
   // 描画・位置合わせ・差分の計算。途中で状態が変わったら（世代番号が進んだら）null を返す
+  // 左右のファイルの組（読み込みの途中で片側だけ入れ替わったら、その途中の結果は使わない）
+  const fileKeys = () => `${S[0] ? S[0].key : ''}||${S[1] ? S[1].key : ''}`;
   async function prepare(pl, pr, l, r, gen) {
+    const fk = fileKeys(), stale = () => gen !== st.gen || fk !== fileKeys();
     const pgL = pl && l >= 0 ? pl[l] : null, pgR = pr && r >= 0 ? pr[r] : null;
     const W = renderWidth(pgL, pgR), scale = W / Math.max(pgL ? pgL.w : 0, pgR ? pgR.w : 0), resF = resFactor(pgL, pgR), tolF = tolFactor(pgL, pgR);
     const [cl, cr] = await Promise.all([pgL ? renderAt(0, l, W) : null, pgR ? renderAt(1, r, W) : null]);
-    if (gen !== st.gen) return null;
+    if (stale()) return null;
     // 位置合わせ：手動・自動で決めた量をページの組ごとに覚える。スキャンは初回に自動で合わせる
     const key = `${l}:${r}`;
     let off = [0, 0, 0], autoMsg = '';
     if (st.align.has(key)) off = st.align.get(key);
     else if (cl && cr && scanMode()) {
       off = st.slots ? await autoAlign(cl, cr) : await withBusy('スキャン画像の位置を合わせています…', () => autoAlign(cl, cr));
-      if (gen !== st.gen) return null;
+      if (stale()) return null;
       st.align.set(key, off);
       autoMsg = `<br><span class="muted">スキャン画像のため自動で位置合わせしました（X ${off[0]} / Y ${off[1]}px${off[2] ? ` / 回転 ${off[2]}°` : ''}）</span>`;
     }
@@ -341,7 +378,7 @@ const OV = (() => {
     let res = null;
     if (cl && cr && (st.mode === 'diff' || (st.mode === 'side' && ($('#ovSideHl').checked || $('#ovBoxes').checked)))) {
       res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx, dy, ang, resF, tolF });
-      if (gen !== st.gen) return null;
+      if (stale()) return null;
     }
     return { l, r, cl, cr, dx, dy, ang, res, autoMsg, scale, resF, both: !!(pl && pr) };
   }
@@ -688,11 +725,15 @@ const OV = (() => {
   // 1組を、1ページずつ表示したときと同じ解像度・位置合わせで調べる（件数をそろえるため）
   async function analyzePair(pl, pr, p, stop) {
     if (p.l < 0 || p.r < 0) return { ...p, kind: p.l < 0 ? 'add' : 'del', regs: 0, pct: 0 };
-    const W = renderWidth(pl[p.l], pr[p.r]);
+    const W = renderWidth(pl[p.l], pr[p.r]), fk = fileKeys();
     const a = await renderAt(0, p.l, W), b = await renderAt(1, p.r, W);
     const key = `${p.l}:${p.r}`;
     let off = st.align.get(key);
-    if (!off) { off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null; if (scanMode()) st.align.set(key, off); }
+    if (!off) {
+      off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null;
+      if (fk !== fileKeys()) return null; // 途中でファイルが変わった：位置合わせの結果を、新しいファイルの組に残さない
+      if (scanMode()) st.align.set(key, off);
+    }
     const res = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]), tolF: tolFactor(pl[p.l], pr[p.r]) });
     return { ...p, kind: 'pair', regs: res.regions.length, pct: res.ink ? res.changed / res.ink * 100 : 0, res, off };
   }
@@ -700,13 +741,14 @@ const OV = (() => {
   // 結果は、ファイル・感度・許容・解像度が同じあいだ覚えておく。同じ組を同時に頼まれたら同じ計算を待つ
   const rcache = new Map();
   function regionsFor(l, r) {
-    const key = `${st.gen0}:${l}:${r}:${$('#ovThr').value}:${$('#ovTolPx').value}:${Settings.get('ovRes')}`;
+    const key = `${st.gen0}:${l}:${r}:${$('#ovThr').value}:${$('#ovTolPx').value}:${Settings.get('ovRes')}:${colorCheck()}`;
     if (!rcache.has(key)) {
       if (rcache.size > 200) rcache.clear();
       rcache.set(key, (async () => {
         const pl = await pages(0), pr = await pages(1);
         if (!pl || !pr || !pl[l] || !pr[r]) return null;
         const a = await analyzePair(pl, pr, { l, r }, () => false);
+        if (!a) return null;
         const res = a.res, off = a.off || [0, 0, 0], W = renderWidth(pl[l], pr[r]);
         const sL = W / pl[l].w, sR = W / pr[r].w, cw = W, ch = Math.round(pr[r].h * sR);
         const ids = res.regions.map(g => Notes.ovId(l, r, g, res.W, res.H));
@@ -762,6 +804,7 @@ const OV = (() => {
       if (res) {
         const im = c.getImageData(0, 0, W2, H2), d = im.data, m = res.mask, want = k + 1, col = k ? [26, 115, 232] : [229, 50, 45];
         for (let j = 0; j < m.length; j++) if (m[j] === want) { const q = j * 4; d[q] = col[0]; d[q + 1] = col[1]; d[q + 2] = col[2]; }
+        else if (m[j] === 3) { const q = j * 4; d[q] = (d[q] + 156) >> 1; d[q + 1] = (d[q + 1] + 54) >> 1; d[q + 2] = (d[q + 2] + 181) >> 1; }
         c.putImageData(im, 0, 0); drawBoxesOn(c, res.regions, -1, ids);
       }
       return cv;
@@ -804,7 +847,7 @@ const OV = (() => {
           if (o.layout !== 'side') {
             const cv = document.createElement('canvas'); cv.width = res.W; cv.height = res.H;
             const c = cv.getContext('2d'); c.putImageData(res.img, 0, 0); drawBoxesOn(c, res.regions, -1, ids);
-            parts.push(`<figure><img src="${Report.jpeg(cv, maxW)}" alt=""><figcaption>差分画像：赤＝左にだけある（削除・変更前）、青＝右にだけある（追加・変更後）、橙の枠＝変更箇所。変化量 ${r.pct.toFixed(2)}%${offTxt}</figcaption></figure>`);
+            parts.push(`<figure><img src="${Report.jpeg(cv, maxW)}" alt=""><figcaption>差分画像：赤＝左にだけある（削除・変更前）、青＝右にだけある（追加・変更後）、紫＝色が変わった、橙の枠＝変更箇所。変化量 ${r.pct.toFixed(2)}%${offTxt}</figcaption></figure>`);
             cv.width = cv.height = 0;
           }
           if (o.layout !== 'diff') {
@@ -828,7 +871,7 @@ const OV = (() => {
       const nAdd = rows.filter(r => r.kind === 'add').length, nDel = rows.filter(r => r.kind === 'del').length;
       const summary = !o.summary ? '' : `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
         rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}${r.nOk ? ` <span class="nst ok">確認済 ${r.nOk}</span>` : ''}${r.nAsk ? ` <span class="nst ask">要確認 ${r.nAsk}</span>` : ''}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
-      const cond = [`差分の感度 ${$('#ovThr').value}`, `ずれの許容 ${$('#ovTolPx').value}px`, `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
+      const cond = [`差分の感度 ${$('#ovThr').value}`, `ずれの許容 ${$('#ovTolPx').value}px`, colorCheck() ? '色の違いも検出' : '色の違いは検出しない', `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
       html = Report.page({
         title: `重ね合わせレポート - ${S[0].name} / ${S[1].name}`, heading: '重ね合わせ比較レポート',
         meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}` + (o.cond ? `<br>比較条件: ${esc(cond)}` : '') +
@@ -896,6 +939,7 @@ const OV = (() => {
   $('#ovBlinkManual').onchange = () => { startBlink(); if (st.mode === 'blink') $('#ovStats').innerHTML = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます'; };
   $('#ovBlinkToggle').onclick = () => { if (st.blinkFrame) st.blinkFrame(); };
   $('#ovFaint').onchange = () => update();
+  $('#ovColor').onchange = () => { st.cache && rcache.clear(); update(); };
   let tolT = 0;
   $('#ovTolPx').oninput = () => { $('#ovTolVal').textContent = $('#ovTolPx').value; clearTimeout(tolT); tolT = setTimeout(update, 150); };
   const setOff = () => {
@@ -959,6 +1003,8 @@ const OV = (() => {
     st.align.clear(); st.dx = 0; st.dy = 0; st.ang = 0; showOffset();
     // 「1px程度のずれを無視」はスキャン画像のときだけ既定でON（CADやWordから作ったPDFでは小さな変更を見落とさないようOFF）
     $('#ovTolPx').value = scanMode() ? 2 : 0; $('#ovTolVal').textContent = $('#ovTolPx').value;
+    // 紙のスキャン（文字のないPDF）は、紙の地色や印刷のムラを拾わないよう色の比較を既定でオフ。画像・文字のあるPDFはオン
+    $('#ovColor').checked = ![0, 1].some(i => S[i] && S[i].noTextLayer);
     $('#ovMatchInfo').innerHTML = ''; // 前のファイルの対応付けの結果を残さない
     if (App.tab === 'overlay') { update(); refreshMatch(); }
   }

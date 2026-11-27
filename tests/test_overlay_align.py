@@ -73,4 +73,5 @@ async def large_sheet(t):
     t.check('閉じた文書の PDF ワーカーは終了している', len(t.page.workers) == 2, len(t.page.workers))
     await t.js("Settings.set('ovRes','std')")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

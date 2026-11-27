@@ -198,6 +198,7 @@
           <label data-modes="side"><input type="checkbox" id="ovSideHl" checked>変更箇所を色で表示</label>
           <div data-modes="diff side">差分の感度 <input type="range" id="ovThr" min="5" max="160" value="60"></div>
           <label data-modes="diff side"><input type="checkbox" id="ovBoxes" checked>変更箇所を枠で囲む</label>
+          <label data-modes="diff side" title="明るさが同じくらいの別の色への変更（水色→青など）も見つけます。紙のスキャンでは、地色のムラを拾わないよう最初はオフです"><input type="checkbox" id="ovColor" checked>色の違いも検出（紫）</label>
           <label data-modes="diff"><input type="checkbox" id="ovFaint" checked>共通部分を薄く表示</label>
           <div data-modes="diff side" title="スキャンなどの細かなずれを差分として扱わない幅">ずれの許容 <b id="ovTolVal">0</b> px <input type="range" id="ovTolPx" min="0" max="5" step="1" value="0" aria-label="ずれの許容（ピクセル）"></div>
           <div title="大きな図面（A1・A0 など）で描く細かさ。軽量は速く、精細は細い線まで比べられます">解像度 <select id="ovRes" aria-label="重ね合わせの解像度"><option value="low">軽量（〜1600px）</option><option value="std">標準（〜2400px）</option><option value="high">精細（〜4000px）</option></select></div>
@@ -212,6 +213,7 @@
         <div class="legend" data-modes="diff side">
           <span><i style="background:#e5322d"></i>左にだけある（削除・変更前）</span>
           <span><i style="background:#1a73e8"></i>右にだけある（追加・変更後）</span>
+          <span><i style="background:#9c36b5"></i>色が変わった（形は同じ）</span>
           <span data-modes="diff"><i style="background:#bfc5cc"></i>共通部分</span>
         </div>
         <h4>ページの対応</h4>
