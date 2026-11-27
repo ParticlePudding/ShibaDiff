@@ -60,8 +60,10 @@ body.slots-closed #slots{display:none}
 body.slots-closed #btnSlots{transform:rotate(-90deg)}
 /* 全画面表示 */
 body.fullview #top,body.fullview #slots{display:none!important}
-#btnExitFull{position:fixed;top:6px;right:8px;z-index:45;background:rgba(29,39,51,.85);color:#fff;border-color:#4a5868;font-size:12px;padding:3px 10px;opacity:.55}
-#btnExitFull:hover{opacity:1}
+/* 全画面を終える：ツールバーの右端に並べる（ほかのボタンと重ならない） */
+#btnExitFull{margin-left:6px;background:#1d2733;color:#fff;border-color:#1d2733;flex:none}
+#btnExitFull:hover{background:#2a3644}
+@media (max-width:1100px){#btnExitFull{font-size:0;gap:0;padding:5px 7px}}
 /* ドロップ先（左右どちらに入るか） */
 #dropOverlay{border:none;background:rgba(20,30,45,.18);display:none;padding:10px;gap:10px}
 #dropOverlay.on{display:flex}

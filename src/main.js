@@ -364,7 +364,7 @@ const App = (() => {
     $$('#modeSw button').forEach(b => { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
     if (m === 'folder') {
       if (app.tab === 'overlay') OV.deactivate();
-      $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-folder'));
+      $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-folder')); placeExitFull();
       $('#btnBackFolder').hidden = true;
     } else { setTab(app.tab); requestAnimationFrame(fitHdrNames); }
   }
@@ -391,9 +391,18 @@ const App = (() => {
   });
 
   /* ---------- 全画面表示（ヘッダとファイル欄を隠し、ブラウザも全画面にする） ---------- */
+  // 「全画面を終える」は、今見ているタブ（フォルダ比較ではフォルダ比較）のツールバーの右端に入れる。
+  // 画面の右上に浮かせると、ツールバーの右端のボタン（レポートなど）に重なって押せなくなるため
+  function placeExitFull() {
+    const btn = $('#btnExitFull');
+    if (!document.body.classList.contains('fullview')) return;
+    const sec = $('.tab.on'), bar = sec && $('.toolbar', sec);
+    if (bar && btn.parentElement !== bar) bar.appendChild(btn);
+  }
   function setFull(on) {
     document.body.classList.toggle('fullview', on);
     $('#btnExitFull').hidden = !on;
+    placeExitFull();
     try {
       if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => { });
       if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => { });
@@ -411,7 +420,7 @@ const App = (() => {
     if (app.tab === 'overlay' && t !== 'overlay') OV.deactivate();
     app.tab = t;
     $$('#tabs button').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
-    $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + t));
+    $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + t)); placeExitFull();
     if (t === 'text') TV.activate();
     else if (t === 'page') PV.activate();
     else if (t === 'overlay') OV.activate();

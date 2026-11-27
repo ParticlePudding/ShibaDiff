@@ -116,6 +116,24 @@ async def main():
         pw = await t.js("(() => { const sc = document.querySelector('.pv-col[data-side=\"0\"] .pv-scroll') || document.querySelector('.pv-col[data-side=\"0\"]'); const pg = document.querySelector('.pv-col[data-side=\"0\"] .pv-page'); return Math.round(pg.getBoundingClientRect().width / sc.clientWidth * 100); })()")
         ck('ページ表示も、表示領域の幅が変わると「幅に合わせる」を合わせ直す', pw >= 85, pw)
 
+        # ---- 全画面：「全画面を終える」がツールバーのボタンに重ならない ----
+        overlap = '''(() => { const b = document.querySelector('#btnExitFull'), r = b.getBoundingClientRect();
+          if (b.hidden || !r.width || r.right > innerWidth + 1) return 'hidden-or-out';
+          const hit = [...document.querySelectorAll('.tab.on .toolbar button, .tab.on .toolbar select, .tab.on .toolbar summary')].filter(e => e !== b && e.offsetParent && !e.closest('.pop > :not(summary)')).find(e => { const q = e.getBoundingClientRect(); return q.width && !(q.right <= r.left || q.left >= r.right || q.bottom <= r.top || q.top >= r.bottom); });
+          return hit ? (hit.id || hit.textContent.trim().slice(0, 10)) : ''; })()'''
+        res = []
+        await t.click('#btnFull'); await t.page.wait_for_timeout(300)
+        for w in (1366, 1000):
+            await t.page.set_viewport_size({'width': w, 'height': 768}); await t.page.wait_for_timeout(300)
+            for tab in ('text', 'page', 'overlay'):
+                await t.js(f"App.setTab ? App.setTab('{tab}') : null"); await t.page.wait_for_timeout(500)
+                res.append((w, tab, await t.js(overlap)))
+            await t.js("App.setMode('folder')"); await t.page.wait_for_timeout(300); res.append((w, 'folder', await t.js(overlap))); await t.js("App.setMode('file')")
+        ck('全画面の「全画面を終える」は、どのタブでもツールバーのボタンに重ならない', all(x[2] == '' for x in res), [x for x in res if x[2]])
+        await t.click('#btnExitFull'); await t.page.wait_for_timeout(300)
+        ck('「全画面を終える」で戻る', not await t.js("document.body.classList.contains('fullview')"))
+        await t.page.set_viewport_size({'width': 1366, 'height': 768})
+
         # ---- ヘッダのファイル名：左右の違う部分（v3／v4_提出版）が見える ----
         await t.load(os.path.join(D, 'R10', 'ノース様提案_v3.pptx'), os.path.join(D, 'R10', 'ノース様提案_v4_提出版.pptx'))
         names = lambda: t.js("[...document.querySelectorAll('#hdrFiles .nm')].map(e => e.textContent)")
