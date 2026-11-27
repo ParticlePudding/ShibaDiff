@@ -11,6 +11,10 @@ G.ROOT = ROOT
 random.seed(2027)
 P, text, mkdocx, mkxlsx, mkpptx, chrome_pdf, html_doc, font, page_image, scan_pdf = G.P, G.text, G.mkdocx, G.mkxlsx, G.mkpptx, G.chrome_pdf, G.html_doc, G.font, G.page_image, G.scan_pdf
 KEYS = {}
+_mkdocx = mkdocx
+def mkdocx(path, title, blocks):
+    """本文の「## 」で始まる行は、Word では見出し（「## 」は付けない）にする"""
+    return _mkdocx(path, title, [('h', x[3:]) if isinstance(x, str) and x.startswith('## ') else x for x in blocks])
 
 
 def key(d, *lines):
@@ -87,9 +91,8 @@ def r02(d):
          a[2], ['## 附則', 'この規程は2025年4月1日から施行する。', '改定：2027年4月1日（日当・宿泊料の見直し、第2章の2の新設）']]
     chrome_pdf(f'{d}/旅費規程_2025.pdf', pages_html('旅費規程', a))
     chrome_pdf(f'{d}/旅費規程_2027改定案.pdf', pages_html('旅費規程', b))
-    hd = lambda ps: [('h', x[3:]) if isinstance(x, str) and x.startswith('## ') else x for x in sum(ps, [])]  # 「## 」は Word では見出しにする
-    mkdocx(f'{d}/旅費規程_新旧対照の元原稿_2025.docx', '旅費規程', hd(a))
-    mkdocx(f'{d}/旅費規程_新旧対照の元原稿_2027.docx', '旅費規程', hd(b))
+    mkdocx(f'{d}/旅費規程_新旧対照の元原稿_2025.docx', '旅費規程', sum(a, []))
+    mkdocx(f'{d}/旅費規程_新旧対照の元原稿_2027.docx', '旅費規程', sum(b, []))
     key(d, 'PDFは4ページ→5ページ。3ページ目（第2章の2）が挿入', '第5条 日当 2,000円→2,500円', '第6条 宿泊料 10,000円→12,000円、東京23区内14,000円を追加', '附則に改定日を追加',
         '重ね合わせ：ページの対応付けで3ページ目が「右で追加」となること')
 
