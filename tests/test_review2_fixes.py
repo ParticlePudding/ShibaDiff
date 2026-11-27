@@ -11,7 +11,7 @@ D = os.path.join(O, 'r2')
 def make():
     """必要なレビュー用データだけをテストの出力先に作る"""
     R2.ROOT = D; R2.G.ROOT = D
-    for f in (R2.r06, R2.r15, R2.r16, R2.r19): f(f.__name__.upper())
+    for f in (R2.r06, R2.r10, R2.r15, R2.r16, R2.r19): f(f.__name__.upper())
     d = os.path.join(D, 'FD')
     for side, ini in (('L', '[db]\nhost=db01\n'), ('R', '[db]\nhost=db02\n')):
         os.makedirs(os.path.join(d, side), exist_ok=True)
@@ -87,6 +87,18 @@ async def main():
         await t.load(os.path.join(D, 'R15', '決裁文書_起案時_スキャン.pdf'), os.path.join(D, 'R15', '決裁文書_決裁後_スキャン.pdf'))
         await t.page.wait_for_timeout(500)
         ck('紙のスキャン（文字のないPDF）では、色の比較は既定でオフ', not await t.js("$('#ovColor').checked"))
+
+        # ---- ヘッダのファイル名：左右の違う部分（v3／v4_提出版）が見える ----
+        await t.load(os.path.join(D, 'R10', 'ノース様提案_v3.pptx'), os.path.join(D, 'R10', 'ノース様提案_v4_提出版.pptx'))
+        names = lambda: t.js("[...document.querySelectorAll('#hdrFiles .nm')].map(e => e.textContent)")
+        vis = lambda: t.js("[...document.querySelectorAll('#hdrFiles .nm')].every(e => e.scrollWidth <= e.clientWidth + 1)")
+        for w, back in ((1366, False), (900, True), (800, True)):
+            await t.page.set_viewport_size({'width': w, 'height': 700})
+            await t.js(f"document.querySelector('#btnBackFolder').hidden = {str(not back).lower()}; window.dispatchEvent(new Event('resize'))"); await t.page.wait_for_timeout(400)
+            n = await names()
+            ck(f'ヘッダの名前に違う部分が見える（幅 {w}px{"・フォルダ一覧ボタンあり" if back else ""}）', 'v3' in n[0] and 'v4' in n[1] and await vis(), n)
+        await t.js("document.querySelector('#btnBackFolder').hidden = true")
+        await t.page.set_viewport_size({'width': 1366, 'height': 768})
 
         # ---- 390px 幅 ----
         await t.page.set_viewport_size({'width': 390, 'height': 800}); await t.page.wait_for_timeout(500)

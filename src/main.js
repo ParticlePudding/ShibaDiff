@@ -116,6 +116,7 @@ const App = (() => {
     if (fromFolder) app.tab = 'text';
     changed([0, 1]);
     if (fromFolder) { setMode('file'); $('#btnBackFolder').hidden = false; }
+    requestAnimationFrame(fitHdrNames); // ヘッダのボタンが増減すると名前の欄の幅が変わる
     return true;
   }
 
@@ -152,6 +153,60 @@ const App = (() => {
     void quiet;
   }
 
+  /* ---------- ヘッダのファイル名：左右の違う部分が見えるように縮める ---------- */
+  // 1) 左右の名前の共通の先頭が長ければ「…」にして、違う部分から出す（例：…v3.pptx ／ …v4_提出版.pptx）
+  // 2) それでも入らなければ、真ん中を「…」にする（先頭と、拡張子の前の版番号などの末尾を残す）
+  const cps = t => Array.from(t);
+  function hdrLabel(name, other) {
+    if (!other || name === other) return null;
+    const a = cps(name), b = cps(other); let p = 0;
+    while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    if (p < 6) return null;
+    while (p > 0 && /[0-9A-Za-z]/.test(a[p - 1])) p--; // v3 と v4 なら「v」から、12 と 13 なら数字の頭から出す
+    return a.slice(p).join('');
+  }
+  let measureCtx = null;
+  function textWidth(t, el) { measureCtx = measureCtx || document.createElement('canvas').getContext('2d'); measureCtx.font = getComputedStyle(el).font; return measureCtx.measureText(t).width; }
+  // 先頭 head 文字 ＋「…」＋末尾 tail 文字で、幅 w に入る最長のもの
+  function squeeze(a, w, el, pre, tailMin) {
+    let lo = 1, hi = a.length - 1, best = null;
+    while (lo <= hi) {
+      const n = (lo + hi) >> 1, tail = Math.max(tailMin, Math.ceil(n * 0.4)), head = n - tail;
+      if (head < 0) { hi = n - 1; continue; }
+      const c = pre + a.slice(0, head).join('') + '…' + a.slice(a.length - tail).join('');
+      if (textWidth(c, el) <= w) { best = c; lo = n + 1; } else hi = n - 1;
+    }
+    return best || pre + '…' + a.slice(-tailMin).join('');
+  }
+  function fitName(name, other, el, w) {
+    if (textWidth(name, el) <= w) return name;
+    const diff = hdrLabel(name, other);
+    const ext = (/\.[^.]{1,6}$/.exec(name) || [''])[0], extN = cps(ext).length;
+    if (diff != null) {
+      // 共通の先頭は「…」にして、違う部分から出す。入らなければ、違う部分の頭と拡張子を残す
+      if (textWidth('…' + diff, el) <= w) return '…' + diff;
+      const d = cps(diff), body = d.length - extN;
+      // 違う部分の頭を2文字以上出せるなら拡張子も残す。出せないほど狭ければ拡張子は省き、違う部分の頭を出す
+      for (let k = body; k >= 2; k--) { const c = '…' + d.slice(0, k).join('') + '…' + ext; if (textWidth(c, el) <= w) return c; }
+      for (let k = body; k >= 1; k--) { const c = '…' + d.slice(0, k).join('') + '…'; if (textWidth(c, el) <= w) return c; }
+      return '…' + d[0];
+    }
+    return squeeze(cps(name), w, el, '', Math.max(extN + 3, 4));
+  }
+  function fitHdrNames() {
+    // 1) 左右とも全体を入れて、それぞれに割り当てられた幅を測る 2) その幅に収めた名前を入れる（片側ずつだと、もう片側の幅が変わるため）
+    const items = [0, 1].map(side => {
+      const hf = $(`#hdrFiles .hf[data-side="${side}"]`), nm = $('.nm', hf), s = S[side];
+      const dirty = s && hf.dataset.dirty === '1' ? '<span class="dirty" title="未保存の変更があります">● </span>' : '';
+      if (s) nm.innerHTML = dirty + esc(s.name); else nm.textContent = 'ファイルを選択';
+      return { side, nm, s, dirty };
+    });
+    for (const it of items) { if (it.s) { it.over = it.nm.scrollWidth > it.nm.clientWidth + 1; it.w = it.nm.clientWidth - (it.dirty ? textWidth('● ', it.nm) : 0); } }
+    for (const it of items) if (it.s && it.over) it.nm.innerHTML = it.dirty + esc(fitName(it.s.name, S[1 - it.side] && S[1 - it.side].name, it.nm, it.w - 2));
+  }
+  let hdrT = 0;
+  window.addEventListener('resize', () => { clearTimeout(hdrT); hdrT = setTimeout(fitHdrNames, 120); });
+
   /* ---------- file slot UI ---------- */
   const KIND = { pdf: 'PDF', docx: 'Word', xlsx: 'Excel', pptx: 'PowerPoint', image: '画像', binary: 'バイナリ', text: 'テキスト' };
   function updateSlot(side) {
@@ -159,9 +214,9 @@ const App = (() => {
     // ヘッダのファイル名（1行表示）
     const hf = $(`#hdrFiles .hf[data-side="${side}"]`);
     hf.classList.toggle('empty', !s);
-    $('.nm', hf).innerHTML = s ? `${s.dirty ? '<span class="dirty" title="未保存の変更があります">● </span>' : ''}${esc(s.name)}` : 'ファイルを選択';
+    hf.dataset.dirty = s && s.dirty ? '1' : '';
     hf.title = s ? `${side ? '右' : '左'}：${s.name}（クリックでファイル欄を開く／たたむ）` : `${side ? '右' : '左'}のファイルを選択`;
-    autoSlots();
+    autoSlots(); fitHdrNames();
     el.classList.toggle('loaded', !!s);
     $('.fname', el).innerHTML = s ? `${s.dirty ? '<span class="dirty" title="未保存の変更があります">● </span>' : ''}${esc(s.name)}` : 'ファイルをドロップ、またはクリックして選択';
     $('.fname', el).title = s ? s.name : '';
@@ -311,7 +366,7 @@ const App = (() => {
       if (app.tab === 'overlay') OV.deactivate();
       $$('.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-folder'));
       $('#btnBackFolder').hidden = true;
-    } else setTab(app.tab);
+    } else { setTab(app.tab); requestAnimationFrame(fitHdrNames); }
   }
   $$('#modeSw button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
   $('#btnBackFolder').onclick = () => setMode('folder');
