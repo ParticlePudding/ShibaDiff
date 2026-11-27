@@ -11,7 +11,7 @@ D = os.path.join(O, 'r2')
 def make():
     """必要なレビュー用データだけをテストの出力先に作る"""
     R2.ROOT = D; R2.G.ROOT = D
-    for f in (R2.r06, R2.r10, R2.r15, R2.r16, R2.r19): f(f.__name__.upper())
+    for f in (R2.r06, R2.r07, R2.r10, R2.r15, R2.r16, R2.r19): f(f.__name__.upper())
     d = os.path.join(D, 'FD')
     for side, ini in (('L', '[db]\nhost=db01\n'), ('R', '[db]\nhost=db02\n')):
         os.makedirs(os.path.join(d, side), exist_ok=True)
@@ -115,6 +115,22 @@ async def main():
         await t.js("App.showSlots(false)"); await t.page.wait_for_timeout(600)
         pw = await t.js("(() => { const sc = document.querySelector('.pv-col[data-side=\"0\"] .pv-scroll') || document.querySelector('.pv-col[data-side=\"0\"]'); const pg = document.querySelector('.pv-col[data-side=\"0\"] .pv-page'); return Math.round(pg.getBoundingClientRect().width / sc.clientWidth * 100); })()")
         ck('ページ表示も、表示領域の幅が変わると「幅に合わせる」を合わせ直す', pw >= 85, pw)
+
+        # ---- 末尾の改行の有無（右だけ改行なしで終わる）。ほかにも差分があるとき ----
+        await t.tab('text')
+        await t.load(os.path.join(D, 'R07', 'db_util_old.py'), os.path.join(D, 'R07', 'db_util_new.py')); await t.page.wait_for_timeout(400)
+        stx = await t.page.inner_text('#textStatus')
+        ck('状態表示：ほかに差分があっても「末尾の改行の有無も異なります（右は改行なし）」', '末尾の改行の有無も異なります' in stx and '右は改行なし' in stx, stx[:90])
+        await t.js("TV.go(TV.st.blocks.length - 1)"); await t.page.wait_for_timeout(300)
+        ck('比較欄：改行のない側（右）の最終行に「改行なし」の札', await t.js("document.querySelectorAll('#paneR .nonl').length") == 1 and await t.js("document.querySelectorAll('#paneL .nonl').length") == 0)
+        ck('差分の件数には数えない', await t.js('TV.st.blocks.length') == await t.js("new Set(TV.st.rows.filter(r => r.blk >= 0).map(r => r.blk)).size"))
+        if not await t.js("document.querySelector('#diffwrap').classList.contains('notes-on')"): await t.click('#tNotes')
+        await t.page.wait_for_timeout(300)
+        ck('変更点一覧の最後に「末尾の改行」（入力欄つき）', await t.js("!!document.querySelector('#tvNotes .nt-eol .nt-ed')"))
+        await t.page.fill('#tvNotes .nt-eol textarea', 'エディタの設定で末尾改行を付ける'); await t.page.wait_for_timeout(400)
+        h = open(await t.download('#tReport'), encoding='utf-8').read()
+        ck('レポート：見出しに注記、変更点の一覧に「末尾の改行」とコメント', '末尾の改行の有無も異なります' in h and '末尾の改行' in h and 'エディタの設定で末尾改行を付ける' in h)
+        await t.click('#tNotes')
 
         # ---- 全画面：「全画面を終える」がツールバーのボタンに重ならない ----
         overlap = '''(() => { const b = document.querySelector('#btnExitFull'), r = b.getBoundingClientRect();

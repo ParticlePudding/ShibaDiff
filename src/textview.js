@@ -170,9 +170,19 @@ const TV = (() => {
     const WS = { '\t': '<span class="wsc wtab">\t</span>', ' ': '<span class="wsc wsp"> </span>', '\u3000': '<span class="wsc wzsp">\u3000</span>' };
     return h.replace(/[\t \u3000]/g, c => WS[c]); // 1回の置換で行う（置換後のタグ内の空白を壊さない）
   }
+  // 末尾の改行の有無が左右で違うか（テキストどうしで、どちらかに行があるとき）。違えば改行のない側（0／1）を返す
+  function noNLSide() {
+    if (!S[0] || !S[1] || S[0].kind !== 'text' || S[1].kind !== 'text') return -1;
+    const a = S[0].finalNL !== false, b = S[1].finalNL !== false;
+    if (a === b || !(L(0).length || L(1).length)) return -1;
+    return a ? 1 : 0;
+  }
+  const NONL = '<span class="nonl" title="ファイルの末尾に改行がありません（反対側は改行で終わります）">改行なし</span>';
   function eolMark(side, li) {
-    if (!Settings.get('showWs')) return '';
     const sd = S[side]; if (!sd) return '';
+    // 末尾の改行の有無が違うときは、改行のない側の最終行に札を付ける（空白の記号表示がオフでも）
+    if (li === sd.lines.length - 1 && noNLSide() === side) return NONL;
+    if (!Settings.get('showWs')) return '';
     if (li === sd.lines.length - 1 && sd.finalNL === false) return '';
     return sd.eol === '\r\n' ? '<span class="wsc weol" title="CRLF">↵</span>' : sd.eol === '\r' ? '<span class="wsc weol" title="CR">←</span>' : '<span class="wsc weol" title="LF">↓</span>';
   }
@@ -227,7 +237,7 @@ const TV = (() => {
     if (e === st.hit) cls += ' hit';
     if (r && r.blk >= 0 && st.noteCls[r.blk]) cls += st.noteCls[r.blk];
     const side = u.k === 'b' ? 1 : 0;
-    const tx = u.k === 'e' ? txt(A[r.a]) + eolMark(0, r.a) : (r.t === 'c' ? inlineHtml(r, side) : txt((side ? B : A)[side ? r.b : r.a])) + eolMark(side, side ? r.b : r.a);
+    const tx = u.k === 'e' ? txt(A[r.a]) + (noNLSide() === 1 && r.b === L(1).length - 1 ? NONL.replace('改行なし', '右は改行なし') : eolMark(0, r.a)) : (r.t === 'c' ? inlineHtml(r, side) : txt((side ? B : A)[side ? r.b : r.a])) + eolMark(side, side ? r.b : r.a);
     const na = u.k !== 'b' && r.a >= 0 ? r.a + 1 : '', nb = u.k !== 'a' && r.b >= 0 ? r.b + 1 : '';
     return `<div class="${cls}" data-v="${u.v}" data-s="${side}"><span class="ln"><i>${na}</i><i>${nb}</i></span><span class="tx"><span class="mk" aria-hidden="true">${u.k === 'a' ? '−' : u.k === 'b' ? '+' : ' '}</span>${tx}</span></div>`;
   }
@@ -556,12 +566,19 @@ const TV = (() => {
       `<span class="grow"></span><button type="button" id="ntCsv" title="変更点の一覧（確認・コメント付き）をCSVに出力"><i data-i="sheet"></i>CSV</button></div>` +
       `<div class="nt-hint muted">差分を選ぶと、ここで「確認済・要確認」とひとことを付けられます。レポートにも載ります。</div>`;
   }
+  const EOL_ID = 't:eol:0';
+  function eolItem() {
+    const nn = noNLSide(); if (nn < 0) return '';
+    return `<div class="nt-item nt-eol${Notes.get(EOL_ID) ? (Notes.get(EOL_ID).st === 'ok' ? ' nt-ok' : Notes.get(EOL_ID).st === 'ask' ? ' nt-ask' : ' nt-c') : ''}" data-b="eol"><div class="nt-h"><b>末尾</b> 末尾の改行 <span class="muted">${nn ? '右' : '左'}は改行なしで終わる</span></div><div class="nt-hint2 muted">行の差分ではないため、差分の件数には数えません</div></div>`;
+  }
   function renderNotes() {
     if (!notesOn()) return;
     if (!S[0] || !S[1]) { ntPanel.innerHTML = '<div class="nt-empty muted">左右にファイルを読み込むと、差分ごとにコメントを付けられます</div>'; return; }
-    const n = st.blocks.length;
-    ntPanel.innerHTML = notesHead() + `<div class="nt-list">${n ? Array.from({ length: n }, (_, i) => noteItemHtml(i)).join('') : '<div class="nt-empty muted">差分はありません</div>'}</div>`;
+    const n = st.blocks.length, eol = eolItem();
+    ntPanel.innerHTML = notesHead() + `<div class="nt-list">${n ? Array.from({ length: n }, (_, i) => noteItemHtml(i)).join('') : (eol ? '' : '<div class="nt-empty muted">差分はありません</div>')}${eol}</div>`;
     $('#ntCsv', ntPanel).onclick = exportNotesCsv;
+    const ei = $('.nt-eol', ntPanel);
+    if (ei) ei.appendChild(Notes.editor(EOL_ID, `末尾の改行（${noNLSide() ? '右' : '左'}は改行なし）`)); // 1つだけなので、入力欄は常に出しておく
     st.noteCur = -2; notesCur();
   }
   // 選んでいる差分の行に入力欄を出す
@@ -576,7 +593,7 @@ const TV = (() => {
     if (ir.top < lr.top || ir.bottom > lr.bottom) it.scrollIntoView({ block: 'nearest' });
   }
   ntPanel.addEventListener('click', e => {
-    const it = e.target.closest('.nt-item'); if (!it || e.target.closest('.nt-ed')) return;
+    const it = e.target.closest('.nt-item'); if (!it || e.target.closest('.nt-ed') || it.dataset.b === 'eol') return;
     go(+it.dataset.b);
   });
   Notes.on(id => {
@@ -598,10 +615,17 @@ const TV = (() => {
   $('#tNotes').onclick = () => setNotes(!notesOn());
   function noteRows() {
     const A = L(0), B = L(1), o = Notes.all();
-    return st.blocks.map((b, i) => {
+    const rows = st.blocks.map((b, i) => {
       const v = o[st.noteIds[i]] || {};
       return { no: i + 1, kind: blockKind(b), left: lineRange(b.a0, b.a1), right: lineRange(b.b0, b.b1), before: A.slice(b.a0, b.a1).join('\n'), after: B.slice(b.b0, b.b1).join('\n'), st: v.st || '', text: v.text || '', by: v.by || '', at: v.at || 0 };
     });
+    // 末尾の改行の有無の違いも、変更点の1つとして一覧の最後に載せる（差分の件数には数えない）
+    const nn = noNLSide();
+    if (nn >= 0) {
+      const v = o[EOL_ID] || {};
+      rows.push({ no: '末尾', kind: '末尾の改行', left: nn === 0 ? '改行なし' : '改行あり', right: nn === 1 ? '改行なし' : '改行あり', before: '', after: '', st: v.st || '', text: v.text || '', by: v.by || '', at: v.at || 0 });
+    }
+    return rows;
   }
   function exportNotesCsv() {
     if (!S[0] || !S[1]) return toast('左右にファイルを読み込んでください');
@@ -641,7 +665,8 @@ const TV = (() => {
       } else {
       msg = `<b style="color:#21752f">✓ ${same ? '完全に同一です' : (ignored ? '比較オプションの範囲で同一です' : 'テキスト内容は同一です')}</b>`;
       if (!same && !ignored && S[0].kind === S[1].kind && S[0].kind === 'text' && (S[0].enc !== S[1].enc || S[0].eol !== S[1].eol)) msg += '<span>（文字コードまたは改行コードが異なります）</span>';
-      if (!same && S[0].kind === 'text' && S[1].kind === 'text' && S[0].lines.length && (S[0].finalNL !== false) !== (S[1].finalNL !== false)) msg += '<span>（末尾の改行の有無が異なります）</span>';
+      const nn = noNLSide();
+      if (!same && nn >= 0) msg += `<span>（末尾の改行の有無が異なります：${nn ? '右' : '左'}は改行なしで終わる）</span>`;
       // 差分をコピーした・編集した結果の「同一」は、元のファイルが同一という意味ではないことを示す
       const ed = [0, 1].filter(i => S[i].dirty);
       if (ed.length) msg += `<span style="color:#b45309">（${ed.map(i => i ? '右' : '左').join('・')}は編集後・未保存の内容です。元のファイルどうしの結果ではありません。元に戻す：Ctrl+Z）</span>`;
@@ -650,6 +675,8 @@ const TV = (() => {
       let dl = 0, il = 0, cl = 0;
       for (const r of st.rows) { if (r.t === 'c') cl++; else if (r.t === 'd') dl++; else if (r.t === 'i') il++; }
       msg = `差分 <b>${st.cur >= 0 ? st.cur + 1 : '-'} / ${n}</b> 箇所<span>変更 ${fmtNum(cl)}行・左のみ ${fmtNum(dl)}行・右のみ ${fmtNum(il)}行</span>`;
+      const nn = noNLSide();
+      if (nn >= 0) msg += `<span style="color:#b45309">（末尾の改行の有無も異なります：${nn ? '右' : '左'}は改行なしで終わる）</span>`;
       if ([0, 1].some(i => S[i].kind === 'binary' && S[i].bytes && S[i].bytes.length > Enc.DUMP_MAX)) msg += `<span>（バイナリは先頭 ${fmtSize(Enc.DUMP_MAX)} だけを表示・比較しています。それより後ろの違いは数に含みません）</span>`;
     }
     $('#textStatus').innerHTML = `${msg}<span class="grow"></span><span>左: ${esc(sideInfo(S[0]))}</span><span>右: ${esc(sideInfo(S[1]))}</span>`;
@@ -802,7 +829,7 @@ tr.fold td{background:#eef3fb;color:#4c6a96;text-align:center;font-family:sans-s
       nrows.map(x => `<tr><td>#${x.no}</td><td>${x.kind}</td><td>${x.left}<br>${x.right}</td><td class="b">${cut(x.before)}</td><td class="a">${cut(x.after)}</td><td>${nst[x.st]}</td><td>${esc(x.text).replace(/\n/g, '<br>')}${x.text && (x.by || x.at) ? `<div class="by">${esc(x.by)}${x.by ? '・' : ''}${x.at ? fmtDate(x.at) : ''}</div>` : ''}</td></tr>`).join('') + '</tbody></table><h2>比較結果</h2>';
     const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>比較レポート - ${esc(S[0].name)} / ${esc(S[1].name)}</title><style>${css}</style></head><body>
 <h1>比較レポート</h1>
-<div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）${o.cond ? `　比較条件: ${esc(cond)}<br>
+<div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）${noNLSide() >= 0 ? `　<b style="color:#b45309">末尾の改行の有無も異なります（${noNLSide() ? '右' : '左'}は改行なしで終わる）</b>` : ''}${o.cond ? `　比較条件: ${esc(cond)}<br>
 <span class="legend">${uni ? '<span>− 変更前・左だけにある行（赤）</span><span>＋ 変更後・右だけにある行（青）</span><span>変わった文字：変更前＝取り消し線、変更後＝下線</span>' : '<span>＊ 変更（変更前＝赤・取り消し線、変更後＝青・下線）</span><span>− 左だけにある行（赤）</span><span>＋ 右だけにある行（青）</span>'}</span>` : ''}</div>
 ${noteTable}
 ${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr><th>右</th><td>${info(S[1], h1)}</td></tr></table>
