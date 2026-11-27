@@ -892,7 +892,18 @@ const OV = (() => {
     showPanelFor(m);
     update();
   }
+  // 連動中で対応付けを計算している途中なら、終わるのを待つ（待たずに送ると、挿入・削除されたページを飛ばせず組がずれる）
+  const needMatch = () => $('#ovLink').checked && S[0] && S[1] && PageMatch.enabled() && !PageMatch.ready();
+  let waiting = null;
+  async function afterMatch(fn) {
+    if (!needMatch()) return fn();
+    const ticket = {}; waiting = ticket;
+    toast('ページの対応を調べています。終わりしだい移動します…');
+    await ensureMatch().catch(() => null);
+    if (waiting === ticket) { waiting = null; fn(); } // 待っている間に別の操作が来たら、最後の操作だけを行う
+  }
   function step(side, d) {
+    if (needMatch()) return afterMatch(() => step(side, d));
     if (st.slots) { const c = st.curSlot ? st.curSlot.k : 0; return scrollToSlot(Math.max(0, Math.min(st.slots.length - 1, c + d))); }
     const lsel = $('#ovLPage'), rsel = $('#ovRPage');
     const nl = lsel.options.length - 1, nr = rsel.options.length - 1; // 先頭は「—」
@@ -911,12 +922,16 @@ const OV = (() => {
   $('#ovLPrev').onclick = () => step(0, -1); $('#ovLNext').onclick = () => step(0, 1);
   $('#ovRPrev').onclick = () => step(1, -1); $('#ovRNext').onclick = () => step(1, 1);
   $('#ovLPage').onchange = e => {
-    const v = +e.target.value, d = v - st.l, pairs = PageMatch.ready();
+    const v = +e.target.value;
+    if (needMatch()) { e.target.value = String(st.l); return afterMatch(() => { $('#ovLPage').value = String(v); $('#ovLPage').dispatchEvent(new Event('change')); }); }
+    const d = v - st.l, pairs = PageMatch.ready();
     if ($('#ovLink').checked) st.r = pairs ? pairs.find(p => p.l === v).r : Math.max(0, Math.min($('#ovRPage').options.length - 2, st.r + d));
     st.l = v; go();
   };
   $('#ovRPage').onchange = e => {
-    const v = +e.target.value, pairs = PageMatch.ready();
+    const v = +e.target.value;
+    if (needMatch()) { e.target.value = String(st.r); return afterMatch(() => { $('#ovRPage').value = String(v); $('#ovRPage').dispatchEvent(new Event('change')); }); }
+    const pairs = PageMatch.ready();
     if ($('#ovLink').checked && pairs) st.l = pairs.find(p => p.r === v).l;
     st.r = v; go();
   };
@@ -983,10 +998,11 @@ const OV = (() => {
   async function refreshMatch() {
     const before = PageMatch.ready(), gen = st.gen;
     const pairs = await ensureMatch();
-    if (pairs && !before && App.tab === 'overlay' && gen === st.gen && st.scroll) { update(); return; }
-    if (pairs && !before && $('#ovLink').checked && App.tab === 'overlay' && gen === st.gen) {
-      const p = pairs.find(q => q.l === st.l);
-      if (p && p.r !== st.r) { st.r = p.r; update(); }
+    if (pairs && !before && App.tab === 'overlay' && st.scroll) { update(); return; }
+    // 計算が終わったら、今の組を確かめ直す（計算中に表示を描き直していても、左のページに対応する右のページへ直す）
+    if (pairs && !before && $('#ovLink').checked && App.tab === 'overlay' && !waiting) {
+      const p = st.l >= 0 ? pairs.find(q => q.l === st.l) : pairs.find(q => q.r === st.r);
+      if (p && (p.r !== st.r || p.l !== st.l)) { st.l = p.l; st.r = p.r; update(); }
     }
   }
   async function activate() {
