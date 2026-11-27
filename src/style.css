@@ -31,7 +31,7 @@ kbd{font-family:var(--mono);background:#f3f4f6;border:1px solid #cfd5dc;border-b
 /* header */
 #top{display:flex;align-items:center;gap:14px;padding:0 12px;height:44px;background:#1d2733;color:#fff;flex:none}
 #top .brand{font-weight:700;letter-spacing:.04em;font-size:14.5px;display:flex;align-items:center;gap:8px}
-#top .brand i{display:inline-block;width:18px;height:18px;border-radius:4px;background:linear-gradient(90deg,#ffd34d 0 50%,#8fdc99 50%)}
+#top .brand .logo{display:block;width:22px;height:22px;flex:none}
 #tabs{display:flex;gap:2px;height:100%;align-items:flex-end}
 #tabs button{border:none;border-radius:6px 6px 0 0;background:transparent;color:#c9d3df;padding:8px 16px 9px;font-size:13px}
 #tabs button:hover{background:#2a3644;color:#fff}

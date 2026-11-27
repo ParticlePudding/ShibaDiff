@@ -86,6 +86,13 @@ licenses = "\n\n".join([
 ])
 check_script_safe("licenses", licenses)
 
+def icon_uri(n):
+    import base64
+    with open(os.path.join(HERE, "assets", f"icon-{n}.png"), "rb") as f:
+        return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+icon64, icon180 = icon_uri(64), icon_uri(180)
+body = body.replace("__ICON64__", icon64)
+
 html = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -93,6 +100,8 @@ html = f"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <title>ShibaDiff</title>
+<link rel="icon" type="image/png" sizes="64x64" href="{icon64}">
+<link rel="apple-touch-icon" href="{icon180}">
 <style>
 {css}
 </style>
