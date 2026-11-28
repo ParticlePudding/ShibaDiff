@@ -29,16 +29,23 @@ function toast(msg, isErr = false, ms = 2600) {
 let busyCount = 0;
 function busy(on, msg) {
   busyCount = Math.max(0, busyCount + (on ? 1 : -1));
-  if (msg) $('#busyMsg').textContent = msg;
+  // 読み上げには、始まったときの文だけを伝える（#busyLive）。進み具合（n / m など）は #busyMsg に直接書かれ、読み上げない
+  // （進み具合まで読み上げると、数千ファイルの読み込みで読み上げが止まらなくなる）
+  if (msg) { $('#busyMsg').textContent = msg; if (on) $('#busyLive').textContent = msg; }
   $('#busy').classList.toggle('on', busyCount > 0);
 }
-// opt.onCancel を渡すと、「処理中」の表示に「中止」ボタンを出す（押すと onCancel を呼ぶ。止め方は呼び出し側で決める）
+// opt.onCancel を渡すと、「処理中」の表示に「中止」ボタンを出す（押すと onCancel を呼ぶ。止め方は呼び出し側で決める）。
+// 中止できる処理が重なっているときは、ボタンはどれかが残っている間は出したままにし、押されたら残っている分をすべて中止する
+const busyCancels = new Set();
 async function withBusy(msg, fn, opt = {}) {
   const btn = $('#busyCancel');
   busy(true, msg);
-  if (opt.onCancel) { btn.hidden = false; btn.onclick = opt.onCancel; }
+  if (opt.onCancel) { busyCancels.add(opt.onCancel); btn.hidden = false; btn.onclick = () => Array.from(busyCancels).forEach(f => f()); }
   await nextFrame(); await nextFrame();
-  try { return await fn(); } finally { if (opt.onCancel) { btn.hidden = true; btn.onclick = null; } busy(false); }
+  try { return await fn(); } finally {
+    if (opt.onCancel) { busyCancels.delete(opt.onCancel); if (!busyCancels.size) { btn.hidden = true; btn.onclick = null; } }
+    busy(false);
+  }
 }
 
 /* modal: クリックしたボタンの value で解決する Promise を返す。
@@ -104,7 +111,8 @@ function modal({ title, html, buttons = [{ label: '閉じる', value: null }], o
     document.addEventListener('keydown', onKey, true);
     modalStack.push(me);
     m.classList.add('on');
-    if (onOpen) onOpen(m, close);
+    // 中身の初期化で例外が出たら、開いたままにせず閉じる（閉じられないダイアログが modalStack に残らないように）
+    try { if (onOpen) onOpen(m, close); } catch (e) { console.error(e); close(null); return; }
     if (!dlg.contains(document.activeElement)) {
       const first = $('textarea,input:not([type=checkbox]),select', bodyEl) || $('button.primary', foot) || focusables()[0];
       if (first) first.focus();

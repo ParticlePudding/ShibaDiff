@@ -207,7 +207,8 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 .fd-slot.loaded{border-style:solid;border-color:var(--line)}
 .fd-slot.drag{border-color:var(--accent);background:var(--accent-weak)}
 .fd-slot .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fd-table-wrap{flex:1;min-height:0;overflow:auto;background:#fff;border-top:1px solid var(--line)}
+/* scroll-padding-top：↑ キーで選んだ行を見える位置へ動かすとき、固定している見出しの行（th）の下に隠れないようにする */
+.fd-table-wrap{flex:1;min-height:0;overflow:auto;background:#fff;border-top:1px solid var(--line);scroll-padding-top:34px}
 .fd-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .fd-table th{position:sticky;top:0;background:#f3f5f8;border-bottom:1px solid var(--line2);text-align:left;padding:5px 8px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
 .fd-table td{border-bottom:1px solid #eef0f3;padding:4px 8px;white-space:nowrap}
@@ -246,6 +247,8 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 #toast.err{background:#b42318}
 #busy{position:fixed;inset:0;background:rgba(255,255,255,.55);display:none;flex-direction:column;gap:10px;align-items:center;justify-content:center;z-index:55;font-size:14px}
 #busyCancel{padding:5px 18px}
+/* 読み上げにだけ伝える文（画面には出さない） */
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 #busy.on{display:flex}
 /* ダイアログが開いている間は「処理中」の幕を出さない（読み込みの途中でパスワードを聞くとき、幕が上に重なって入力欄もボタンも押せなくなるため）。閉じたらまた出る */
 #modal.on ~ #busy.on{display:none}

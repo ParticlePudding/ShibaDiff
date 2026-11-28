@@ -1,6 +1,6 @@
 /* フォルダ比較 */
 const FD = (() => {
-  const st = { files: [null, null], names: ['', ''], rows: [], sort: { k: 'path', d: 1 }, running: false, sel: -1, gen: 0, readGen: 0 };
+  const st = { files: [null, null], names: ['', ''], rows: [], sort: { k: 'path', d: 1 }, running: false, sel: -1, gen: 0 };
   const slots = $$('.fd-slot');
 
   function setFolder(side, name, map) {
@@ -41,10 +41,15 @@ const FD = (() => {
       const files = [], dirs = [];
       for await (const [name, h] of dir.entries()) { if (!ctl.alive()) throw CANCELLED; (h.kind === 'file' ? files : dirs).push([prefix + name, h]); }
       await takeFiles(files, h => h.getFile(), map, ctl);
-      for (const [path, h] of dirs) await walk(h, path + '/');
+      for (const [path, h] of dirs) await walkSub(() => walk(h, path + '/'), path, ctl);
     }
     await walk(root, '');
     return map;
+  }
+  // サブフォルダを読む。開けないサブフォルダ（権限がない、Windows の接合点など）は、そこだけ飛ばして残りを続ける
+  // （1つ読めないだけで、フォルダ全体を読めないことにしない。飛ばしたものは ctl.skipped に入れて通知する）
+  async function walkSub(fn, path, ctl) {
+    try { await fn(); } catch (e) { if (e === CANCELLED) throw e; ctl.skipped.push(path + '/（フォルダ）'); }
   }
   async function fromEntry(entry, ctl) {
     const map = new Map();
@@ -58,7 +63,7 @@ const FD = (() => {
       const es = await readAll(dir);
       if (!ctl.alive()) throw CANCELLED;
       await takeFiles(es.filter(e => e.isFile).map(e => [prefix + e.name, e]), fileOf, map, ctl);
-      for (const e of es) if (e.isDirectory) await walk(e, prefix + e.name + '/');
+      for (const e of es) if (e.isDirectory) await walkSub(() => walk(e, prefix + e.name + '/'), prefix + e.name, ctl);
     }
     await walk(entry, '');
     return map;
@@ -193,11 +198,12 @@ const FD = (() => {
     }).filter(Boolean);
     if (!srcs.length) return toast('フォルダをドロップしてください', true);
     const targets = srcs.length >= 2 ? [[0, srcs[0]], [1, srcs[1]]] : [[side, srcs[0]]];
-    // 中止できるようにする（大きなフォルダやネットワーク上のフォルダは時間がかかる。読み取りが返ってこないときも、画面を取り戻せる）
-    const gen = ++st.readGen, ctl = { alive: () => gen === st.readGen, skipped: [], tick: () => { } };
-    let cancel; const stopped = new Promise((_, rej) => { cancel = () => { st.readGen++; rej(CANCELLED); }; });
+    // 中止できるようにする（大きなフォルダやネットワーク上のフォルダは時間がかかる。読み取りが返ってこないときも、画面を取り戻せる）。
+    // 中止の印は、このドロップの分だけに効かせる（左を読んでいる間に右をドロップしても、左の読み込みは止めない）
+    const ctl = { stop: false, alive: () => !ctl.stop, skipped: [], tick: () => { } };
+    let cancel; const stopped = new Promise((_, rej) => { cancel = () => { ctl.stop = true; rej(CANCELLED); }; });
     stopped.catch(() => { });
-    const got = [];
+    const got = []; let failed = null;
     try {
       await withBusy('フォルダを読み込み中…', async () => {
         for (const [sd, src] of targets) {
@@ -205,13 +211,15 @@ const FD = (() => {
           got.push([sd, src.name, await Promise.race([readDropped(src, ctl), stopped])]);
         }
       }, { onCancel: () => cancel() });
-    } catch (e) {
-      if (e === CANCELLED) return toast('フォルダの読み込みを中止しました');
-      console.error(e);
-      return toast(`フォルダを読み込めませんでした（${(e && (e.name || e.message)) || e}）。「フォルダを選択」のボタンから指定してください`, true);
-    }
+    } catch (e) { failed = e; }
+    // 読めた分は、あとの分が失敗・中止でも一覧に入れる
     for (const [sd, name, map] of got) setFolder(sd, name, map);
-    if (ctl.skipped.length) toast(`読めないファイルが ${fmtNum(ctl.skipped.length)} 個あり、一覧に入っていません（${ctl.skipped.slice(0, 3).join('、')}${ctl.skipped.length > 3 ? ' ほか' : ''}）`, true, 8000);
+    if (failed === CANCELLED) return toast('フォルダの読み込みを中止しました');
+    if (failed) {
+      console.error(failed);
+      return toast(`フォルダを読み込めませんでした（${(failed && (failed.name || failed.message)) || failed}）。「フォルダを選択」のボタンから指定してください`, true);
+    }
+    if (ctl.skipped.length) toast(`読めないものが ${fmtNum(ctl.skipped.length)} 個あり、一覧に入っていません（${ctl.skipped.slice(0, 3).join('、')}${ctl.skipped.length > 3 ? ' ほか' : ''}）`, true, 8000);
   }
   /* ---- CSV・レポート ---- */
   const ROWS_SORTED = () => st.rows.slice().sort((x, y) => x.path < y.path ? -1 : x.path > y.path ? 1 : 0);

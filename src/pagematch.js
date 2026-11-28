@@ -132,10 +132,14 @@ const PageMatch = (() => {
     const p = (async () => {
       const [pl, pr] = await Promise.all([S[0].getPages(), S[1].getPages()]);
       const n = pl.length, m = pr.length;
+      // ページ数が多すぎるときは、特徴（縮小画像）を作る前にやめて、同じページ番号どうしを組にする
+      if (tooBig(n, m)) return { pairs: sameNumber(n, m), skipped: false, visual: false, big: true };
       let sim = null, skipped = false;
       const tl = pageTexts(S[0], n), tr = pageTexts(S[1], m);
       if (tl && tr) sim = (i, j) => textSim(tl[i], tr[j]);
-      else if (n === m && !visual) skipped = true; // ページ数が同じなら1対1とみなす（全ページの縮小画像を作らない）
+      // ページ数が同じなら1対1とみなす（全ページの縮小画像を作らない）。「調べていない」と示すのは2ページ以上のときだけ：
+      // 1ページどうし（画像どうしなど）は、入れ替えの起こりようがない
+      else if (n === m && !visual) skipped = n > 1;
       else {
         // 文字がない（スキャン）ときは見た目で比べる
         const vl = [], vr = [], tot = n + m;
@@ -143,10 +147,9 @@ const PageMatch = (() => {
         for (let j = 0; j < m; j++) { vr.push(await thumb(pr[j])); if (onProgress) onProgress(n + j + 1, tot); if (keyOf() !== key) return null; }
         sim = (i, j) => cosine(vl[i], vr[j]);
       }
-      const big = !!sim && tooBig(n, m);
       const pairs = sim ? await align(n, m, sim, tl ? 0.3 : 0.55, () => sleep(0)) : sameNumber(n, m);
       if (keyOf() !== key) return null;
-      return { pairs, skipped, visual: !!sim && !(tl && tr) && !big, big };
+      return { pairs, skipped, visual: !!sim && !(tl && tr), big: false };
     })();
     const job = st.busy = { key, p, visual };
     const res = await p;

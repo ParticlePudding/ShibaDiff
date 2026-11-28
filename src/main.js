@@ -53,12 +53,9 @@ const App = (() => {
         const info = {};
         s.kind = k; setText(s, await Office.extract(k, b, info));
         s.getPages = async () => (s._pages || (s._pages = Pages.fromText(s.lines, s.name)));
-        // Word の変更履歴が残っている：比較は「すべて承諾した状態」の文字で行うので、削除された文字は比較に出ない。見落とさないよう知らせる
-        // （ファイル欄とテキスト比較の状態表示にも出す）
-        if (info.tracked) {
-          s.tracked = info.tracked;
-          toast(`「${s.name}」には変更履歴が残っています（挿入 ${info.tracked.ins}・削除 ${info.tracked.del}）。変更をすべて承諾した状態の文字で比較します（削除された文字は比較に出ません）`, false, 7000);
-        }
+        // Word の変更履歴が残っている：比較は「すべて承諾した状態」の文字で行うので、削除された文字は比較に出ない。
+        // 見落とさないよう、読み込みが終わったら知らせ（noticeTracked）、ファイル欄とテキスト比較の状態表示にも出す
+        if (info.tracked) s.tracked = info.tracked;
         return;
       }
     }
@@ -77,10 +74,15 @@ const App = (() => {
     const n = e && e.name, m = (e && e.message) || String(e);
     if (n === 'InvalidPDFException' || /Invalid PDF/i.test(m)) return 'PDFファイルが壊れているか、PDF形式ではありません。';
     if (n === 'PasswordException') return 'パスワードが入力されませんでした。';
-    if (/ZIPの構造|ZIP形式/.test(m)) return 'Office文書が壊れている可能性があります。';
+    if (/ZIPの構造|ZIP形式/.test(m)) return 'Office文書が壊れている可能性があります。Word・Excel などで開いて保存し直すと、読めることがあります。';
     return m;
   }
   function disposeSide(s) { if (s && s.pdf) { try { s.pdf.destroy(); } catch (e) { } } }
+  // 変更履歴の残る Word 文書を読み込んだときの通知。左右をまとめて読み込んだときは、1つの通知にまとめる（あとの通知で前の通知が消えないように）
+  function noticeTracked(sides) {
+    const t = sides.filter(i => S[i] && S[i].tracked).map(i => `${i ? '右' : '左'}の「${S[i].name}」（挿入 ${S[i].tracked.ins}・削除 ${S[i].tracked.del}）`);
+    if (t.length) toast(`${t.join('と')}には変更履歴が残っています。変更をすべて承諾した状態の文字で比較します（削除された文字は比較に出ません）`, false, 8000);
+  }
 
   /* 保存していない変更がある側を置き換える前に確認する（置き換えると元に戻す履歴も消えるため） */
   async function confirmDiscard(sides, verb) {
@@ -100,6 +102,7 @@ const App = (() => {
         S[side] = s;
       });
       changed([side]);
+      noticeTracked([side]);
     } catch (e) {
       console.error(e);
       toast(`「${file.name}」を読み込めませんでした。${errMsg(e)}${S[side] ? '（前のファイルはそのまま残っています）' : ''}`, true);
@@ -107,6 +110,7 @@ const App = (() => {
   }
   async function loadPair(files) {
     if (!await confirmDiscard([0, 1], '別のファイルを読み込む')) return false;
+    let failed = false; // 読み込めなかったものがあれば、その通知を残す（変更履歴の通知で上書きしない）
     for (let i = 0; i < 2; i++) {
       if (!files[i]) continue;
       try {
@@ -115,7 +119,7 @@ const App = (() => {
           const s = { name: f.name, size: f.size, mtime: f.lastModified, bytes, key: `${f.name}|${f.size}|${f.lastModified}`, file: f };
           await prepare(s); disposeSide(S[i]); S[i] = s;
         });
-      } catch (e) { toast(`「${files[i].name}」を読み込めませんでした。${errMsg(e)}`, true); }
+      } catch (e) { failed = true; toast(`「${files[i].name}」を読み込めませんでした。${errMsg(e)}`, true); }
     }
     for (let i = 0; i < 2; i++) if (!files[i]) { disposeSide(S[i]); S[i] = null; }
     // 先に各画面へ「文書が変わった」ことを知らせてから表示を切り替える（逆だと、古い比較結果を新しい文書で描こうとして失敗する）
@@ -123,6 +127,7 @@ const App = (() => {
     if (fromFolder) app.tab = 'text';
     changed([0, 1]);
     if (fromFolder) { setMode('file'); $('#btnBackFolder').hidden = false; }
+    if (!failed) noticeTracked([0, 1].filter(i => files[i]));
     requestAnimationFrame(fitHdrNames); // ヘッダのボタンが増減すると名前の欄の幅が変わる
     return true;
   }

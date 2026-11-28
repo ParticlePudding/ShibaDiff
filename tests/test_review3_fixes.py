@@ -25,17 +25,22 @@ def make_docx(path):
 <w:p><w:moveFrom w:id="3" w:author="A">{run("この文は移動した。")}</w:moveFrom></w:p>
 <w:p>{run("第2条 期間")}</w:p>
 <w:p><w:moveTo w:id="4" w:author="A">{run("この文は移動した。")}</w:moveTo></w:p>
-<w:sectPr><w:headerReference w:type="default" r:id="rId1"/><w:footerReference w:type="default" r:id="rId2"/></w:sectPr>
+<w:sectPr><w:headerReference w:type="default" r:id="rId1"/><w:headerReference w:type="first" r:id="rId3"/><w:headerReference w:type="even" r:id="rId4"/><w:footerReference w:type="default" r:id="rId2"/><w:titlePg/></w:sectPr>
 </w:body></w:document>'''
     hdr = f'<?xml version="1.0" encoding="UTF-8"?><w:hdr {W}><w:p>{run("文書番号 QA-001　第3版　社外秘")}</w:p></w:hdr>'
+    hdr_of = lambda text: f'<?xml version="1.0" encoding="UTF-8"?><w:hdr {W}><w:p>{run(text)}</w:p></w:hdr>'
     fld = lambda t: f'<w:r><w:fldChar w:fldCharType="{t}"/></w:r>'
     ftr = (f'<?xml version="1.0" encoding="UTF-8"?><w:ftr {W}><w:p>{run("- ")}{fld("begin")}<w:r><w:instrText> PAGE </w:instrText></w:r>{fld("separate")}{run("1")}{fld("end")}'
-           f'{run(" / ")}<w:fldSimple w:instr=" NUMPAGES ">{run("5")}</w:fldSimple>{run(" -")}</w:p></w:ftr>')
+           f'{run(" / ")}<w:fldSimple w:instr=" NUMPAGES ">{run("5")}</w:fldSimple>{run(" -　印刷日 ")}'
+           f'<w:fldSimple w:instr=" DATE \\@ &quot;yyyy/MM/dd&quot; ">{run("2026/11/20")}</w:fldSimple></w:p></w:ftr>')
     rels = (f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            f'<Relationship Id="rId1" Type="{REL}/header" Target="header1.xml"/><Relationship Id="rId2" Type="{REL}/footer" Target="footer1.xml"/></Relationships>')
-    # header2.xml は先頭ページ用などの「同じ内容のヘッダー」。1回だけ出ること
+            f'<Relationship Id="rId1" Type="{REL}/header" Target="header1.xml"/><Relationship Id="rId2" Type="{REL}/footer" Target="footer1.xml"/>'
+            f'<Relationship Id="rId3" Type="{REL}/header" Target="header2.xml"/><Relationship Id="rId4" Type="{REL}/header" Target="header4.xml"/></Relationships>')
+    # header2.xml：先頭ページ用（w:titlePg があるので使われる）。中身が既定のヘッダーと同じなので、1回だけ出ること
+    # header3.xml：どこからも参照されていない（テンプレートの残り）。header4.xml：偶数ページ用だが、文書の設定に指定がないので使われない
     zipto(path, {'[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
-                 'word/document.xml': doc, 'word/_rels/document.xml.rels': rels, 'word/header1.xml': hdr, 'word/header2.xml': hdr, 'word/footer1.xml': ftr})
+                 'word/document.xml': doc, 'word/_rels/document.xml.rels': rels, 'word/header1.xml': hdr, 'word/header2.xml': hdr,
+                 'word/header3.xml': hdr_of('旧社名（未使用のヘッダー）'), 'word/header4.xml': hdr_of('偶数ページ用（使われない）'), 'word/footer1.xml': ftr})
 
 
 def make_xlsx(path):
@@ -159,9 +164,13 @@ async def main():
         toast = await t.toast()
         L = await t.js('S[0].lines')
         ck('Word：ヘッダーを取り出す（同じ内容のヘッダーは1回だけ）', '===== ヘッダー =====' in L and L.count('文書番号 QA-001　第3版　社外秘') == 1, L)
-        ck('Word：フッターを取り出し、ページ番号のフィールドは印にする', '===== フッター =====' in L and '- ‹ページ番号› / ‹総ページ数› -' in L, L)
+        ck('Word：文書に出ないヘッダー（参照されていないもの・設定のない偶数ページ用）は取り出さない', not any('旧社名' in x or '偶数ページ用' in x for x in L), L)
+        ck('Word：フッターを取り出し、ページ番号・日付のフィールドは印にする（保存した日で差分にならない）', '===== フッター =====' in L and '- ‹ページ番号› / ‹総ページ数› -　印刷日 ‹日付›' in L, L)
         ck('Word：変更履歴は承諾した状態（削除と、移動する前の文は読まない）', '契約金額は120万円とする。' in L and L.count('この文は移動した。') == 1, L)
         ck('Word：変更履歴が残っていることを通知する', '変更履歴が残っています' in toast and '挿入 2・削除 2' in toast, toast)
+        await t.js("App.loadPair([S[0].file, S[0].file]); 0"); await p.wait_for_timeout(900); await t.wait_idle(100)
+        toast2 = await t.toast()
+        ck('Word：左右まとめて読み込んだときは、左右の分を1つの通知にまとめる', '左の「契約書_履歴あり.docx」' in toast2 and '右の「契約書_履歴あり.docx」' in toast2, toast2)
         meta = await p.inner_text('.slot[data-side="0"] .slot-info .meta')
         ck('Word：ファイル欄にも「変更履歴あり」', '変更履歴あり' in meta, meta)
         await t.load_one(1, f('契約書_履歴あり.docx'))

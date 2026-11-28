@@ -107,10 +107,12 @@ const Office = (() => {
   /* ---- Word ---- */
   const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
   const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-  // ページ番号のフィールド（ヘッダー・フッターで使う）。保存時の値（1 など）ではなく、印で出す
-  const PAGE_FIELD = { PAGE: '‹ページ番号›', NUMPAGES: '‹総ページ数›', SECTIONPAGES: '‹総ページ数›' };
+  // 自動で変わるフィールド（ヘッダー・フッターで使う）。保存時の値（1、保存した日の日付など）ではなく、印で出す。
+  // 値のまま出すと、本文が同じ2つの版でも、保存した日やファイル名が違うだけで毎回差分になる（作成日 CREATEDATE は変わらないので値のまま）
+  const PAGE_FIELD = { PAGE: '‹ページ番号›', NUMPAGES: '‹総ページ数›', SECTIONPAGES: '‹総ページ数›',
+    DATE: '‹日付›', TIME: '‹日付›', SAVEDATE: '‹日付›', PRINTDATE: '‹日付›', FILENAME: '‹ファイル名›' };
   const pageField = instr => PAGE_FIELD[((/^\s*([A-Za-z]+)/.exec(instr || '') || [])[1] || '').toUpperCase()] || '';
-  // opt.pageFields：ページ番号のフィールドを印に置き換える（ヘッダー・フッター用）
+  // opt.pageFields：ページ番号・日付・ファイル名のフィールドを印に置き換える（ヘッダー・フッター用）
   function wParaText(p, opt = {}) {
     let s = '', fld = null; // fld：読んでいる途中のフィールド { instr, mark, result }
     const walk = el => {
@@ -174,14 +176,30 @@ const Office = (() => {
     const tracked = { ins: 0, del: 0 };
     const count = d => { tracked.ins += all(d, 'ins').length + all(d, 'moveTo').length; tracked.del += all(d, 'del').length + all(d, 'moveFrom').length; };
     count(doc);
-    // ヘッダー・フッター（版数・文書番号・機密区分などが書かれることが多い）。本文の節（sectPr）が参照している順に読み、
-    // どこからも参照されていないものは番号順に足す。同じ内容のもの（先頭ページ用・偶数ページ用など）は1回だけ出す
+    // ヘッダー・フッター（版数・文書番号・機密区分などが書かれることが多い）。本文の節（sectPr）が参照していて、
+    // 実際に使われるものだけを、参照している順に読む（文書に出ない文字を、比較に入れない）：
+    //   ・先頭ページ用（type="first"）は、その節に「先頭ページのみ別指定」（w:titlePg）があるときだけ
+    //   ・偶数ページ用（type="even"）は、文書の設定に「奇数・偶数ページ別指定」（w:evenAndOddHeaders）があるときだけ
+    //   ・どこからも参照されていない header*.xml・footer*.xml（テンプレートの残りなど）は読まない
+    // 同じ内容のものは1回だけ出す
     const rels = await relsMap(zip, 'word/_rels/document.xml.rels');
-    for (const [ref, re, label] of [['headerReference', /^word\/header(\d+)\.xml$/, 'ヘッダー'], ['footerReference', /^word\/footer(\d+)\.xml$/, 'フッター']]) {
-      const used = all(doc, ref).map(e => rels.get(e.getAttributeNS(R_NS, 'id') || e.getAttribute('r:id'))).filter(Boolean).map(t => resolve('word/document.xml', t));
-      const rest = zip.names().filter(n => re.test(n)).sort((a, b) => +re.exec(a)[1] - +re.exec(b)[1]);
+    const wAttr = (e, name) => e.getAttributeNS(W_NS, name) || e.getAttribute('w:' + name);
+    const flagOn = e => { const v = wAttr(e, 'val'); return v == null || v === '' || !/^(0|false|off)$/i.test(v); };
+    const settings = await xmlOf(zip, 'word/settings.xml');
+    const evenOdd = !!settings && all(settings, 'evenAndOddHeaders').some(flagOn);
+    for (const [ref, label] of [['headerReference', 'ヘッダー'], ['footerReference', 'フッター']]) {
+      const used = [];
+      for (const sp of all(doc, 'sectPr')) {
+        const titlePg = kids(sp, 'titlePg').some(flagOn);
+        for (const e of kids(sp, ref)) {
+          const type = wAttr(e, 'type') || 'default';
+          if ((type === 'first' && !titlePg) || (type === 'even' && !evenOdd)) continue;
+          const t = rels.get(e.getAttributeNS(R_NS, 'id') || e.getAttribute('r:id'));
+          if (t) used.push(resolve('word/document.xml', t));
+        }
+      }
       const lines = [], seen = new Set();
-      for (const name of new Set([...used, ...rest])) {
+      for (const name of new Set(used)) {
         const d = await xmlOf(zip, name); if (!d) continue;
         const ls = []; count(d);
         wBlock(d.documentElement, ls, { pageFields: true });

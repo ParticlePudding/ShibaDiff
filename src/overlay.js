@@ -590,7 +590,7 @@ const OV = (() => {
     markCurrent(s);
   }
   // 利用者が自分でスクロールし始めたら、向かうのをやめる
-  for (const ty of ['wheel', 'pointerdown', 'touchstart']) view.addEventListener(ty, () => { heading = null; }, { passive: true });
+  for (const ty of ['wheel', 'pointerdown', 'touchstart', 'keydown']) view.addEventListener(ty, () => { heading = null; }, { passive: true });
   // 見えていないページの描画は捨てる（メモリを使いすぎないように）。仮の枠に戻す
   function releaseSlot(s) {
     if (!s.v) return;
@@ -724,6 +724,7 @@ const OV = (() => {
     if (v !== st.cur && st.slots) { const s = st.slots.find(q => q.v === v); if (s) markCurrent(s); }
     renderOvNotes();
     if (!scroll) return;
+    heading = null; // ページへ移動している途中でも、ここからは変更箇所へ向かう（ページの先頭へ向かい直さない）
     const r = v.regions[i], o = v.out.getBoundingClientRect(), vr = view.getBoundingClientRect(), k = o.width / v.out.width;
     view.scrollTo({ top: view.scrollTop + o.top - vr.top + r.y * k - view.clientHeight / 3, left: view.scrollLeft + o.left - vr.left + r.x * k - view.clientWidth / 3, behavior: 'smooth' });
   }

@@ -78,7 +78,24 @@ async def main():
         await p.click('#busyCancel'); await p.wait_for_timeout(600)
         ck('「中止」で読み込みをやめ、画面を取り戻す', await t.js(idle) and '中止しました' in await t.toast() and await t.js("FD.st.names[0]") == '納品_v2', await t.toast())
         ck('中止のあと、「中止」ボタンは隠れる', await t.js("document.querySelector('#busyCancel').hidden"))
+        # 左を読んでいる間に右をドロップしても、左の読み込みは止まらない
+        await t.js("FileSystemFileHandle.prototype.getFile = async function () { await new Promise(r => setTimeout(r, 25)); return window.__g.call(this); }; 0")
+        await t.js("document.querySelector('#toast').textContent = ''; 0")  # 前の確認（中止）の通知の文字を消しておく
+        await drop([os.path.join(D, '大_v1')], 300)
+        await p.wait_for_selector('#busyCancel:not([hidden])', timeout=10000); await p.wait_for_timeout(300)
+        await drop([inner('納品_v1')], 1100)
+        await t.wait_for("FD.st.names[1] === '納品_v1'", 30)
+        ck('左の読み込み中に右をドロップしても、「中止」ボタンは左の分のために残る', await t.js("FD.st.names[0] !== '大_v1' && !document.querySelector('#busyCancel').hidden"))
+        await t.wait_for(f"FD.st.names[0] === '大_v1' && {idle}", 60)
+        ck('左の読み込み中に右をドロップしても、左右とも読み込まれる（左が中止されない）', await t.js("FD.st.files[0].size") == 3000 and await t.js("FD.st.files[1].size") == 6 and '中止' not in await t.toast(), await t.toast())
         await t.js("FileSystemFileHandle.prototype.getFile = window.__g; 0")
+        # 開けないサブフォルダがあっても、そこだけ飛ばして残りを読む
+        await t.js("window.__e = FileSystemDirectoryHandle.prototype.entries; FileSystemDirectoryHandle.prototype.entries = function () { if (this.name === '旧資料') throw new DOMException('denied', 'NotAllowedError'); return window.__e.call(this); }; 0")
+        await drop([inner('納品_v1')], 300)
+        await t.wait_for(f"FD.st.names[0] === '納品_v1' && {idle}", 30); await p.wait_for_timeout(300)
+        toast = await t.toast()
+        ck('開けないサブフォルダがあっても、残りのファイルは一覧に入り、飛ばしたものを通知する', await t.js("FD.st.files[0].size") == 5 and '読めないものが 1 個' in toast and '旧資料/' in toast, toast)
+        await t.js("FileSystemDirectoryHandle.prototype.entries = window.__e; 0")
 
         # ---- 大きなフォルダ：比較の間、画面が止まらない ----
         await t.js("window.__lt = []; new PerformanceObserver(l => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ['longtask'] }); 0")
@@ -106,6 +123,14 @@ async def main():
         ck('End キーは表に出している最後の行へ移り、そこで続きの行が足される（3回で 900 行目）', sel == [1200, 899], sel)
         await p.keyboard.press('ArrowDown'); await p.wait_for_timeout(150)
         ck('↓ キーで、続きの行へそのまま進める', await t.js("[...document.querySelectorAll('#fdTable tbody tr[data-i]')].findIndex(x => x.classList.contains('sel'))") == 900)
+        # 上へ移動したとき、選んだ行が固定している見出しの行の下に隠れない
+        clear = "(() => { const tr = document.querySelector('#fdTable tbody tr.sel'), th = document.querySelector('#fdTable thead th'); return Math.round(tr.getBoundingClientRect().top - th.getBoundingClientRect().bottom); })()"
+        for _ in range(40): await p.keyboard.press('ArrowUp')
+        await p.wait_for_timeout(200)
+        gap = await t.js(clear)
+        ck('↑ キーで上へ移動しても、選んだ行が見出しの行の下に隠れない', gap >= -1, gap)
+        await p.keyboard.press('Home'); await p.wait_for_timeout(200)
+        ck('Home キーでも、先頭の行が見出しの行の下に隠れない', await t.js(clear) >= -1 and await t.js("[...document.querySelectorAll('#fdTable tbody tr[data-i]')].findIndex(x => x.classList.contains('sel'))") == 0, await t.js(clear))
         p_csv = await t.download('#fdCsv')
         ck('CSV は、表に出している行数に関係なく全件', len(open(p_csv, encoding='utf-8-sig').read().strip().splitlines()) == 3001)
         t.finish(allowed_errors=('EncodingError',))  # 古い方式で読めなかったときの記録（想定どおり）

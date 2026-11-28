@@ -76,6 +76,9 @@ def make():
         'xl/_rels/workbook.xml.rels': f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
         'xl/worksheets/sheet1.xml': f'<worksheet {ns}><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v>'})
     open(f('ok.txt'), 'w', encoding='utf-8').write('前のファイル\n')
+    from PIL import Image, ImageDraw
+    for name, x in (('img_a.png', 60), ('img_b.png', 90)):
+        im = Image.new('RGB', (400, 300), 'white'); ImageDraw.Draw(im).rectangle([x, 80, x + 120, 200], outline='black', width=4); im.save(f(name))
     for side in ('L', 'R'):
         os.makedirs(os.path.join(D, 'FD', side), exist_ok=True)
         for nm, text in (('a.txt', 'aaaa\n'), ('b.txt', 'bbbb\n' if side == 'L' else 'BBBB\n'), ('c.txt', 'cccc\n')):
@@ -109,6 +112,20 @@ async def main():
         r = await t.js("(async () => { const q = await PageMatch._align(30000, 30000, () => 1, 0.3); return [q.length, q[7]]; })()")
         ck('対応付け：ページ数が多すぎるときは、表を作らずに同じページ番号どうしを組にする', r == [30000, {'l': 7, 'r': 7}], r)
 
+        # ---- 1ページどうし（画像どうし）は、入れ替えの起こりようがないので「調べていません」と出さない ----
+        await t.load(f('img_a.png'), f('img_b.png'))
+        await t.wait_for("App.tab === 'overlay'"); await t.wait_for("/ありません|調べていません/.test(document.querySelector('#ovMatchInfo').textContent)", 60)
+        info = await p.inner_text('#ovMatchInfo')
+        ck('対応付け：画像どうし（1ページどうし）では「挿入・削除はありません」。調べ直すボタンは出さない', info.strip() == 'ページの挿入・削除はありません' and not await p.is_visible('#ovRematch'), info)
+        await t.tab('text'); await t.js("document.querySelector('#btnClear').click()"); await p.wait_for_timeout(300)
+
+        # ---- ダイアログ：中身の初期化で例外が出ても、閉じられないダイアログを残さない ----
+        await t.js("modal({ title: '失敗するダイアログ', html: 'x', onOpen: () => { throw new Error('onOpen の中の失敗（テスト用）'); } }); 0"); await p.wait_for_timeout(200)
+        ck('ダイアログ：初期化に失敗したら閉じる（modalStack に残さない）', await t.js('modalStack.length') == 0 and not await p.is_visible('#modal.on'))
+        await t.click('#btnHelp'); ok = await p.inner_text('#modal h3') == 'ヘルプ' and await t.js('modalStack.length') == 1
+        await p.keyboard.press('Escape'); await p.wait_for_timeout(200)
+        ck('ダイアログ：そのあとも、ふつうに開いて閉じられる', ok and await t.js('modalStack.length') == 0)
+
         # ---- ZIP：無圧縮の項目も実際の大きさで確かめる。壊れた構造を、読めた分だけで進めない ----
         await t.load_one(0, f('ok.txt'))
         await t.load_one(1, f('正常_無圧縮.docx'))
@@ -131,17 +148,22 @@ async def main():
         # ---- 数字の差：桁の多い数、負の値、指数表記 ----
         r = await t.js("""(() => { const f = (a, b) => Diff.numberDeltas(Diff.chars(a, b, 'char')).map(d => d.text);
           return [f('金額 9,007,199,254,740,993', '金額 9,007,199,254,740,995'), f('残高 12345678901234567890', '残高 12345678901234567891'), f('損益 -100', '損益 100'), f('損益 -100', '損益 -150'),
-                  f('損益 100', '損益 -50'), f('損益 0', '損益 -30'), f('値 1E-5', '値 2E-5'), f('値 1.5e3', '値 1.5e4'), f('値 1.5', '値 1.25'), f('単価 1,200円', '単価 1,320円'), f('x 0.10', 'x 0.3')]; })()""")
+                  f('損益 100', '損益 -50'), f('損益 0', '損益 -30'), f('値 1E-5', '値 2E-5'), f('値 1.5e3', '値 1.5e4'), f('値 1.5', '値 1.25'), f('単価 1,200円', '単価 1,320円'), f('x 0.10', 'x 0.3'),
+                  f('20E-mail', '30E-mail')]; })()""")
         ck('数字の差：16 桁を超える数でも、差を正確に出す（+4 ではなく +2）', r[0] == ['+2 / +0.1%未満'] and r[1] == ['+1 / +0.1%未満'], r[:2])
         ck('数字の差：元の値が負のときは、増減率を出さない（−100→100 を「+200%」としない）', r[2] == ['+200'] and r[3] == ['−50'], r[2:4])
         ck('数字の差：元が正なら、負になっても増減率を出す。元が 0 なら差だけ', r[4] == ['−150 / −150.0%'] and r[5] == ['−30'], r[4:6])
         ck('数字の差：指数表記の仮数・指数には差を付けない（1E-5→2E-5 を「+1」としない）', r[6] == [] and r[7] == [], r[6:8])
-        ck('数字の差：小数の桁をそろえる・3桁区切り（これまでどおり）', r[8] == ['−0.25 / −16.7%'] and r[9] == ['+120 / +10.0%'] and r[10] == ['+0.20 / +200.0%'], r[8:])
+        ck('数字の差：小数の桁をそろえる・3桁区切り（これまでどおり）', r[8] == ['−0.25 / −16.7%'] and r[9] == ['+120 / +10.0%'] and r[10] == ['+0.20 / +200.0%'], r[8:11])
+        ck('数字の差：数字のあとが E でも、指数表記でなければ差を付ける（20E-mail）', r[11] == ['+10 / +50.0%'], r[11])
 
         # ---- 読み上げ：通知と処理中の表示 ----
         await t.js("toast('ふつうの通知')"); a = await t.js("[document.querySelector('#toast').getAttribute('role'), document.querySelector('#toast').getAttribute('aria-live')]")
         await t.js("toast('誤り', true)"); b = await t.js("document.querySelector('#toast').getAttribute('aria-live')")
-        ck('通知を読み上げに伝える（誤りはすぐに）', a == ['status', 'polite'] and b == 'assertive' and await t.js("document.querySelector('#busyMsg').getAttribute('aria-live')") == 'polite', (a, b))
+        ck('通知を読み上げに伝える（誤りはすぐに）', a == ['status', 'polite'] and b == 'assertive', (a, b))
+        await t.js("busy(true, '読み込みを始めました'); document.querySelector('#busyMsg').textContent = '読み込み中… 64 ファイル'; busy(false)")
+        c = await t.js("[document.querySelector('#busyLive').getAttribute('aria-live'), document.querySelector('#busyLive').textContent, document.querySelector('#busyMsg').getAttribute('aria-live')]")
+        ck('処理中の表示は、始まったときの文だけを読み上げに伝える（進み具合は読み上げない）', c == ['polite', '読み込みを始めました', None], c)
 
         # ---- フォルダ比較：読めなかったファイルを「相違」にしない ----
         await t.tab('folder'); await p.uncheck('#fdContent')
@@ -169,7 +191,7 @@ async def main():
         if old is None: del os.environ['CHROME_PATH']
         else: os.environ['CHROME_PATH'] = old
         ck('サンプル生成（tools/gen_samples.py）も、CHROME_PATH で Chrome の場所を変えられる', a == '/opt/somewhere/chrome' and G.chrome_path() == (old or ('/usr/bin/google-chrome' if os.path.exists('/usr/bin/google-chrome') else None)))
-        t.finish(allowed_errors=('ZIPの構造が壊れています', 'が壊れています', 'NotReadableError', 'NotFoundError'))  # 壊れたファイル・読めないファイルの記録（想定どおり）
+        t.finish(allowed_errors=('ZIPの構造が壊れています', 'が壊れています', 'NotReadableError', 'NotFoundError', 'テスト用'))  # 壊れたファイル・読めないファイル・わざと失敗させた初期化の記録（想定どおり）
 
 if __name__ == '__main__':
     asyncio.run(main())

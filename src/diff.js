@@ -264,7 +264,8 @@ const Diff = (() => {
     if ((a === '-' || a === '－') && /[0-9０-９]/.test(a2)) return 'skip';
     if (/[A-Za-zＡ-Ｚａ-ｚ_#№]/.test(b) || /^No\.?$/i.test(arr.slice(Math.max(0, n.st - 3), n.st).join('').trim())) return 'skip'; // S12、G4、v3、#12、No.5（記号・番号）
     // 指数表記（1.5E-5 など）の仮数・指数は、それだけでは量にならないので差を付けない（1E-5→2E-5 を「+1」と出さない）
-    if (/[eEｅＥ]/.test(a) && /[0-9０-９+\-−]/.test(a2)) return 'skip';
+    // （e のあとに、符号と数字が続き、そのあとが英字でないもの。「20E-mail」のような並びは指数表記としない）
+    if (/^[eEｅＥ][+\-−]?[0-9０-９]+(?![A-Za-zＡ-Ｚａ-ｚ])/.test(arr.slice(n.en, n.en + 8).join(''))) return 'skip';
     if (/[%％]/.test(a)) return 'pct';
     return 'num';
   }
