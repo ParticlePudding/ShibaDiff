@@ -263,27 +263,46 @@ const Diff = (() => {
     if ((b === '-' || b === '－') && /[0-9０-９]/.test(b2)) return 'skip';               // 2026-11-27 の 11・27
     if ((a === '-' || a === '－') && /[0-9０-９]/.test(a2)) return 'skip';
     if (/[A-Za-zＡ-Ｚａ-ｚ_#№]/.test(b) || /^No\.?$/i.test(arr.slice(Math.max(0, n.st - 3), n.st).join('').trim())) return 'skip'; // S12、G4、v3、#12、No.5（記号・番号）
+    // 指数表記（1.5E-5 など）の仮数・指数は、それだけでは量にならないので差を付けない（1E-5→2E-5 を「+1」と出さない）
+    if (/[eEｅＥ]/.test(a) && /[0-9０-９+\-−]/.test(a2)) return 'skip';
     if (/[%％]/.test(a)) return 'pct';
     return 'num';
   }
   function numbersIn(arr, ranges, csv) {
     return numberSpans(arr, csv).filter(n => ranges.some(([a, b]) => a < n.en && b > n.st)).map(n => {
       const t = n.text.normalize('NFKC').replace(/[,，]/g, '').replace('−', '-');
-      return { st: n.st, en: n.en, v: parseFloat(t), dec: (t.split('.')[1] || '').length, kind: kindOf(arr, n) };
+      return { st: n.st, en: n.en, v: parseFloat(t), t, dec: (t.split('.')[1] || '').length, kind: kindOf(arr, n) };
     }).filter(n => isFinite(n.v));
+  }
+  // 数の文字列（-1234.5）を、小数 dec 桁にそろえた整数（BigInt）にする。差を正確に出すため：
+  // parseFloat は 15〜16 桁を超えると丸めるので、桁の多い数（9,007,199,254,740,993 など）の差がずれる
+  function scaled(t, dec) {
+    const neg = t[0] === '-', [i, f = ''] = t.replace(/^[+-]/, '').split('.');
+    const b = BigInt((i || '0') + f.padEnd(dec, '0'));
+    return neg ? -b : b;
+  }
+  function fmtScaled(b, dec) { // 絶対値を、3桁区切り・小数 dec 桁で
+    const s = (b < 0n ? -b : b).toString().padStart(dec + 1, '0'), i = s.slice(0, s.length - dec);
+    return i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (dec ? '.' + s.slice(-dec) : '');
   }
   function numberDeltas(cd) {
     const na = numbersIn(cd.A, cd.a, cd.csv), nb = numbersIn(cd.B, cd.b, cd.csv);
     if (!na.length || na.length !== nb.length) return [];
     const res = [];
     nb.forEach((n, k) => {
-      const o = na[k], d = n.v - o.v; if (!d) return;
+      const o = na[k];
       if (n.kind === 'skip' || o.kind === 'skip') return;
-      const dec = Math.max(n.dec, o.dec);
-      const abs = Math.abs(d).toLocaleString('ja-JP', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-      let t = (d > 0 ? '+' : '−') + abs;
+      const dec = Math.max(n.dec, o.dec), d = scaled(n.t, dec) - scaled(o.t, dec); if (d === 0n) return;
+      const up = d > 0n;
+      let t = (up ? '+' : '−') + fmtScaled(d, dec);
       if (n.kind === 'pct' && o.kind === 'pct') t += 'ポイント';
-      else if (o.v !== 0) t += ` / ${d > 0 ? '+' : '−'}${Math.abs(d / o.v * 100).toFixed(1)}%`;
+      // 増減率は、元の値が正のときだけ出す。元が 0 のときは計算できず、元が負のとき（−100 → 100 など）は
+      // 「+200%」のような、増えたのか減ったのか読み違える数字になるので、差だけを出す
+      else if (o.v > 0) {
+        // 0.05% に満たない変化を「0.0%」と出すと、変わっていないように読めるので「0.1%未満」とする
+        const r = Math.abs((n.v - o.v) / o.v * 100);
+        t += ` / ${up ? '+' : '−'}${r < 0.05 ? '0.1%未満' : r.toFixed(1) + '%'}`;
+      }
       res.push({ at: n.en, text: t });
     });
     return res;

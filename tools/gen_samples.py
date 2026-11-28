@@ -20,6 +20,9 @@ pdfmetrics.registerFont(UnicodeCIDFont('HeiseiMin-W3'))
 FONT = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
 FONTB = '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'
 CHROME_PDFS = []  # (path, html)
+# Chrome の場所：環境変数 CHROME_PATH → /usr/bin/google-chrome → Playwright 同梱の Chromium（tests/harness.py と同じ決め方）
+def chrome_path():
+    return os.environ.get('CHROME_PATH') or ('/usr/bin/google-chrome' if os.path.exists('/usr/bin/google-chrome') else None)
 
 def P(*a):
     p = os.path.join(ROOT, *a); os.makedirs(os.path.dirname(p), exist_ok=True); return p
@@ -526,7 +529,7 @@ def main():
     async def mk():
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            b = await p.chromium.launch(executable_path='/usr/bin/google-chrome')
+            b = await p.chromium.launch(executable_path=chrome_path(), args=['--no-sandbox'])
             pg = await b.new_page()
             for path, html in CHROME_PDFS:
                 await pg.set_content(html); await pg.pdf(path=path, format='A4')

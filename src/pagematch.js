@@ -2,7 +2,8 @@
    ページ表示の連動、重ね合わせのページ送り、全ページ一括チェックで使う */
 const PageMatch = (() => {
   // skipped：スキャンでページ数が同じため、調べずに1対1とみなした。visual：見た目で調べた結果（compute の visual 指定）
-  const st = { key: '', pairs: null, busy: null, info: '', skipped: false, visual: false };
+  // big：ページ数が多すぎて対応付けをしなかった（同じページ番号どうしを組にした）
+  const st = { key: '', pairs: null, busy: null, info: '', skipped: false, visual: false, big: false };
   // 組の配列：{ l, r }（片側にしかないページは、反対側が -1）
   const enabled = () => Settings.get('pageMatch') !== false;
   const keyOf = () => (S[0] && S[1]) ? `${S[0].key}\u0001${S[1].key}\u0001${S[0].lines.length}\u0001${S[1].lines.length}` : '';
@@ -69,23 +70,39 @@ const PageMatch = (() => {
   /* ---- 並びをそろえる（ページの挿入・削除を許す動的計画法） ---- */
   // sim(i, j) が T を超える組だけを「同じページ」として組にし、合計が最大になる並びを選ぶ。
   // 組にならなかった左右のページが同じ数だけ並んでいる区間は、順に組にする（内容が大きく変わったページ）
-  function align(n, m, sim, T) {
+  // 表のますの数の上限（たどり方の表が約100MB）。2万ページどうしに当たる。これを超えたら対応付けをせず、同じページ番号どうしを組にする
+  const MAX_CELLS = 4e8;
+  const tooBig = (n, m) => (n + 1) * (m + 1) > MAX_CELLS;
+  const sameNumber = (n, m) => Array.from({ length: Math.max(n, m) }, (_, i) => ({ l: i < n ? i : -1, r: i < m ? i : -1 }));
+  /* 表のメモリを抑える：点数は「直前の行」と「今の行」の2行だけを持ち、たどり方（1＝左だけ、2＝右だけ、3＝組）は1ますを2ビットに詰める。
+     全ますを Float32 と Uint8 で持つと、5,000 ページどうしで約125MB、1万ページどうしで約500MB になる（詰めると約6MB、約25MB）。
+     計算の順序と値は変えていないので、結果は全ますを持つ方式と同じ。
+     tick を渡すと、ますの数が多いとき、途中で画面へ制御を返す（1万ページどうしで1億ます。止めたままにしない） */
+  async function align(n, m, sim, T, tick) {
+    if (tooBig(n, m)) return sameNumber(n, m);
     const band = Math.abs(n - m) + 30; // 対角線から離れすぎた組は調べない（ページ数が多いときの計算量を抑える）
-    const W = m + 1, dp = new Float32Array((n + 1) * W), bt = new Uint8Array((n + 1) * W);
-    for (let i = 0; i <= n; i++) for (let j = 0; j <= m; j++) {
-      if (!i && !j) continue;
-      let best = -Infinity, how = 0;
-      if (i) { const v = dp[(i - 1) * W + j]; if (v > best) { best = v; how = 1; } }
-      if (j) { const v = dp[i * W + j - 1]; if (v > best) { best = v; how = 2; } }
-      if (i && j && Math.abs(i - j - (n - m) * i / Math.max(1, n)) <= band) {
-        const g = sim(i - 1, j - 1) - T;
-        if (g > 0) { const v = dp[(i - 1) * W + j - 1] + g; if (v > best) { best = v; how = 3; } }
+    const W = m + 1, bt = new Uint8Array(Math.ceil((n + 1) * W / 4));
+    const how = k => (bt[Math.floor(k / 4)] >> ((k % 4) * 2)) & 3;
+    let prev = new Float32Array(W), cur = new Float32Array(W), since = 0;
+    for (let i = 0; i <= n; i++) {
+      for (let j = 0; j <= m; j++) {
+        if (!i && !j) { cur[0] = 0; continue; }
+        let best = -Infinity, h = 0;
+        if (i) { const v = prev[j]; if (v > best) { best = v; h = 1; } }
+        if (j) { const v = cur[j - 1]; if (v > best) { best = v; h = 2; } }
+        if (i && j && Math.abs(i - j - (n - m) * i / Math.max(1, n)) <= band) {
+          const g = sim(i - 1, j - 1) - T;
+          if (g > 0) { const v = prev[j - 1] + g; if (v > best) { best = v; h = 3; } }
+        }
+        cur[j] = best;
+        const k = i * W + j; bt[Math.floor(k / 4)] |= h << ((k % 4) * 2);
       }
-      dp[i * W + j] = best; bt[i * W + j] = how;
+      const t = prev; prev = cur; cur = t;
+      if (tick && (since += W) > 4e6) { since = 0; await tick(); }
     }
     const raw = [];
     for (let i = n, j = m; i || j;) {
-      const h = bt[i * W + j];
+      const h = how(i * W + j);
       if (h === 3) { raw.push({ l: i - 1, r: j - 1 }); i--; j--; }
       else if (h === 1) { raw.push({ l: i - 1, r: -1 }); i--; }
       else { raw.push({ l: -1, r: j - 1 }); j--; }
@@ -126,16 +143,18 @@ const PageMatch = (() => {
         for (let j = 0; j < m; j++) { vr.push(await thumb(pr[j])); if (onProgress) onProgress(n + j + 1, tot); if (keyOf() !== key) return null; }
         sim = (i, j) => cosine(vl[i], vr[j]);
       }
-      const pairs = sim ? align(n, m, sim, tl ? 0.3 : 0.55) : Array.from({ length: Math.max(n, m) }, (_, i) => ({ l: i < n ? i : -1, r: i < m ? i : -1 }));
-      return { pairs, skipped, visual: !!sim && !(tl && tr) };
+      const big = !!sim && tooBig(n, m);
+      const pairs = sim ? await align(n, m, sim, tl ? 0.3 : 0.55, () => sleep(0)) : sameNumber(n, m);
+      if (keyOf() !== key) return null;
+      return { pairs, skipped, visual: !!sim && !(tl && tr) && !big, big };
     })();
     const job = st.busy = { key, p, visual };
     const res = await p;
     if (st.busy === job) st.busy = null;
-    if (res && keyOf() === key) { st.key = key; st.pairs = res.pairs; st.skipped = res.skipped; st.visual = res.visual; }
+    if (res && keyOf() === key) { st.key = key; st.pairs = res.pairs; st.skipped = res.skipped; st.visual = res.visual; st.big = res.big; }
     return res && res.pairs;
   }
-  function invalidate() { st.key = ''; st.pairs = null; st.busy = null; st.skipped = false; st.visual = false; }
+  function invalidate() { st.key = ''; st.pairs = null; st.busy = null; st.skipped = false; st.visual = false; st.big = false; }
   const ready = () => st.key === keyOf() && st.pairs && enabled() ? st.pairs : null;
   // 調べずに1対1とみなしたか（スキャンでページ数が同じ）。重ね合わせの画面で「見た目で調べ直す」を出すために使う
   const skipped = () => !!ready() && st.skipped;
@@ -158,6 +177,7 @@ const PageMatch = (() => {
     const fmt = a => a.length > 6 ? a.slice(0, 6).join('・') + ` ほか ${a.length - 6}` : a.join('・');
     // 調べていないときは「ありません」とは言わない（スキャンでページ数が同じなら、同じページ番号どうしを組にしているだけ）
     if (skipped()) return 'ページ数が同じスキャンのため、同じページ番号どうしを組にしています（ページの入れ替え・差し替えは調べていません）';
+    if (st.big) return 'ページ数が多すぎるため、ページの対応は調べず、同じページ番号どうしを組にしています';
     if (!add.length && !del.length) return 'ページの挿入・削除はありません' + (st.visual ? '（見た目で確認）' : '');
     return [add.length ? `右で追加されたページ：${fmt(add)}` : '', del.length ? `左から削除されたページ：${fmt(del)}` : ''].filter(Boolean).join('<br>');
   }

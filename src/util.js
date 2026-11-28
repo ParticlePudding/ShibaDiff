@@ -21,6 +21,7 @@ function fmtNum(n) { return n.toLocaleString('ja-JP'); }
 let toastTimer = 0;
 function toast(msg, isErr = false, ms = 2600) {
   const t = $('#toast');
+  t.setAttribute('aria-live', isErr ? 'assertive' : 'polite'); // 読み上げ：誤りはすぐに、ふつうの通知は区切りのよいところで
   t.textContent = msg; t.className = 'on' + (isErr ? ' err' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.className = '', isErr ? Math.max(ms, 5000) : ms);

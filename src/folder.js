@@ -106,9 +106,10 @@ const FD = (() => {
       while (next < todo.length && gen === st.gen) {
         const r = todo[next++];
         let same;
-        try { same = await sameContent(r.a, r.b); } catch (e) { same = false; r.err = e.message; }
+        // 読めなかったもの（比較のあいだに書き換えられた・消えた・開けない）は「相違」にしない。比べられていないので、別の状態にする
+        try { same = await sameContent(r.a, r.b); } catch (e) { same = null; r.err = (e && (e.name || e.message)) || String(e); }
         if (gen !== st.gen) return;
-        r.st = same ? 'same' : 'diff'; paintRow(r); done++;
+        r.st = same === null ? 'error' : same ? 'same' : 'diff'; paintRow(r); done++;
         if (performance.now() - last > 100) { last = performance.now(); $('#fdStatus').textContent = `内容を比較中… ${fmtNum(done)} / ${fmtNum(todo.length)}`; await sleep(0); }
       }
     };
@@ -116,13 +117,14 @@ const FD = (() => {
     if (gen !== st.gen) return;
     st.running = false; render(true);
   }
-  const ST = { same: ['同一', 'st-same'], size: ['サイズ同じ（内容は未確認）', 'st-size'], diff: ['相違', 'st-diff'], left: ['左のみ', 'st-left'], right: ['右のみ', 'st-right'], wait: ['比較中', 'st-wait'] };
-  const ORDER = { diff: 0, left: 1, right: 2, wait: 3, size: 4, same: 5 };
+  const ST = { same: ['同一', 'st-same'], size: ['サイズ同じ（内容は未確認）', 'st-size'], diff: ['相違', 'st-diff'], left: ['左のみ', 'st-left'], right: ['右のみ', 'st-right'], wait: ['比較中', 'st-wait'], error: ['読み取りエラー（未比較）', 'st-error'] };
+  const ORDER = { error: 0, diff: 1, left: 2, right: 3, wait: 4, size: 5, same: 6 }; // 並べ替え・レポートの順（確かめる必要のあるものを先に）
+  const count = () => { const c = { same: 0, size: 0, diff: 0, left: 0, right: 0, wait: 0, error: 0 }; st.rows.forEach(r => c[r.st]++); return c; };
   // 1行の中身（セル）。比較の結果が出たとき、その行だけを書き換えるのにも使う
   function cellsHtml(r) {
     const s = ST[r.st];
     const newer = r.a && r.b && r.st === 'diff' ? (r.a.lastModified > r.b.lastModified ? 0 : r.a.lastModified < r.b.lastModified ? 1 : -1) : -1;
-    return `<td class="path">${esc(r.path)}</td><td><span class="st ${s[1]}">${s[0]}</span></td>` +
+    return `<td class="path">${esc(r.path)}</td><td><span class="st ${s[1]}"${r.st === 'error' ? ` title="読めなかった理由：${esc(r.err || '')}"` : ''}>${s[0]}</span></td>` +
       `<td class="num">${r.a ? fmtSize(r.a.size) : ''}</td><td class="num">${r.b ? fmtSize(r.b.size) : ''}</td>` +
       `<td${newer === 0 ? ' style="font-weight:700"' : ''}>${r.a ? fmtDate(r.a.lastModified) : ''}</td><td${newer === 1 ? ' style="font-weight:700"' : ''}>${r.b ? fmtDate(r.b.lastModified) : ''}</td>`;
   }
@@ -153,6 +155,7 @@ const FD = (() => {
   // keep：表に出している行数を保つ（比較が終わったとき・行を開くとき）。絞り込み・並べ替えを変えたときは先頭の PAGE 行に戻す
   function render(keep) {
     const show = new Set($$('.fdFilter').filter(c => c.checked).map(c => c.value)); show.add('wait'); if (show.has('same')) show.add('size');
+    show.add('error'); // 読めなかったものは、絞り込みにかかわらず出す
     const { k, d } = st.sort;
     const val = r => k === 'path' ? r.path : k === 'st' ? ORDER[r.st] : k === 'ls' ? (r.a ? r.a.size : -1) : k === 'rs' ? (r.b ? r.b.size : -1) : k === 'lm' ? (r.a ? r.a.lastModified : 0) : (r.b ? r.b.lastModified : 0);
     const rows = st.rows.map((r, i) => ({ r, i })).filter(x => show.has(x.r.st)).sort((x, y) => { const a = val(x.r), b = val(y.r); return (a < b ? -1 : a > b ? 1 : x.r.path < y.r.path ? -1 : 1) * d; });
@@ -160,9 +163,9 @@ const FD = (() => {
     // 選んでいる行は、表に出す範囲に入れる
     const at = st.sel >= 0 ? view.findIndex(x => x.i === st.sel) : -1; if (at >= shown) shown = at + 1 + PAGE;
     drawRows();
-    const c = { same: 0, size: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
+    const c = count();
     if (!st.running) $('#fdStatus').innerHTML = st.rows.length
-      ? `全 <b>${fmtNum(st.rows.length)}</b> ファイル　<span class="st st-diff">相違 ${c.diff}</span> <span class="st st-left">左のみ ${c.left}</span> <span class="st st-right">右のみ ${c.right}</span> <span class="st st-same">同一 ${c.same}</span>${c.size ? ` <span class="st st-size">サイズ同じ ${c.size}</span>` : ''}　<span class="muted">（更新日時が新しい方を太字で表示）</span>`
+      ? `全 <b>${fmtNum(st.rows.length)}</b> ファイル　${c.error ? `<span class="st st-error">読み取りエラー ${c.error}</span> ` : ''}<span class="st st-diff">相違 ${c.diff}</span> <span class="st st-left">左のみ ${c.left}</span> <span class="st st-right">右のみ ${c.right}</span> <span class="st st-same">同一 ${c.same}</span>${c.size ? ` <span class="st st-size">サイズ同じ ${c.size}</span>` : ''}　<span class="muted">（更新日時が新しい方を太字で表示）</span>`
       : '左右にフォルダを指定して「比較」を押してください';
     $$('#fdTable th').forEach(th => { th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.k === k ? (d > 0 ? ' ▲' : ' ▼') : ''); });
   }
@@ -229,9 +232,8 @@ const FD = (() => {
         { k: 'dates', label: '更新日時', type: 'check', def: true }, { k: 'sizes', label: 'サイズ', type: 'check', def: true }],
       [{ label: '出力', value: 'ok', primary: true }]);
     if (!o) return;
-    const c = { same: 0, size: 0, diff: 0, left: 0, right: 0, wait: 0 }; st.rows.forEach(r => c[r.st]++);
-    const order = { diff: 0, left: 1, right: 2, wait: 3, size: 4, same: 5 };
-    const rows = ROWS_SORTED().filter(r => o.rows === 'all' || r.st !== 'same').sort((x, y) => order[x.st] - order[y.st]);
+    const c = count();
+    const rows = ROWS_SORTED().filter(r => o.rows === 'all' || r.st !== 'same').sort((x, y) => ORDER[x.st] - ORDER[y.st]);
     const sz = o.sizes, dts = o.dates;
     const body = `<table class="files"><tr><th>左</th><td>${esc(st.names[0])}</td></tr><tr><th>右</th><td>${esc(st.names[1])}</td></tr></table>` +
       `<table class="list"><thead><tr><th>ファイル</th><th>状態</th>${sz ? '<th class="num">左サイズ</th><th class="num">右サイズ</th>' : ''}${dts ? '<th>左 更新日時</th><th>右 更新日時</th>' : ''}</tr></thead><tbody>` +
@@ -239,8 +241,8 @@ const FD = (() => {
       (o.rows === 'diff' && c.same ? `<p class="sub">同一の ${c.same} ファイルは省略しています。</p>` : '');
     const html = Report.page({
       title: `フォルダ比較レポート - ${st.names[0]} / ${st.names[1]}`, heading: 'フォルダ比較レポート',
-      meta: `<b>全 ${fmtNum(st.rows.length)} ファイル</b>　相違 ${c.diff}・左のみ ${c.left}・右のみ ${c.right}・同一 ${c.same}${c.size ? `・サイズ同じ（内容は未確認）${c.size}` : ''}${c.wait ? `・比較中 ${c.wait}` : ''}<br>比較方法: ${$('#fdContent').checked ? '内容まで比較' : 'サイズだけで判定'}`,
-      body, css: '.tag.wait{background:#888}.tag.size{background:#8a6d00}'
+      meta: `<b>全 ${fmtNum(st.rows.length)} ファイル</b>　${c.error ? `<b style="color:#b42318">読み取りエラー（未比較）${c.error}</b>・` : ''}相違 ${c.diff}・左のみ ${c.left}・右のみ ${c.right}・同一 ${c.same}${c.size ? `・サイズ同じ（内容は未確認）${c.size}` : ''}${c.wait ? `・比較中 ${c.wait}` : ''}<br>比較方法: ${$('#fdContent').checked ? '内容まで比較' : 'サイズだけで判定'}`,
+      body, css: '.tag.wait{background:#888}.tag.size{background:#8a6d00}.tag.error{background:#7c2d92}'
     });
     download(`フォルダ比較レポート_${st.names[0] || '左'}.html`, html, 'text/html;charset=utf-8');
   };

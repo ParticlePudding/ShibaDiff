@@ -33,13 +33,15 @@ const Zip = (() => {
     let p = dv.getUint32(eocd + 16, true);
     const entries = new Map();
     const td = new TextDecoder('utf-8');
+    const BROKEN = () => new Error('ZIPの構造が壊れています');
     for (let n = 0; n < count; n++) {
-      if (p + 46 > bytes.length) throw new Error('ZIPの構造が壊れています');
-      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      // 中央ディレクトリ（項目の一覧）が途中で切れている・別のデータになっているときは、読めた分だけで進めずに、壊れているとする
+      if (p + 46 > bytes.length || dv.getUint32(p, true) !== 0x02014b50) throw BROKEN();
       const method = dv.getUint16(p + 10, true);
       const csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
       const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), cmtLen = dv.getUint16(p + 32, true);
       const lho = dv.getUint32(p + 42, true);
+      if (p + 46 + nameLen > bytes.length) throw BROKEN();
       const name = td.decode(bytes.subarray(p + 46, p + 46 + nameLen));
       entries.set(name, { method, csize, usize, lho });
       p += 46 + nameLen + extraLen + cmtLen;
@@ -52,11 +54,21 @@ const Zip = (() => {
         const e = entries.get(name); if (!e) return null;
         if (e.usize > LIMIT.entry || e.usize > budget.left) throw TOO_BIG();
         const l = e.lho;
-        if (l + 30 > bytes.length || dv.getUint32(l, true) !== 0x04034b50) throw new Error('ZIPの構造が壊れています');
+        if (l + 30 > bytes.length || dv.getUint32(l, true) !== 0x04034b50) throw BROKEN();
+        // 項目の一覧（中央ディレクトリ）と、項目の先頭（ローカルヘッダー）で、圧縮方式が食い違っていないこと
+        if (dv.getUint16(l + 8, true) !== e.method) throw BROKEN();
         const nl = dv.getUint16(l + 26, true), xl = dv.getUint16(l + 28, true);
         const start = l + 30 + nl + xl;
+        // データがファイルの終わりを越えていないこと（越えていると、subarray は黙って短いデータを返す）
+        if (start + e.csize > bytes.length) throw BROKEN();
         const data = bytes.subarray(start, start + e.csize);
-        if (e.method === 0) { budget.left -= data.length; return data; }
+        if (e.method === 0) {
+          // 無圧縮の項目も、圧縮した項目と同じく「実際のデータの大きさ」で上限を確かめる（一覧の値は偽装できる）。
+          // 無圧縮なら、一覧の「圧縮後」と「展開後」の大きさは同じはず
+          if (e.csize !== e.usize) throw BROKEN();
+          if (data.length > LIMIT.entry || data.length > budget.left) throw TOO_BIG();
+          budget.left -= data.length; return data;
+        }
         if (e.method === 8) return inflateRaw(data, budget);
         throw new Error('未対応の圧縮形式: ' + e.method);
       },
@@ -67,13 +79,22 @@ const Zip = (() => {
 })();
 
 const Office = (() => {
-  const parseXml = s => new DOMParser().parseFromString(s, 'application/xml');
+  // XML として読めないとき、DOMParser は例外を出さずに <parsererror> の入った文書を返す。そのまま進むと、
+  // 中身が空・途中までの文書を「読めた」ことにしてしまうので、エラーにする（name：ZIP の中のファイル名）
+  const parseXml = (s, name = 'XML') => {
+    const d = new DOMParser().parseFromString(s == null ? '' : s, 'application/xml');
+    if (d.getElementsByTagNameNS('*', 'parsererror').length) throw new Error(`Office文書の中身（${name}）が壊れています`);
+    return d;
+  };
+  // ZIP の中の XML を読む。その項目がなければ null
+  const xmlOf = async (zip, name) => { const s = await zip.text(name); return s == null ? null : parseXml(s, name); };
   const kids = (el, ln) => Array.from(el.children).filter(c => c.localName === ln);
   const all = (el, ln) => Array.from(el.getElementsByTagNameNS('*', ln));
 
-  function relsMap(xml) {
-    const m = new Map(); if (!xml) return m;
-    for (const r of all(parseXml(xml), 'Relationship')) m.set(r.getAttribute('Id'), r.getAttribute('Target'));
+  // 関連付け（.rels）を読む。その項目がなければ空
+  async function relsMap(zip, name) {
+    const m = new Map(), d = await xmlOf(zip, name); if (!d) return m;
+    for (const r of all(d, 'Relationship')) m.set(r.getAttribute('Id'), r.getAttribute('Target'));
     return m;
   }
   function resolve(base, target) {
@@ -145,9 +166,9 @@ const Office = (() => {
   }
   async function docx(zip, info) {
     const out = [];
-    const xml = await zip.text('word/document.xml');
-    if (!xml) throw new Error('word/document.xml が見つかりません');
-    const doc = parseXml(xml), body = all(doc, 'body')[0];
+    const doc = await xmlOf(zip, 'word/document.xml');
+    if (!doc) throw new Error('word/document.xml が見つかりません');
+    const body = all(doc, 'body')[0];
     if (body) wBlock(body, out);
     // 変更履歴（挿入・削除・移動）の数。比較は承諾した状態の文字で行うので、残っていることを読み込んだ側で知らせる
     const tracked = { ins: 0, del: 0 };
@@ -155,14 +176,14 @@ const Office = (() => {
     count(doc);
     // ヘッダー・フッター（版数・文書番号・機密区分などが書かれることが多い）。本文の節（sectPr）が参照している順に読み、
     // どこからも参照されていないものは番号順に足す。同じ内容のもの（先頭ページ用・偶数ページ用など）は1回だけ出す
-    const rels = relsMap(await zip.text('word/_rels/document.xml.rels'));
+    const rels = await relsMap(zip, 'word/_rels/document.xml.rels');
     for (const [ref, re, label] of [['headerReference', /^word\/header(\d+)\.xml$/, 'ヘッダー'], ['footerReference', /^word\/footer(\d+)\.xml$/, 'フッター']]) {
       const used = all(doc, ref).map(e => rels.get(e.getAttributeNS(R_NS, 'id') || e.getAttribute('r:id'))).filter(Boolean).map(t => resolve('word/document.xml', t));
       const rest = zip.names().filter(n => re.test(n)).sort((a, b) => +re.exec(a)[1] - +re.exec(b)[1]);
       const lines = [], seen = new Set();
       for (const name of new Set([...used, ...rest])) {
-        const x = await zip.text(name); if (!x) continue;
-        const d = parseXml(x), ls = []; count(d);
+        const d = await xmlOf(zip, name); if (!d) continue;
+        const ls = []; count(d);
         wBlock(d.documentElement, ls, { pageFields: true });
         const t = ls.filter(l => l.trim()), key = t.join('\n');
         if (!t.length || seen.has(key)) continue;
@@ -171,8 +192,8 @@ const Office = (() => {
       if (lines.length) out.push('', `===== ${label} =====`, ...lines);
     }
     for (const extra of [['word/footnotes.xml', '脚注'], ['word/endnotes.xml', '文末脚注'], ['word/comments.xml', 'コメント']]) {
-      const x = await zip.text(extra[0]); if (!x) continue;
-      const d = parseXml(x); if (extra[1] !== 'コメント') count(d);
+      const d = await xmlOf(zip, extra[0]); if (!d) continue;
+      if (extra[1] !== 'コメント') count(d);
       const lines = []; for (const p of all(d, 'p')) { const t = wParaText(p); if (t.trim()) lines.push(t); }
       if (lines.length) { out.push('', `===== ${extra[1]} =====`, ...lines); }
     }
@@ -222,13 +243,13 @@ const Office = (() => {
   }
   async function xlsx(zip) {
     const ss = [];
-    const ssx = await zip.text('xl/sharedStrings.xml');
-    if (ssx) for (const si of all(parseXml(ssx), 'si')) ss.push(all(si, 't').filter(t => t.parentNode.localName !== 'rPh').map(t => t.textContent).join(''));
+    const ssd = await xmlOf(zip, 'xl/sharedStrings.xml');
+    if (ssd) for (const si of all(ssd, 'si')) ss.push(all(si, 't').filter(t => t.parentNode.localName !== 'rPh').map(t => t.textContent).join(''));
     // 日付の表示形式のセルを判定する（日付は内部では通し番号で保存されている）
     const dateStyle = [];
-    const stx = await zip.text('xl/styles.xml');
-    if (stx) {
-      const sd = parseXml(stx), custom = new Map();
+    const sd = await xmlOf(zip, 'xl/styles.xml');
+    if (sd) {
+      const custom = new Map();
       for (const nf of all(sd, 'numFmt')) custom.set(+nf.getAttribute('numFmtId'), nf.getAttribute('formatCode') || '');
       // 日付・時刻の書式か。'd'＝日付（日付と時刻の両方を含む）、't'＝時刻だけ、''＝日付ではない
       const TIME_IDS = new Set([18, 19, 20, 21, 32, 33, 45, 46, 47]);
@@ -252,19 +273,19 @@ const Office = (() => {
       const frac = n - Math.floor(n);
       return frac > 1e-6 ? `${n >= 1 ? date + ' ' : ''}${time}` : date;
     };
-    const wb = parseXml(await zip.text('xl/workbook.xml'));
-    const rels = relsMap(await zip.text('xl/_rels/workbook.xml.rels'));
+    const wb = await xmlOf(zip, 'xl/workbook.xml');
+    if (!wb) throw new Error('xl/workbook.xml が見つかりません');
+    const rels = await relsMap(zip, 'xl/_rels/workbook.xml.rels');
     const out = [];
     for (const sh of all(wb, 'sheet')) {
       const name = sh.getAttribute('name');
       const rid = sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') || sh.getAttribute('r:id');
       const target = rels.get(rid); if (!target) continue;
       const path = resolve('xl/workbook.xml', target);
-      const sx = await zip.text(path); if (!sx) continue;
+      const doc = await xmlOf(zip, path); if (!doc) continue;
       // 非表示のシートも比較の対象にする。見えていないシートの内容だと分かるよう、見出しに書く
       const hidden = /hidden/i.test(sh.getAttribute('state') || '');
       out.push(`===== シート: ${name}${hidden ? '（非表示）' : ''} =====`);
-      const doc = parseXml(sx);
       // 共有数式の先頭のセル（本文のあるもの）を先に集める
       const shared = new Map();
       for (const f of all(doc, 'f')) {
@@ -305,8 +326,9 @@ const Office = (() => {
 
   /* ---- PowerPoint ---- */
   async function pptx(zip) {
-    const pres = parseXml(await zip.text('ppt/presentation.xml'));
-    const rels = relsMap(await zip.text('ppt/_rels/presentation.xml.rels'));
+    const pres = await xmlOf(zip, 'ppt/presentation.xml');
+    if (!pres) throw new Error('ppt/presentation.xml が見つかりません');
+    const rels = await relsMap(zip, 'ppt/_rels/presentation.xml.rels');
     let slides = all(pres, 'sldId').map(s => {
       const rid = s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') || s.getAttribute('r:id');
       return rels.get(rid) ? resolve('ppt/presentation.xml', rels.get(rid)) : null;
@@ -317,17 +339,17 @@ const Office = (() => {
     for (const path of slides) {
       n++;
       out.push(`===== スライド ${n} =====`);
-      const x = await zip.text(path); if (!x) continue;
-      for (const p of all(parseXml(x), 'p')) {
+      const sd = await xmlOf(zip, path); if (!sd) continue;
+      for (const p of all(sd, 'p')) {
         if (p.namespaceURI && !/drawingml/.test(p.namespaceURI)) continue;
         const t = all(p, 't').map(e => e.textContent).join('');
         if (t.trim()) out.push(t);
       }
-      const nrels = relsMap(await zip.text(path.replace(/slides\/(slide\d+\.xml)$/, 'slides/_rels/$1.rels')));
+      const nrels = await relsMap(zip, path.replace(/slides\/(slide\d+\.xml)$/, 'slides/_rels/$1.rels'));
       for (const tgt of nrels.values()) {
         if (!/notesSlide/.test(tgt)) continue;
-        const nx = await zip.text(resolve(path, tgt)); if (!nx) continue;
-        const lines = all(parseXml(nx), 'p').map(p => all(p, 't').map(e => e.textContent).join('')).filter(s => s.trim() && !/^\d+$/.test(s.trim()));
+        const nd = await xmlOf(zip, resolve(path, tgt)); if (!nd) continue;
+        const lines = all(nd, 'p').map(p => all(p, 't').map(e => e.textContent).join('')).filter(s => s.trim() && !/^\d+$/.test(s.trim()));
         if (lines.length) out.push('〔ノート〕', ...lines);
       }
       out.push('');

@@ -526,7 +526,8 @@ const OV = (() => {
 
   /* ---- 全ページ表示：全ページを縦に並べ、見えているページだけを描く ---- */
   let io = null;
-  function dropSlots() { if (io) { io.disconnect(); io = null; } st.slots = null; st.curSlot = null; }
+  let heading = null; // ページへ移動している途中の、向かっている組（下の scrollToSlot の説明を参照）
+  function dropSlots() { if (io) { io.disconnect(); io = null; } st.slots = null; st.curSlot = null; heading = null; }
   const pairLabel = p => `左 ${p.l < 0 ? '—' : p.l + 1} ／ 右 ${p.r < 0 ? '—' : p.r + 1}`;
   async function buildScroll(pl, pr, gen) {
     const pairs = pl && pr ? await pagePairs(pl, pr) : (pl || pr).map((_, i) => ({ l: pl ? i : -1, r: pr ? i : -1 }));
@@ -577,12 +578,19 @@ const OV = (() => {
     const vr = view.getBoundingClientRect(), r = s.el.getBoundingClientRect();
     view.scrollTop += r.top - vr.top + kp.f * r.height;
   }
+  /* ページへの移動（滑らかなスクロール）の途中であることを覚えておく。heading：向かっている組と、向かい始めた時刻。
+     ・着くまでは、途中で通るページを「今のページ」にしない（ページ番号の欄が、通過するページの番号に次々と変わらないように）
+     ・途中で別のスクロール（上のページの描画が終わったときの表示位置の補正）が入ると、滑らかなスクロールはそこで打ち切られる。
+       そのときは向かい直す（以前は、目的のページの手前で止まったままになることがあった） */
+  const slotTop = s => view.scrollTop + s.el.getBoundingClientRect().top - view.getBoundingClientRect().top - 6;
   function scrollToSlot(k, smooth = true) {
     const s = st.slots[k]; if (!s) return;
-    const top = view.scrollTop + s.el.getBoundingClientRect().top - view.getBoundingClientRect().top - 6;
-    if (smooth) view.scrollTo({ top, behavior: 'smooth' }); else view.scrollTop = top;
+    if (smooth) { heading = { s, t: performance.now() }; view.scrollTo({ top: slotTop(s), behavior: 'smooth' }); }
+    else { heading = null; view.scrollTop = slotTop(s); }
     markCurrent(s);
   }
+  // 利用者が自分でスクロールし始めたら、向かうのをやめる
+  for (const ty of ['wheel', 'pointerdown', 'touchstart']) view.addEventListener(ty, () => { heading = null; }, { passive: true });
   // 見えていないページの描画は捨てる（メモリを使いすぎないように）。仮の枠に戻す
   function releaseSlot(s) {
     if (!s.v) return;
@@ -616,7 +624,11 @@ const OV = (() => {
     // 今見ている位置より上のページの大きさが変わっても、表示位置がずれないようにする
     const vr = view.getBoundingClientRect(), above = s.el.getBoundingClientRect().bottom <= vr.top + 1, h0 = s.el.offsetHeight;
     s.v = v; s.body.replaceChildren(...(v.el.classList && v.el.classList.contains('pair') ? [...v.el.children] : [v.el]));
-    if (above) view.scrollTop += s.el.offsetHeight - h0;
+    // 高さが変わったときだけ補正する（差が 0 でも scrollTop に代入すると、進行中の滑らかなスクロールが打ち切られる）
+    const dh = s.el.offsetHeight - h0;
+    if (above && dh) view.scrollTop += dh;
+    // ページへ移動している途中なら、向かい直す（補正で打ち切られた分と、高さが変わって行き先がずれた分）
+    if (dh && heading && st.slots && st.slots.includes(heading.s)) view.scrollTo({ top: slotTop(heading.s), behavior: 'smooth' });
     if (v.regions && v.regions.length && v.l >= 0 && v.r >= 0 && st.mode !== 'blink') {
       if (!$('.tag.diff', s.head)) s.head.insertAdjacentHTML('beforeend', `<span class="tag diff">${v.regions.length} 箇所</span>`);
     }
@@ -637,6 +649,14 @@ const OV = (() => {
   }
   function onScroll() {
     if (!st.slots) return;
+    if (heading) {
+      // 着いた（いちばん下までしか行けないときは、そこまで）ら、今のページはそのまま（向かった先のページ）。
+      // 3秒たっても着かない・一覧が作り直されたときは、向かうのをやめて、見えている位置で決め直す
+      const arrived = Math.abs(view.scrollTop - Math.max(0, Math.min(slotTop(heading.s), view.scrollHeight - view.clientHeight))) < 3;
+      const alive = st.slots.includes(heading.s) && performance.now() - heading.t < 3000;
+      if (arrived || !alive) heading = null;
+      if (arrived || alive) return;
+    }
     const vr = view.getBoundingClientRect(), y = vr.top + Math.min(vr.height / 3, 200);
     let s = st.slots.find(q => q.el.getBoundingClientRect().bottom > y) || st.slots[st.slots.length - 1];
     if (s) markCurrent(s);

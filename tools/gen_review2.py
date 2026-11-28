@@ -375,7 +375,7 @@ def main():
     async def mk():
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            b = await p.chromium.launch(executable_path='/usr/bin/google-chrome'); pg = await b.new_page()
+            b = await p.chromium.launch(executable_path=G.chrome_path(), args=['--no-sandbox']); pg = await b.new_page()
             for path, html in G.CHROME_PDFS: await pg.set_content(html); await pg.pdf(path=path, format='A4')
             await b.close()
     asyncio.run(mk())

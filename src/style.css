@@ -222,6 +222,7 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 .st-left{background:#ffe1e1;color:#a12b2b}
 .st-right{background:#dcf5df;color:#21752f}
 .st-wait{background:#eef3fb;color:#4c6a96}
+.st-error{background:#f3e3f7;color:#6b2382;cursor:help}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 
 /* ---------- modal / toast ---------- */

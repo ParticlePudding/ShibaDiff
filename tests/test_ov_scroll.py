@@ -41,8 +41,15 @@ async def main():
         await t.page.keyboard.press('PageDown'); await t.page.wait_for_timeout(900)
         ck('PageDown で次のページへ', await t.js("OV.st.curSlot.k") == 3)
         # ページ番号の欄で選ぶと、そのページまでスクロール
-        await t.page.select_option('#ovLPage', '4'); await t.page.wait_for_timeout(900)
+        await t.page.select_option('#ovLPage', '4')
+        # 移動している間（滑らかなスクロールの途中）の「今のページ」を、30ms ごとに記録する
+        await t.js("window.__ks = []; window.__kt = setInterval(() => window.__ks.push(OV.st.curSlot ? OV.st.curSlot.k : -1), 30); 0")
+        await t.page.wait_for_timeout(1500)
+        ks = await t.js("(clearInterval(window.__kt), window.__ks)")
         ck('ページ番号を選ぶとそのページへスクロール', await t.js("OV.st.curSlot.k") == 5)
+        ck('移動の途中で通るページを「今のページ」にしない（ページ番号の欄が次々と変わらない）', len(ks) > 10 and set(ks) == {5}, sorted(set(ks)))
+        off = await t.js("(() => { const v = document.querySelector('#ovView'), s = OV.st.curSlot.el; return Math.round(s.getBoundingClientRect().top - v.getBoundingClientRect().top); })()")
+        ck('目的のページの先頭まで届く（途中で止まらない）', abs(off - 6) <= 3 or await t.js("(() => { const v = document.querySelector('#ovView'); return v.scrollTop >= v.scrollHeight - v.clientHeight - 2; })()"), off)
         # 表示方法ごとに描ける
         for m in ['side', 'blink', 'swipe', 'overlay', 'diff']:
             await t.click(f'#ovModes button[data-mode={m}]')
