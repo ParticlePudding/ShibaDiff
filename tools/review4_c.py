@@ -1337,6 +1337,7 @@ def r15_prosp(v):
     g = random.Random(1501); cnt = {}
     def U(cat, old, new):
         """決算期の更新に伴って変わる値（予定どおりの変更）。違うときだけ数える"""
+        old, new = [re.sub(r'3\.(85|30)％', lambda m: '3.84％' if m.group(1) == '85' else '3.31％', x) if isinstance(x, str) else x for x in (old, new)]     # 手数料率と同じ数字（3.30％・3.85％）が、表の中に偶然出ないようにする
         if v and old != new: cnt[cat] = cnt.get(cat, 0) + 1
         return new if v else old
     def TB(cat, a, b, head, cls=''):
