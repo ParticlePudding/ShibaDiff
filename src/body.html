@@ -196,7 +196,7 @@
           <label data-modes="blink"><input type="checkbox" id="ovBlinkManual">手動で切り替える（画像のクリック・Space）</label>
           <button data-modes="blink" id="ovBlinkToggle" type="button"><i data-i="repeat"></i>左右を切り替え</button>
           <label data-modes="side"><input type="checkbox" id="ovSideHl" checked>変更箇所を色で表示</label>
-          <div data-modes="diff side">差分の感度 <input type="range" id="ovThr" min="5" max="160" value="60"></div>
+          <div data-modes="diff side" class="thr-row" title="右へ動かすほど、うすい・小さな違いまで検出します">差分の感度<span class="rng"><span class="rng-end">低</span><input type="range" id="ovThr" min="5" max="160" value="105" aria-label="差分の感度（右ほど敏感）"><span class="rng-end">高</span></span></div>
           <label data-modes="diff side"><input type="checkbox" id="ovBoxes" checked>変更箇所を枠で囲む</label>
           <label data-modes="diff side" title="明るさが同じくらいの別の色への変更（水色→青など）も見つけます。紙のスキャンでは、地色のムラを拾わないよう最初はオフです"><input type="checkbox" id="ovColor" checked>色の違いも検出（紫）</label>
           <label data-modes="diff"><input type="checkbox" id="ovFaint" checked>共通部分を薄く表示</label>

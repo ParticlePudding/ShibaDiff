@@ -64,11 +64,18 @@ async def main():
         await t.page.click('#ovNotes .nt-item.cur .nt-st button[data-st=ask]')
         await t.page.fill('#ovNotes .nt-item.cur textarea', '納期の相違。電話で確認中'); await t.page.wait_for_timeout(400)
         ck('変更箇所のコメントを覚える（ページの組と位置）', any(k.startswith('o:0:0:') for k in await t.js('Object.keys(Notes.all())')))
-        await t.js("$('#ovThr').value = 70; $('#ovThr').dispatchEvent(new Event('input'))"); await t.page.wait_for_timeout(2500)
+        await t.js("$('#ovThr').value = 95; $('#ovThr').dispatchEvent(new Event('input'))"); await t.page.wait_for_timeout(2500)
         ck('感度を変えても、同じ箇所のコメントを引き継ぐ', await t.js("OV.st.cur.noteIds.some(id => (Notes.get(id) || {}).text === '納期の相違。電話で確認中')"))
-        await t.js("$('#ovThr').value = 60; $('#ovThr').dispatchEvent(new Event('input'))"); await t.page.wait_for_timeout(2500)
+        await t.js("$('#ovThr').value = 105; $('#ovThr').dispatchEvent(new Event('input'))"); await t.page.wait_for_timeout(2500)
         await t.click('#ovReport'); p = await t.download('#modal .foot button:has-text("変更のあるページだけ")'); h = open(p, encoding='utf-8').read()
         ck('重ね合わせのレポートに確認・コメント', '納期の相違。電話で確認中' in h and '要確認' in h)
+        await t.tab('overlay')
+        cnt = []
+        for v in (5, 160):
+            await t.js(f"$('#ovThr').value = {v}; $('#ovThr').dispatchEvent(new Event('input'))"); await t.page.wait_for_timeout(2500)
+            cnt.append(await t.js("OV.st.cur.regions.reduce((s, g) => s + g.w * g.h, 0)"))
+        ck('差分の感度は右（大きい値）ほど多く検出する', cnt[1] > cnt[0], cnt)
+        await t.js("$('#ovThr').value = 105; $('#ovThr').dispatchEvent(new Event('input'))"); await t.page.wait_for_timeout(2500)
 
         # ---- ページ表示：変更箇所の枠とコメント ----
         await t.tab('page'); await t.wait_for("document.querySelectorAll('.pv-chg .cb').length > 0", 60)

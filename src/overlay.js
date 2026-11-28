@@ -38,6 +38,8 @@ const OV = (() => {
   const resFactor = (pl, pr) => renderWidth(pl, pr) / widthFor(pl, pr, RES.std);
   // ずれの許容の倍率：解像度の倍率と、描画の細かさ（1pt あたり何画素か ÷ 2。A4 では 1）の小さい方。
   // A1 などの大きなページは標準でも 1pt が2画素未満になるので、許容（太らせる量）も細かくし、小さな数字の変更を見落とさないようにする
+  // 差分の感度：スライダーは右ほど敏感（値が大きい）。内部の閾値（明るさの差）は 165 − 感度
+  const thrVal = () => 165 - (+$('#ovThr').value || 105);
   const tolFactor = (pl, pr) => Math.min(resFactor(pl, pr), renderWidth(pl, pr) / Math.max(pl ? pl.w : 0, pr ? pr.w : 0) / 2);
 
   function fillSelect(sel, n, v) {
@@ -379,7 +381,7 @@ const OV = (() => {
     const [dx, dy, ang] = off;
     let res = null;
     if (cl && cr && (st.mode === 'diff' || (st.mode === 'side' && ($('#ovSideHl').checked || $('#ovBoxes').checked)))) {
-      res = await diffImage(cl, cr, +$('#ovThr').value, $('#ovFaint').checked, { dx, dy, ang, resF, tolF });
+      res = await diffImage(cl, cr, thrVal(), $('#ovFaint').checked, { dx, dy, ang, resF, tolF });
       if (stale()) return null;
     }
     return { l, r, cl, cr, dx, dy, ang, res, autoMsg, scale, resF, both: !!(pl && pr) };
@@ -736,14 +738,14 @@ const OV = (() => {
       if (fk !== fileKeys()) return null; // 途中でファイルが変わった：位置合わせの結果を、新しいファイルの組に残さない
       if (scanMode()) st.align.set(key, off);
     }
-    const res = await diffImage(a, b, +$('#ovThr').value, $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]), tolF: tolFactor(pl[p.l], pr[p.r]) });
+    const res = await diffImage(a, b, thrVal(), $('#ovFaint').checked, { dx: off[0], dy: off[1], ang: off[2], resF: resFactor(pl[p.l], pr[p.r]), tolF: tolFactor(pl[p.l], pr[p.r]) });
     return { ...p, kind: 'pair', regs: res.regions.length, pct: res.ink ? res.changed / res.ink * 100 : 0, res, off };
   }
   /* ---- ページ表示・注釈タブ用：ページの組の変更箇所を、各ページの座標（pt）で返す ---- */
   // 結果は、ファイル・感度・許容・解像度が同じあいだ覚えておく。同じ組を同時に頼まれたら同じ計算を待つ
   const rcache = new Map();
   function regionsFor(l, r) {
-    const key = `${st.gen0}:${l}:${r}:${$('#ovThr').value}:${$('#ovTolPx').value}:${Settings.get('ovRes')}:${colorCheck()}`;
+    const key = `${st.gen0}:${l}:${r}:${thrVal()}:${$('#ovTolPx').value}:${Settings.get('ovRes')}:${colorCheck()}`;
     if (!rcache.has(key)) {
       if (rcache.size > 200) rcache.clear();
       rcache.set(key, (async () => {
@@ -873,7 +875,7 @@ const OV = (() => {
       const nAdd = rows.filter(r => r.kind === 'add').length, nDel = rows.filter(r => r.kind === 'del').length;
       const summary = !o.summary ? '' : `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
         rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}${r.nOk ? ` <span class="nst ok">確認済 ${r.nOk}</span>` : ''}${r.nAsk ? ` <span class="nst ask">要確認 ${r.nAsk}</span>` : ''}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
-      const cond = [`差分の感度 ${$('#ovThr').value}`, `ずれの許容 ${$('#ovTolPx').value}px`, colorCheck() ? '色の違いも検出' : '色の違いは検出しない', `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
+      const cond = [`差分の感度 ${$('#ovThr').value}（5〜160、大きいほど敏感）`, `ずれの許容 ${$('#ovTolPx').value}px`, colorCheck() ? '色の違いも検出' : '色の違いは検出しない', `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
       html = Report.page({
         title: `重ね合わせレポート - ${S[0].name} / ${S[1].name}`, heading: '重ね合わせ比較レポート',
         meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}` + (o.cond ? `<br>比較条件: ${esc(cond)}` : '') +
@@ -946,7 +948,7 @@ const OV = (() => {
   };
   $('#ovOpacity').oninput = () => { if (st.mode === 'overlay') update(); };
   $('#ovSwipe').oninput = () => { if (st.mode === 'swipe') drawSwipes(); };
-  let thrT = 0; $('#ovThr').oninput = () => { clearTimeout(thrT); thrT = setTimeout(() => { if (st.mode === 'diff') update(); }, 150); };
+  let thrT = 0; $('#ovThr').oninput = () => { clearTimeout(thrT); thrT = setTimeout(() => { if (st.mode === 'diff' || st.mode === 'side') update(); }, 150); };
     // 並べて表示で差分を計算していなかったページがあれば計算し直す
   const sideNoRes = () => liveViews().some(v => v.side && !v.side.res);
   $('#ovBoxes').onchange = () => { if (st.mode === 'side' && sideNoRes()) update(); else drawBoxes(); };
