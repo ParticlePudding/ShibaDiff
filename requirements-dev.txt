@@ -6,3 +6,6 @@ openpyxl
 python-pptx
 Pillow
 reportlab
+# 3回目の利用者レビュー用データの生成（tools/gen_review3.py）。ほかに LibreOffice（soffice）と poppler-utils（pdftoppm）を使う
+xlsxwriter
+pypdf
