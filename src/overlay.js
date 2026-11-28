@@ -49,15 +49,33 @@ const OV = (() => {
   }
   /* ---- ページの対応（挿入・削除されたページ） ---- */
   // 対応付けを（まだなら）計算し、結果を表示する。連動中なら右のページを左に対応するページへ合わせる
+  // 対応付けの結果の説明。スキャンでページ数が同じとき（調べずに1対1とみなしたとき）は、見た目で調べ直すボタンを付ける
+  const matchInfoHtml = () => PageMatch.describe(PageMatch.ready()) +
+    (PageMatch.skipped() ? '<button type="button" id="ovRematch" title="各ページの縮小画像を比べて、入れ替え・差し替えられたページを探します（ページ数が多いと時間がかかります）"><i data-i="scan-search"></i>見た目で対応を調べ直す</button>' : '');
   async function ensureMatch() {
     const info = $('#ovMatchInfo');
     if (!S[0] || !S[1] || !PageMatch.enabled()) { info.innerHTML = ''; return null; }
-    if (PageMatch.ready()) { info.innerHTML = PageMatch.describe(PageMatch.ready()); return PageMatch.ready(); }
+    if (PageMatch.ready()) { info.innerHTML = matchInfoHtml(); return PageMatch.ready(); }
     info.textContent = 'ページの対応を調べています…';
     const pairs = await PageMatch.compute((k, n) => { info.textContent = `ページの対応を調べています… ${k} / ${n}`; });
-    info.innerHTML = PageMatch.describe(PageMatch.ready());
+    info.innerHTML = matchInfoHtml();
     return pairs && PageMatch.ready();
   }
+  // スキャンでページ数が同じとき：利用者が頼んだら、見た目（縮小画像）で対応を調べ直す。
+  // 1ページ削除して別の場所に1ページ挿入した改訂は、ページ数が同じでも途中の組がずれるため
+  async function rematch() {
+    const info = $('#ovMatchInfo');
+    info.textContent = 'ページの対応を見た目で調べています…';
+    const pairs = await PageMatch.compute((k, n) => { info.textContent = `ページの対応を見た目で調べています… ${k} / ${n}`; }, true).catch(() => null);
+    info.innerHTML = matchInfoHtml();
+    if (!pairs || !PageMatch.ready()) return;
+    // 今の左のページに対応する右のページへ合わせ、新しい組で描き直す（一括チェックの結果は、古い組のものなので消す）
+    const p = st.l >= 0 ? pairs.find(q => q.l === st.l) : pairs.find(q => q.r === st.r);
+    if (p && $('#ovLink').checked) { st.l = p.l; st.r = p.r; }
+    $('#ovScanRes').innerHTML = '';
+    update();
+  }
+  $('#ovMatchInfo').addEventListener('click', e => { if (e.target.closest('#ovRematch')) rematch(); });
   // 今表示している組の位置（組の配列の何番目か）
   function pairIndex(pairs) {
     let k = pairs.findIndex(p => p.l === st.l && p.r === st.r);
@@ -929,14 +947,17 @@ const OV = (() => {
     const v = +e.target.value;
     if (needMatch()) { e.target.value = String(st.l); return afterMatch(() => { $('#ovLPage').value = String(v); $('#ovLPage').dispatchEvent(new Event('change')); }); }
     const d = v - st.l, pairs = PageMatch.ready();
-    if ($('#ovLink').checked) st.r = pairs ? pairs.find(p => p.l === v).r : Math.max(0, Math.min($('#ovRPage').options.length - 2, st.r + d));
+    // 組が見つからないとき（対応付けとページの一覧がずれた場合の備え）は、同じだけ送った位置にする
+    const shifted = Math.max(0, Math.min($('#ovRPage').options.length - 2, st.r + d)), hit = pairs && pairs.find(p => p.l === v);
+    if ($('#ovLink').checked) st.r = hit ? hit.r : shifted;
     st.l = v; go();
   };
   $('#ovRPage').onchange = e => {
     const v = +e.target.value;
     if (needMatch()) { e.target.value = String(st.r); return afterMatch(() => { $('#ovRPage').value = String(v); $('#ovRPage').dispatchEvent(new Event('change')); }); }
     const pairs = PageMatch.ready();
-    if ($('#ovLink').checked && pairs) st.l = pairs.find(p => p.r === v).l;
+    const hit = pairs && pairs.find(p => p.r === v);
+    if ($('#ovLink').checked && hit) st.l = hit.l;
     st.r = v; go();
   };
   $('#ovMatch').checked = PageMatch.enabled();
@@ -965,6 +986,7 @@ const OV = (() => {
     st.dx = Math.round(+$('#ovDx').value || 0); st.dy = Math.round(+$('#ovDy').value || 0);
     st.ang = Math.max(-10, Math.min(10, Math.round((+$('#ovRot').value || 0) * 100) / 100));
     st.align.set(pairKey(), [st.dx, st.dy, st.ang]);
+    rcache.clear(); // ページ表示の変更箇所の枠（regionsFor）は位置合わせ量で変わる。覚えた結果を捨てて、次に開いたときに求め直す
     if (st.slots) { if (st.curSlot) redrawSlot(st.curSlot); } else update();
   };
   $('#ovDx').onchange = setOff; $('#ovDy').onchange = setOff; $('#ovRot').onchange = setOff;

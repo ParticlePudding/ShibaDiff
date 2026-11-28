@@ -21,8 +21,10 @@ async def main():
         # すべて削除で開いている間の設定も初期値に戻る
         await t.js("Settings.set('fontSize','l'); Settings.set('wrap', true)")
         await t.click('#btnSettings'); await t.click('#setData'); await t.page.wait_for_timeout(300)
-        await t.js("window.confirm=()=>true")
         await t.page.click('#modal .foot button >> nth=1'); await t.page.wait_for_timeout(300)
+        check('すべて削除は、アプリのダイアログで確かめる（ブラウザの confirm は使わない）', await t.page.inner_text('#modal h3') == 'すべて削除')
+        await t.page.click('#modal .foot button.primary'); await t.page.wait_for_timeout(300)
+        check('確かめたあとは、保存データの一覧に戻る', await t.page.inner_text('#modal h3') == '保存されているデータ' and await t.js("Object.keys(localStorage).filter(k => k.startsWith('doccmp:')).length") == 0)
         r = await t.js("[Settings.get('fontSize'), Settings.get('wrap') ? '' : '', document.documentElement.dataset.fs]")
         check('すべて削除で設定が初期化', r == ['m', '', 'm'], r)
         await t.page.keyboard.press('Escape'); await t.page.wait_for_timeout(200); await t.page.keyboard.press('Escape')

@@ -50,8 +50,15 @@ const App = (() => {
     if (sn === 'zip') {
       const k = Office.kindOf(s.name, b);
       if (k) {
-        s.kind = k; setText(s, await Office.extract(k, b));
+        const info = {};
+        s.kind = k; setText(s, await Office.extract(k, b, info));
         s.getPages = async () => (s._pages || (s._pages = Pages.fromText(s.lines, s.name)));
+        // Word の変更履歴が残っている：比較は「すべて承諾した状態」の文字で行うので、削除された文字は比較に出ない。見落とさないよう知らせる
+        // （ファイル欄とテキスト比較の状態表示にも出す）
+        if (info.tracked) {
+          s.tracked = info.tracked;
+          toast(`「${s.name}」には変更履歴が残っています（挿入 ${info.tracked.ins}・削除 ${info.tracked.del}）。変更をすべて承諾した状態の文字で比較します（削除された文字は比較に出ません）`, false, 7000);
+        }
         return;
       }
     }
@@ -228,6 +235,7 @@ const App = (() => {
     if (s.kind === 'pdf') meta += `・${s.pageCount}ページ`;
     let html = '';
     if (s.asciiOnly) meta += '・英数字のみ';
+    if (s.tracked) meta += '・変更履歴あり';
     if (!s.lines.length || (s.lines.length === 1 && s.finalNL === false)) meta += '・改行なし';
     if (s.kind === 'text' || s.kind === 'binary') {
       html += `<select data-act="enc" title="文字コード（変更すると読み直します）">${Enc.LIST.map(e => `<option value="${e}"${e === s.enc ? ' selected' : ''}>${Enc.NAMES[e]}</option>`).join('')}</select>`;
@@ -434,12 +442,27 @@ const App = (() => {
     e.preventDefault(); setTab(n.dataset.tab); n.focus();
   });
   $('#btnSettings').onclick = () => Settings.open();
-  // 記号だけのボタンに、読み上げ用の名前を付ける
-  $$('button[title]').forEach(b => { if (!b.hasAttribute('aria-label')) b.setAttribute('aria-label', b.title.replace(/\s*\(.*\)$/, '')); });
+  // 狭い画面（760px 未満）ではツールバーが横スクロールになる。続きがある側の端に目印（ぼかしと矢印）を出す。
+  // スクロールバーは出していないので、目印がないと右に隠れたボタン（レポート・印刷など）に気づけない
+  $$('.toolbar').forEach(bar => {
+    const sync = () => {
+      const max = bar.scrollWidth - bar.clientWidth;
+      bar.classList.toggle('more-l', bar.scrollLeft > 2); bar.classList.toggle('more-r', max - bar.scrollLeft > 2);
+    };
+    bar.addEventListener('scroll', () => { sync(); $$('details.pop[open]', bar).forEach(d => { d.open = false; }); }, { passive: true });
+    new ResizeObserver(sync).observe(bar);
+  });
+  // 記号だけのボタン（文字のないボタン）に、読み上げ用の名前を付ける。文字のあるボタンには付けない：
+  // 見えている文字がそのまま名前になる。title の長い説明で上書きすると、見えている名前と読み上げの名前が食い違う（WCAG 2.5.3）
+  $$('button[title]').forEach(b => { if (!b.hasAttribute('aria-label') && !b.textContent.trim()) b.setAttribute('aria-label', b.title.replace(/\s*\(.*\)$/, '')); });
 
   $('#btnSwap').onclick = () => {
+    // 変更点のコメントは左右の組（左のキー||右のキー）に付く。入れ替えると別の組になり、付けたコメントは表示されなくなるので知らせる
+    // （消えてはいない。もう一度入れ替えると戻る）
+    const had = S[0] && S[1] ? Object.keys(Notes.all()).length : 0;
     S = [S[1], S[0]]; TV.resetHistory(); updateSlot(0); updateSlot(1);
-    TV.invalidate(); PV.invalidate(0); PV.invalidate(1); OV.invalidate();
+    TV.invalidate(); PageMatch.invalidate(); PV.invalidate(0); PV.invalidate(1); OV.invalidate();
+    if (had) toast(`左右を入れ替えました。変更点のコメント ${had} 件は、入れ替える前の左右の組に付いているため表示されません（もう一度入れ替えると戻ります）`, false, 7000);
   };
   $('#btnClear').onclick = async () => {
     if (S.some(s => s && s.dirty)) {
@@ -513,7 +536,8 @@ const App = (() => {
 画面の左半分にドロップすると左、右半分にドロップすると右に入ります（ドラッグ中に、入る側を強調して示します。2つまとめてドロップすると左右に入ります）。上のファイル名をクリックしても選択できます。<br>
 左右とも読み込むと、文字コード・保存・閉じるなどのファイル欄は自動でたたまれます（ヘッダ右のボタンで開く）。「全画面」でヘッダも隠せます（<kbd>Esc</kbd> で戻る）。<br>
 対応形式: テキスト・ソースコード・CSV など（Shift_JIS / EUC-JP / JIS / UTF-8 / UTF-16 を自動判定）、PDF、Word(.docx)、Excel(.xlsx)、PowerPoint(.pptx)、画像（PNG / JPEG / GIF / BMP / WebP）。<br>
-<span class="muted">DocuWorks文書(.xdw)・旧Office形式(.doc/.xls/.ppt)・TIFFは中身を読めないため、PDFや新しい形式に変換してから読み込んでください。</span>
+<span class="muted">DocuWorks文書(.xdw)・旧Office形式(.doc/.xls/.ppt)・TIFFは中身を読めないため、PDFや新しい形式に変換してから読み込んでください。</span><br>
+Word はヘッダー・フッター・脚注・コメントも、Excel は数式（コピーした数式を含む）と非表示のシートも比較します。Word に変更履歴が残っているときは通知し、変更をすべて承諾した状態の文字で比較します。
 <h4>テキスト比較（WinMerge相当）</h4>
 <table>
 <tr><td><kbd>Alt</kbd>+<kbd>↓</kbd> / <kbd>Alt</kbd>+<kbd>↑</kbd></td><td>次 / 前の差分へ（<kbd>N</kbd> / <kbd>P</kbd> でも可）</td></tr>
@@ -540,10 +564,10 @@ const App = (() => {
 <h4>重ね合わせ比較</h4>
 PDF・画像のページを重ねて、変わった部分を色分けします（赤＝左にだけある、青＝右にだけある、紫＝形は同じで色が変わった）。色の比較は「色の違いも検出」で切り替えられます（紙のスキャンでは最初はオフ）。変更箇所はオレンジの枠と番号で示します。右側のパネルには、選んだ表示方法で使う項目だけが出ます。<br>
 スキャン画像は開いたときに自動で位置と傾きを合わせます（「自動位置合わせ」で再実行）。細かなずれを差分にしたくないときは「ずれの許容」を増やしてください。A1・A0 などの大きな図面は「解像度」で軽量／精細を選べます。<br>
-途中でページが挿入・削除されていても、似ているページどうしを自動で組にします（ページ送り・一括チェック・ページ表示の連動に使います）。「全ページの差分を調べる」で、どのページに変更があるか、追加・削除されたページを一覧できます。「レポート」で差分画像と一覧を HTML に出力できます。<br>
+途中でページが挿入・削除されていても、似ているページどうしを自動で組にします（ページ送り・一括チェック・ページ表示の連動に使います）。スキャンで左右のページ数が同じときは、同じページ番号どうしを組にします。ページの入れ替え・差し替えがあるときは、右のパネルの「見た目で対応を調べ直す」を押してください。「全ページの差分を調べる」で、どのページに変更があるか、追加・削除されたページを一覧できます。「レポート」で差分画像と一覧を HTML に出力できます。<br>
 操作：ホイール＝縦スクロール、<kbd>Shift</kbd>+ホイール＝横スクロール、<kbd>Ctrl</kbd>+ホイール＝拡大・縮小。「移動」（<kbd>H</kbd>）ではドラッグで表示位置を動かし、ホイールで拡大・縮小します。<kbd>PageUp</kbd><kbd>PageDown</kbd>（<kbd>←</kbd><kbd>→</kbd>）でページ送り、<kbd>N</kbd>で次の変更箇所、点滅の手動切り替えは画像のクリックか <kbd>Space</kbd>。<br>表示方法：ツールバーの「1ページ」ボタンは1組ずつ、「全ページ」ボタンは全ページを縦に並べてスクロールで見られます（見えているページだけを描くので、ページ数が多くても軽く動きます。全ページ表示でも <kbd>PageUp</kbd><kbd>PageDown</kbd> で前後のページへ移動し、右のパネルの結果・位置合わせは画面の上のほうにあるページが対象です）。
 <h4>フォルダ比較</h4>
-ヘッダ左の「フォルダ比較」に切り替えて使います。2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリック（または <kbd>Enter</kbd>）すると中身の比較に移り、「← フォルダ一覧」で一覧に戻れます。一覧は CSV・HTMLレポートに出力できます。
+ヘッダ左の「フォルダ比較」に切り替えて使います。2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリック（または <kbd>↑</kbd><kbd>↓</kbd> で選んで <kbd>Enter</kbd>）すると中身の比較に移り、「← フォルダ一覧」で一覧に戻れます。一覧は CSV・HTMLレポートに出力できます。
 <h4>プライバシー</h4>
 <span class="muted">すべての処理はこのブラウザの中だけで行われ、ファイルが外部に送信されることはありません（ネットワーク接続なしで動作します）。</span>`
   });

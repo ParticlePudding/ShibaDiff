@@ -1,7 +1,8 @@
 /* ページの対応付け：途中でページが挿入・削除されても、似ているページどうしを組にする。
    ページ表示の連動、重ね合わせのページ送り、全ページ一括チェックで使う */
 const PageMatch = (() => {
-  const st = { key: '', pairs: null, busy: null, info: '' };
+  // skipped：スキャンでページ数が同じため、調べずに1対1とみなした。visual：見た目で調べた結果（compute の visual 指定）
+  const st = { key: '', pairs: null, busy: null, info: '', skipped: false, visual: false };
   // 組の配列：{ l, r }（片側にしかないページは、反対側が -1）
   const enabled = () => Settings.get('pageMatch') !== false;
   const keyOf = () => (S[0] && S[1]) ? `${S[0].key}\u0001${S[1].key}\u0001${S[0].lines.length}\u0001${S[1].lines.length}` : '';
@@ -105,35 +106,39 @@ const PageMatch = (() => {
   }
 
   /* ---- 計算 ---- */
-  async function compute(onProgress) {
+  // visual：文字のないスキャンでページ数が同じときも、見た目で調べる（既定では調べずに1対1とみなす。利用者が頼んだときだけ）
+  async function compute(onProgress, visual = false) {
     const key = keyOf();
     if (!key) { st.key = ''; st.pairs = null; return null; }
-    if (st.key === key && st.pairs) return st.pairs;
-    if (st.busy && st.busy.key === key) return st.busy.p;
+    if (st.key === key && st.pairs && (!visual || !st.skipped)) return st.pairs;
+    if (st.busy && st.busy.key === key && st.busy.visual === visual) return st.busy.p.then(r => r && r.pairs);
     const p = (async () => {
       const [pl, pr] = await Promise.all([S[0].getPages(), S[1].getPages()]);
       const n = pl.length, m = pr.length;
-      let sim = null;
+      let sim = null, skipped = false;
       const tl = pageTexts(S[0], n), tr = pageTexts(S[1], m);
       if (tl && tr) sim = (i, j) => textSim(tl[i], tr[j]);
-      else if (n !== m) {
-        // 文字がない（スキャン）ときは見た目で比べる。ページ数が同じなら1対1とみなす（全ページの縮小画像を作らない）
+      else if (n === m && !visual) skipped = true; // ページ数が同じなら1対1とみなす（全ページの縮小画像を作らない）
+      else {
+        // 文字がない（スキャン）ときは見た目で比べる
         const vl = [], vr = [], tot = n + m;
         for (let i = 0; i < n; i++) { vl.push(await thumb(pl[i])); if (onProgress) onProgress(i + 1, tot); if (keyOf() !== key) return null; }
         for (let j = 0; j < m; j++) { vr.push(await thumb(pr[j])); if (onProgress) onProgress(n + j + 1, tot); if (keyOf() !== key) return null; }
         sim = (i, j) => cosine(vl[i], vr[j]);
       }
       const pairs = sim ? align(n, m, sim, tl ? 0.3 : 0.55) : Array.from({ length: Math.max(n, m) }, (_, i) => ({ l: i < n ? i : -1, r: i < m ? i : -1 }));
-      return pairs;
+      return { pairs, skipped, visual: !!sim && !(tl && tr) };
     })();
-    st.busy = { key, p };
-    const pairs = await p;
-    if (st.busy && st.busy.key === key) st.busy = null;
-    if (pairs && keyOf() === key) { st.key = key; st.pairs = pairs; }
-    return pairs;
+    const job = st.busy = { key, p, visual };
+    const res = await p;
+    if (st.busy === job) st.busy = null;
+    if (res && keyOf() === key) { st.key = key; st.pairs = res.pairs; st.skipped = res.skipped; st.visual = res.visual; }
+    return res && res.pairs;
   }
-  function invalidate() { st.key = ''; st.pairs = null; st.busy = null; }
+  function invalidate() { st.key = ''; st.pairs = null; st.busy = null; st.skipped = false; st.visual = false; }
   const ready = () => st.key === keyOf() && st.pairs && enabled() ? st.pairs : null;
+  // 調べずに1対1とみなしたか（スキャンでページ数が同じ）。重ね合わせの画面で「見た目で調べ直す」を出すために使う
+  const skipped = () => !!ready() && st.skipped;
   // 片側のページ i に対応する、反対側のページ番号（対応がなければ直前の対応から推定）
   function other(side, i, n) {
     const pairs = ready();
@@ -151,8 +156,10 @@ const PageMatch = (() => {
     if (!pairs) return '';
     const add = pairs.filter(p => p.l < 0).map(p => p.r + 1), del = pairs.filter(p => p.r < 0).map(p => p.l + 1);
     const fmt = a => a.length > 6 ? a.slice(0, 6).join('・') + ` ほか ${a.length - 6}` : a.join('・');
-    if (!add.length && !del.length) return 'ページの挿入・削除はありません';
+    // 調べていないときは「ありません」とは言わない（スキャンでページ数が同じなら、同じページ番号どうしを組にしているだけ）
+    if (skipped()) return 'ページ数が同じスキャンのため、同じページ番号どうしを組にしています（ページの入れ替え・差し替えは調べていません）';
+    if (!add.length && !del.length) return 'ページの挿入・削除はありません' + (st.visual ? '（見た目で確認）' : '');
     return [add.length ? `右で追加されたページ：${fmt(add)}` : '', del.length ? `左から削除されたページ：${fmt(del)}` : ''].filter(Boolean).join('<br>');
   }
-  return { compute, invalidate, ready, other, describe, enabled, _align: align };
+  return { compute, invalidate, ready, skipped, other, describe, enabled, _align: align };
 })();

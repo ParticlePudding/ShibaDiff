@@ -320,7 +320,7 @@ const TV = (() => {
     const n = DN(); if (!n) return;
     const pad = 3, hh = H - pad * 2, rh = Math.max(1.5, hh / n);
     const colW = (W - 9) / 2;
-    for (let v = 0; v < n; v++) {
+    for (let v = 0; v < st.view.length; v++) { // n は一列表示では st.uv の数。回すのは表示上の行（st.view）
       const e = st.view[v]; if (typeof e !== 'number') continue;
       const r = st.rows[e]; if (r.t === 'e') continue;
       const y = pad + D(v) / n * hh;
@@ -506,7 +506,8 @@ const TV = (() => {
     const w = p.clientWidth - gut - 30;
     if (x < p.scrollLeft || x > p.scrollLeft + w) p.scrollLeft = Math.max(0, x - w / 3);
   }
-  const fold = t => t.normalize('NFKC').toLowerCase();
+  // 検索のときの文字のそろえ方：全角半角・大文字小文字（NFKC）に加えて、NFKC では通常の漢字にならない CJK部首補助（⻭ → 歯 など）もそろえる
+  const fold = t => normCJK(t).normalize('NFKC').toLowerCase();
   function find() {
     const q = $('#searchBox').value; if (!q) { $('#searchBox').focus(); return; }
     const ql = fold(q), A = L(0), B = L(1), R = st.rows, n = R.length;
@@ -646,7 +647,7 @@ const TV = (() => {
     if (!s) return '—';
     if (s.kind === 'pdf') return s.noTextLayer ? `PDF ${s.pageCount}ページ・文字情報なし（スキャン）` : `PDF ${s.pageCount}ページ・抽出 ${fmtNum(s.lines.length)}行`;
     if (s.noText) return '画像';
-    if (/^(docx|xlsx|pptx)$/.test(s.kind)) return `${s.kind.toUpperCase()}・抽出 ${fmtNum(s.lines.length)}行`;
+    if (/^(docx|xlsx|pptx)$/.test(s.kind)) return `${s.kind.toUpperCase()}・抽出 ${fmtNum(s.lines.length)}行${s.tracked ? '・変更履歴あり（承諾した状態で比較）' : ''}`;
     return `${fmtNum(s.lines.length)}行・${Enc.NAMES[s.enc] || s.enc}・${Enc.EOLNAME[s.eol] || ''}${s.mixed ? '(混在)' : ''}`;
   }
   function status() {
@@ -863,14 +864,14 @@ ${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr
     $('#oBadge').hidden = !n; $('#oBadge').textContent = n;
   }
   for (const id of ['#oWs', '#oCase', '#oBlank', '#oZen']) $(id).addEventListener('change', () => { saveOpts(); markOpts(); compare(); });
-  markOpts();
+  // 前回の比較条件を戻してから数を出す（逆の順だと、起動した直後は条件が効いているのにバッジが出ず、差分を見落とす）
+  loadOpts(); markOpts();
   $('#oFold').addEventListener('change', () => {
     saveOpts(); st.expanded.clear();
     const keepBlk = st.cur; buildView(); sizeSpacers(); st.cur = keepBlk;
     if (st.cur >= 0) { panes[0].scrollTop = 0; scrollToBlock(st.cur); }
     render();
   });
-  loadOpts();
   Settings.on(k => {
     if (k === 'unit') for (const r of st.rows) r.cd = null;
     if (k === 'fontSize') { applyMetrics(); measureChar(); sizeSpacers(); }

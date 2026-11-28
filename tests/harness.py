@@ -30,7 +30,7 @@
   重ね合わせ: #ovModes button[data-mode=diff|overlay|swipe|blink|side] #ovLPage #ovRPage #ovLNext ...
               #ovThr #ovTol #ovBoxes #ovFaint #ovDx #ovDy #ovAuto #ovScan #ovScanRes #ovStats #ovRegNext
   フォルダ: .fd-slot[data-side] input（webkitdirectory）→ t.load_folders(left_dir, right_dir)  #fdTable #fdStatus
-  モーダル: #modal.on  .dlg .foot button.primary（OK/適用） #askTa #edTa
+  モーダル: #modal.on  .dlg .foot button.primary（OK/適用） #askPw #edTa
   ヘルプ: #btnHelp
 """
 import asyncio, os, time

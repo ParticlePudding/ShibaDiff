@@ -53,7 +53,7 @@ const PV = (() => {
   }
   // 「ブラウザに保存しない」設定のときは、開いている間だけメモリに持つ
   const mem = new Map();
-  const persist = () => Settings.get('persist') !== false;
+  const persist = () => Settings.get('persist') === true; // 既定はオフ。はっきりオンのときだけ保存する（notes.js と同じ判定）
   function loadAnn(side) {
     if (!S[side]) { st.ann[side] = {}; st.rot[side] = 0; return; }
     const k = annKey(side);
@@ -216,6 +216,15 @@ const PV = (() => {
   const chgBtn = $('#pvChanges');
   const syncChgBtn = () => { chgBtn.classList.toggle('on', st.showChg); chgBtn.setAttribute('aria-pressed', st.showChg); };
   syncChgBtn();
+  // 変更箇所を調べている間は、ボタンに「調べています」の印を出す（スキャンや大きな図面では、位置合わせと画素の比較に数秒かかる。
+  // 何も出さないと、ページ表示が急に重くなったように見えるため）
+  let chgBusy = 0;
+  const CHG_TITLE = chgBtn.title;
+  function chgBusySync() {
+    const on = chgBusy > 0;
+    chgBtn.classList.toggle('busy', on); chgBtn.setAttribute('aria-busy', on);
+    chgBtn.title = on ? '変更箇所を調べています…（重いときは、このボタンでオフにできます）' : CHG_TITLE;
+  }
   chgBtn.onclick = () => { st.showChg = !st.showChg; store.set('pvChanges', st.showChg); syncChgBtn(); redrawChanges(); };
   const pagePairs = () => {
     const nl = st.sides[0] ? st.sides[0].pages.length : 0, nr = st.sides[1] ? st.sides[1].pages.length : 0;
@@ -240,7 +249,9 @@ const PV = (() => {
     const s = sd.slots[i];
     if (!st.showChg || !st.sides[0] || !st.sides[1] || !s.visible || App.tab !== 'page') { if (!st.showChg) s.chg.innerHTML = ''; return; }
     const p = pairOf(side, i); if (!p) { s.chg.innerHTML = ''; return; }
-    const info = await OV.regionsFor(p.l, p.r);
+    let info;
+    chgBusy++; chgBusySync();
+    try { info = await OV.regionsFor(p.l, p.r); } finally { chgBusy--; chgBusySync(); }
     if (!info || st.sides[side] !== sd || !st.showChg) return;
     s.chg.innerHTML = chgSvg(info, side, sd.z);
     s.chgInfo = info;
@@ -543,23 +554,48 @@ const PV = (() => {
       const data = JSON.parse(await f.text());
       if (!data || !Array.isArray(data.files)) throw new Error('ShibaDiff の注釈ファイルの形式ではありません');
       let applied = 0;
+      const answered = [null, null]; // 文書が違う側に「読み込みますか」と聞いた答え（聞いていなければ null）
       for (const fe of data.files || []) {
         if (!fe || typeof fe !== 'object') continue;
         fe.side = fe.side === 1 ? 1 : 0;
         let side = [0, 1].find(s => S[s] && S[s].name === fe.name);
         if (side === undefined && S[fe.side]) {
+          // 文書が違う側に、読み込む注釈も回転もないときは聞かない（コメントだけの注釈ファイルで、中身のない確認を出さない）
+          const has = [90, 180, 270].includes(fe.rot) || (fe.annotations && typeof fe.annotations === 'object' && Object.values(fe.annotations).some(x => Array.isArray(x) && x.length));
+          if (!has) continue;
           const ok = await modal({ title: '注釈の読み込み', html: `注釈ファイルは「${esc(String(fe.name || ''))}」用ですが、${fe.side ? '右' : '左'}には「${esc(S[fe.side].name)}」が開かれています。<br>この文書に注釈を読み込みますか？`, buttons: [{ label: '読み込まない', value: false }, { label: '読み込む', primary: true, value: true }] });
+          answered[fe.side] = !!ok;
           if (ok) side = fe.side;
         }
         if (side === undefined) continue;
         pushHist(side); st.ann[side] = cleanAnnMap(fe.annotations); st.rot[side] = [0, 90, 180, 270].includes(fe.rot) ? fe.rot : 0; saveAnn(side); saveRot(side);
         applied++; await build(side);
       }
-      // 変更点のコメント：左右とも読み込んでいて、どちらも注釈ファイルの文書と同じとき（名前で照合）に読み込む
+      // 変更点のコメント：左右とも読み込んでいて、左右とも注釈ファイルを保存したときの文書と同じとき（名前で照合。左右の向きも同じ）は、
+      // そのまま今の組に足す。違うときは、別の文書のコメントが紛れ込まないよう、確かめてから読み込む
+      // （重ね合わせのコメントはページと位置で付くので、別の文書でも同じ位置の変更箇所に付いてしまう）
       let nn = 0;
-      if (data.notes && S[0] && S[1] && (data.files || []).length >= 1) nn = Notes.merge(data.notes);
+      const nFile = Object.keys(Notes.clean(data.notes)).length, both = !!(S[0] && S[1]);
+      if (nFile && both) {
+        const nameOf = side => { const fe = data.files.find(x => x && typeof x === 'object' && x.side === side); return fe && typeof fe.name === 'string' ? fe.name : null; };
+        const from = [nameOf(0), nameOf(1)];
+        // 文書が違う側について、注釈の読み込みですでに答えているときは、重ねて聞かない
+        // （どちらかで「読み込まない」ならコメントも読み込まない。違う側すべてで「読み込む」なら読み込む）
+        const ans = [0, 1].map(side => from[side] === S[side].name ? true : answered[side]);
+        let ok = !ans.includes(false) && !ans.includes(null);
+        if (!ok && !ans.includes(false)) {
+          const nm = v => v == null ? '（記録なし）' : `「${esc(v)}」`;
+          ok = await modal({
+            title: '変更点のコメントの読み込み',
+            html: `注釈ファイルの変更点のコメント（${nFile} 件）は、左 ${nm(from[0])}・右 ${nm(from[1])} の比較に付けたものです。<br>今は、左「${esc(S[0].name)}」・右「${esc(S[1].name)}」を開いています。<br>この組にコメントを読み込みますか？<br><span class="muted">文書が違うと、コメントが別の変更点に付いたり、どこにも表示されなかったりします。</span>`,
+            buttons: [{ label: '読み込まない', value: false }, { label: '読み込む', primary: true, value: true }]
+          });
+        }
+        if (ok) nn = Notes.merge(data.notes);
+      }
       const withAnn = (data.files || []).filter(fe => fe && fe.annotations && Object.values(fe.annotations).some(x => Array.isArray(x) && x.length)).length;
-      toast(applied || nn ? `読み込みました：注釈 ${withAnn} ファイル分${nn ? `・変更点のコメント ${nn} 件` : ''}` : '対応するファイルが見つかりませんでした（注釈ファイルの文書と、開いている文書が違います）', !(applied || nn));
+      const skipped = nFile && !both ? `（変更点のコメント ${nFile} 件は、左右とも開いてから読み込んでください）` : '';
+      toast(applied || nn ? `読み込みました：注釈 ${withAnn} ファイル分${nn ? `・変更点のコメント ${nn} 件` : ''}${skipped}` : '対応するファイルが見つかりませんでした（注釈ファイルの文書と、開いている文書が違います）' + skipped, !(applied || nn));
     } catch (err) { toast('注釈ファイルを読み込めません: ' + err.message, true); }
   };
 
@@ -581,6 +617,7 @@ const PV = (() => {
     const out = document.createElement('canvas');
     out.width = rot % 180 ? base.height : base.width; out.height = rot % 180 ? base.width : base.height;
     const c = out.getContext('2d'); c.translate(out.width / 2, out.height / 2); c.rotate(rot * Math.PI / 180); c.drawImage(base, -base.width / 2, -base.height / 2);
+    base.width = base.height = 0; // 回す前の画像はもう使わない（多ページでメモリが膨らまないように）
     return out;
   }
   /* ---- レポート：注釈を付けたページの画像と、注釈・付箋の一覧 ---- */
@@ -692,6 +729,7 @@ const PV = (() => {
           $('#busyMsg').textContent = `印刷用に準備中… ${i + 1} / ${sd.pages.length}`;
           const cv = await renderWithAnn(s, i, Math.min(2.5, 2400 / Math.max(sd.pages[i].w, sd.pages[i].h)));
           const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.92));
+          cv.width = cv.height = 0; // JPEG にしたら描画用の画像は解放する（レポートと同じ。多ページでメモリが膨らまないように）
           const url = URL.createObjectURL(blob); urls.push(url);
           const img = new Image(); img.src = url; area.appendChild(img);
           await img.decode().catch(() => { });

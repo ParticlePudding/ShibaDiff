@@ -50,7 +50,7 @@ const PDF = (() => {
       isEvalSupported: false, password, disableFontFace: false, useSystemFonts: true, ...(worker ? { worker } : {})
     });
     task.onPassword = async (updatePw, reason) => {
-      const pw = await askText(reason === 2 ? 'パスワードが違います。もう一度入力してください' : 'このPDFはパスワードで保護されています', '', { label: 'パスワード' });
+      const pw = await askPassword(reason === 2 ? 'パスワードが違います。もう一度入力してください' : 'このPDFはパスワードで保護されています');
       if (pw == null) { task.destroy(); } else updatePw(pw);
     };
     let doc;

@@ -84,15 +84,37 @@ const Office = (() => {
   }
 
   /* ---- Word ---- */
-  function wParaText(p) {
-    let s = '';
+  const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  // ページ番号のフィールド（ヘッダー・フッターで使う）。保存時の値（1 など）ではなく、印で出す
+  const PAGE_FIELD = { PAGE: '‹ページ番号›', NUMPAGES: '‹総ページ数›', SECTIONPAGES: '‹総ページ数›' };
+  const pageField = instr => PAGE_FIELD[((/^\s*([A-Za-z]+)/.exec(instr || '') || [])[1] || '').toUpperCase()] || '';
+  // opt.pageFields：ページ番号のフィールドを印に置き換える（ヘッダー・フッター用）
+  function wParaText(p, opt = {}) {
+    let s = '', fld = null; // fld：読んでいる途中のフィールド { instr, mark, result }
     const walk = el => {
       for (const c of el.children) {
         const ln = c.localName;
+        if (opt.pageFields) {
+          if (ln === 'fldChar') {
+            const t = c.getAttributeNS(W_NS, 'fldCharType') || c.getAttribute('w:fldCharType');
+            if (t === 'begin') fld = { instr: '', mark: '', result: false };
+            else if (t === 'separate' && fld) { fld.mark = pageField(fld.instr); fld.result = true; s += fld.mark; }
+            else if (t === 'end') { if (fld && !fld.result) s += pageField(fld.instr); fld = null; }
+            continue;
+          }
+          if (ln === 'instrText') { if (fld) fld.instr += c.textContent; continue; }
+          if (ln === 'fldSimple') {
+            const mark = pageField(c.getAttributeNS(W_NS, 'instr') || c.getAttribute('w:instr'));
+            if (mark) { s += mark; continue; }
+          }
+          if (fld && fld.result && fld.mark && ln === 't') continue; // ページ番号の保存時の値は出さない
+        }
         if (ln === 't') s += c.textContent;
         else if (ln === 'tab') s += '\t';
         else if (ln === 'br' || ln === 'cr') s += '\n';
-        else if (ln === 'delText' || ln === 'instrText' || ln === 'del' || ln === 'rPr' || ln === 'pPr') continue;
+        // 変更履歴は「すべて承諾した状態」にする：削除（del）と、移動する前の場所（moveFrom）は読まない
+        else if (ln === 'delText' || ln === 'instrText' || ln === 'del' || ln === 'moveFrom' || ln === 'rPr' || ln === 'pPr') continue;
         else if (ln === 'noBreakHyphen') s += '-';
         else walk(c);
       }
@@ -107,36 +129,97 @@ const Office = (() => {
     const n = lvl ? parseInt(lvl.getAttribute('w:val') || lvl.getAttributeNS(lvl.namespaceURI, 'val') || '0', 10) : 0;
     return '  '.repeat(n) + '・';
   }
-  function wBlock(el, out) {
+  function wBlock(el, out, opt) {
     for (const c of el.children) {
-      if (c.localName === 'p') out.push(...(wListPrefix(c) + wParaText(c)).split('\n'));
+      if (c.localName === 'p') out.push(...(wListPrefix(c) + wParaText(c, opt)).split('\n'));
       else if (c.localName === 'tbl') {
         out.push('┌─ 表 ─');
         for (const tr of kids(c, 'tr')) {
-          const cells = kids(tr, 'tc').map(tc => { const o = []; wBlock(tc, o); return o.join(' / ').trim(); });
+          const cells = kids(tr, 'tc').map(tc => { const o = []; wBlock(tc, o, opt); return o.join(' / ').trim(); });
           out.push('│ ' + cells.join(' │ '));
         }
         out.push('└─');
-      } else if (c.localName === 'sdt') { const ct = kids(c, 'sdtContent')[0]; if (ct) wBlock(ct, out); }
-      else if (c.localName === 'customXml' || c.localName === 'ins' || c.localName === 'smartTag') wBlock(c, out);
+      } else if (c.localName === 'sdt') { const ct = kids(c, 'sdtContent')[0]; if (ct) wBlock(ct, out, opt); }
+      else if (c.localName === 'customXml' || c.localName === 'ins' || c.localName === 'moveTo' || c.localName === 'smartTag') wBlock(c, out, opt);
     }
   }
-  async function docx(zip) {
+  async function docx(zip, info) {
     const out = [];
     const xml = await zip.text('word/document.xml');
     if (!xml) throw new Error('word/document.xml が見つかりません');
-    const body = all(parseXml(xml), 'body')[0];
+    const doc = parseXml(xml), body = all(doc, 'body')[0];
     if (body) wBlock(body, out);
+    // 変更履歴（挿入・削除・移動）の数。比較は承諾した状態の文字で行うので、残っていることを読み込んだ側で知らせる
+    const tracked = { ins: 0, del: 0 };
+    const count = d => { tracked.ins += all(d, 'ins').length + all(d, 'moveTo').length; tracked.del += all(d, 'del').length + all(d, 'moveFrom').length; };
+    count(doc);
+    // ヘッダー・フッター（版数・文書番号・機密区分などが書かれることが多い）。本文の節（sectPr）が参照している順に読み、
+    // どこからも参照されていないものは番号順に足す。同じ内容のもの（先頭ページ用・偶数ページ用など）は1回だけ出す
+    const rels = relsMap(await zip.text('word/_rels/document.xml.rels'));
+    for (const [ref, re, label] of [['headerReference', /^word\/header(\d+)\.xml$/, 'ヘッダー'], ['footerReference', /^word\/footer(\d+)\.xml$/, 'フッター']]) {
+      const used = all(doc, ref).map(e => rels.get(e.getAttributeNS(R_NS, 'id') || e.getAttribute('r:id'))).filter(Boolean).map(t => resolve('word/document.xml', t));
+      const rest = zip.names().filter(n => re.test(n)).sort((a, b) => +re.exec(a)[1] - +re.exec(b)[1]);
+      const lines = [], seen = new Set();
+      for (const name of new Set([...used, ...rest])) {
+        const x = await zip.text(name); if (!x) continue;
+        const d = parseXml(x), ls = []; count(d);
+        wBlock(d.documentElement, ls, { pageFields: true });
+        const t = ls.filter(l => l.trim()), key = t.join('\n');
+        if (!t.length || seen.has(key)) continue;
+        seen.add(key); lines.push(...t);
+      }
+      if (lines.length) out.push('', `===== ${label} =====`, ...lines);
+    }
     for (const extra of [['word/footnotes.xml', '脚注'], ['word/endnotes.xml', '文末脚注'], ['word/comments.xml', 'コメント']]) {
       const x = await zip.text(extra[0]); if (!x) continue;
-      const lines = []; for (const p of all(parseXml(x), 'p')) { const t = wParaText(p); if (t.trim()) lines.push(t); }
+      const d = parseXml(x); if (extra[1] !== 'コメント') count(d);
+      const lines = []; for (const p of all(d, 'p')) { const t = wParaText(p); if (t.trim()) lines.push(t); }
       if (lines.length) { out.push('', `===== ${extra[1]} =====`, ...lines); }
     }
+    if (info && (tracked.ins || tracked.del)) info.tracked = tracked;
     return out.join('\n');
   }
 
   /* ---- Excel ---- */
   function colIdx(ref) { let n = 0; for (const ch of ref) { const c = ch.charCodeAt(0); if (c < 65 || c > 90) break; n = n * 26 + (c - 64); } return n - 1; }
+  function colName(i) { let s = ''; for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + (n - 1) % 26) + s; return s; }
+  // セル番地（A1・$B$2）→ 0 始まりの行・列
+  function cellPos(ref) { const m = /^\$?([A-Z]{1,3})\$?(\d{1,7})$/.exec(ref || ''); return m ? { r: +m[2] - 1, c: colIdx(m[1]) } : null; }
+  /* 共有数式：Excel は、下や右へコピーした数式を、先頭のセルにだけ本文を書き、残りのセルは <f t="shared" si="番号"/>（本文なし）で保存する。
+     先頭のセルの数式の相対参照を、セルの位置の差（dr 行・dc 列）だけずらして、そのセルの数式を作り直す（Excel の数式バーに出るものと同じ）。
+     $ の付いた行・列、文字列（"…"）、シート名（'…'）、構造化参照（[…]）、関数名・名前はそのままにする */
+  const MAX_COL = 16384, MAX_ROW = 1048576, REF_END = '(?![A-Za-z0-9_.(!])';
+  const RE_CELL = new RegExp('(\\$?)([A-Z]{1,3})(\\$?)([0-9]{1,7})' + REF_END, 'y');
+  const RE_COLS = new RegExp('(\\$?)([A-Z]{1,3}):(\\$?)([A-Z]{1,3})' + REF_END, 'y');
+  const RE_ROWS = new RegExp('(\\$?)([0-9]{1,7}):(\\$?)([0-9]{1,7})' + REF_END, 'y');
+  function shiftFormula(f, dr, dc) {
+    if (!dr && !dc) return f;
+    const wrap = (v, max) => ((v % max) + max) % max; // 端を越えたら反対側へ回る（Excel と同じ）
+    const okCol = name => colIdx(name) < MAX_COL, okRow = n => +n >= 1 && +n <= MAX_ROW;
+    const col = (abs, name) => abs + (abs ? name : colName(wrap(colIdx(name) + dc, MAX_COL)));
+    const row = (abs, n) => abs + (abs ? n : String(wrap(+n - 1 + dr, MAX_ROW) + 1));
+    const n = f.length; let out = '', i = 0;
+    const quoted = q => { // 引用符で囲まれた部分（中の引用符は2つ重ねて書かれる）
+      let j = i + 1;
+      while (j < n) { if (f[j] === q) { if (f[j + 1] === q) { j += 2; continue; } break; } j++; }
+      out += f.slice(i, j + 1); i = j + 1;
+    };
+    while (i < n) {
+      const ch = f[i];
+      if (ch === '"' || ch === "'") { quoted(ch); continue; }
+      if (ch === '[') { let d = 0, j = i; do { if (f[j] === '[') d++; else if (f[j] === ']') d--; j++; } while (j < n && d > 0); out += f.slice(i, j); i = j; continue; }
+      // 参照は、名前や数の途中（英数字・_・.・$ の直後）からは始まらない
+      if (!(i && /[A-Za-z0-9_.$]/.test(f[i - 1]))) {
+        let m;
+        RE_CELL.lastIndex = RE_COLS.lastIndex = RE_ROWS.lastIndex = i;
+        if ((m = RE_CELL.exec(f)) && okCol(m[2]) && okRow(m[4])) { out += col(m[1], m[2]) + row(m[3], m[4]); i += m[0].length; continue; }
+        if ((m = RE_COLS.exec(f)) && okCol(m[2]) && okCol(m[4])) { out += col(m[1], m[2]) + ':' + col(m[3], m[4]); i += m[0].length; continue; }
+        if ((m = RE_ROWS.exec(f)) && okRow(m[2]) && okRow(m[4])) { out += row(m[1], m[2]) + ':' + row(m[3], m[4]); i += m[0].length; continue; }
+      }
+      out += ch; i++;
+    }
+    return out;
+  }
   async function xlsx(zip) {
     const ss = [];
     const ssx = await zip.text('xl/sharedStrings.xml');
@@ -147,21 +230,27 @@ const Office = (() => {
     if (stx) {
       const sd = parseXml(stx), custom = new Map();
       for (const nf of all(sd, 'numFmt')) custom.set(+nf.getAttribute('numFmtId'), nf.getAttribute('formatCode') || '');
-      const isDateFmt = id => {
-        if ((id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58)) return true;
-        const code = custom.get(id); if (!code) return false;
+      // 日付・時刻の書式か。'd'＝日付（日付と時刻の両方を含む）、't'＝時刻だけ、''＝日付ではない
+      const TIME_IDS = new Set([18, 19, 20, 21, 32, 33, 45, 46, 47]);
+      const dateFmt = id => {
+        if ((id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58)) return TIME_IDS.has(id) ? 't' : 'd';
+        const code = custom.get(id); if (!code) return '';
         const c = code.replace(/"[^"]*"|\[[^\]]*\]|\\./g, '');
-        return /[ymdhs]/i.test(c) && !/^[#0.,%E+\-\s]*$/i.test(c);
+        if (!(/[ymdhs]/i.test(c) && !/^[#0.,%E+\-\s]*$/i.test(c))) return '';
+        // 年・日・元号があれば日付。なければ、時・秒か、経過時間（[h] [mm] [ss]）があれば時刻だけ（m だけなら月）
+        return /[ydge]/i.test(c) ? 'd' : (/[hs]/i.test(c) || /\[(h+|m+|s+)\]/i.test(code)) ? 't' : 'd';
       };
       const xfs = all(sd, 'cellXfs')[0];
-      if (xfs) kids(xfs, 'xf').forEach((xf, i) => { dateStyle[i] = isDateFmt(+xf.getAttribute('numFmtId')); });
+      if (xfs) kids(xfs, 'xf').forEach((xf, i) => { dateStyle[i] = dateFmt(+xf.getAttribute('numFmtId')); });
     }
-    const serialToDate = v => {
+    const serialToDate = (v, kind) => {
       const n = parseFloat(v); if (!isFinite(n)) return v;
       const ms = Math.round((n - 25569) * 86400000), d = new Date(ms), p = x => String(x).padStart(2, '0');
-      const date = `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}`;
+      const date = `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}`, time = `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+      // 時刻だけの書式で1日未満の値は、0（0:00）でも時刻として出す（日付にすると 1899/12/30 になってしまう）
+      if (kind === 't' && n >= 0 && n < 1) return time;
       const frac = n - Math.floor(n);
-      return frac > 1e-6 ? `${n >= 1 ? date + ' ' : ''}${p(d.getUTCHours())}:${p(d.getUTCMinutes())}` : date;
+      return frac > 1e-6 ? `${n >= 1 ? date + ' ' : ''}${time}` : date;
     };
     const wb = parseXml(await zip.text('xl/workbook.xml'));
     const rels = relsMap(await zip.text('xl/_rels/workbook.xml.rels'));
@@ -172,8 +261,17 @@ const Office = (() => {
       const target = rels.get(rid); if (!target) continue;
       const path = resolve('xl/workbook.xml', target);
       const sx = await zip.text(path); if (!sx) continue;
-      out.push(`===== シート: ${name} =====`);
+      // 非表示のシートも比較の対象にする。見えていないシートの内容だと分かるよう、見出しに書く
+      const hidden = /hidden/i.test(sh.getAttribute('state') || '');
+      out.push(`===== シート: ${name}${hidden ? '（非表示）' : ''} =====`);
       const doc = parseXml(sx);
+      // 共有数式の先頭のセル（本文のあるもの）を先に集める
+      const shared = new Map();
+      for (const f of all(doc, 'f')) {
+        if (f.getAttribute('t') !== 'shared' || !f.textContent) continue;
+        const pos = cellPos(f.parentNode.getAttribute('r'));
+        if (pos) shared.set(f.getAttribute('si'), { text: f.textContent, r: pos.r, c: pos.c });
+      }
       for (const row of all(doc, 'row')) {
         const cells = [];
         for (const c of kids(row, 'c')) {
@@ -184,10 +282,16 @@ const Office = (() => {
           else if (t === 'inlineStr') val = all(c, 't').map(x => x.textContent).join('');
           else if (t === 'b') val = v ? (v.textContent === '1' ? 'TRUE' : 'FALSE') : '';
           else if (t === 'str' || t === 'e') val = v ? v.textContent : '';
-          else val = v ? (dateStyle[+(c.getAttribute('s') || 0)] ? serialToDate(v.textContent) : v.textContent) : '';
+          else { const dk = dateStyle[+(c.getAttribute('s') || 0)]; val = v ? (dk ? serialToDate(v.textContent, dk) : v.textContent) : ''; }
           // 数式は「値 ‹=数式›」の形で比較対象に含める（数式だけの変更も見落とさないように）
           const f = kids(c, 'f')[0];
-          if (f && f.textContent) val = (val === '' ? '' : val + ' ') + '‹=' + f.textContent + '›';
+          let ftext = f ? f.textContent : '';
+          if (f && !ftext && f.getAttribute('t') === 'shared') {
+            // 共有数式の2つ目以降のセル：先頭のセルの数式を、位置の差だけずらして作る
+            const mst = shared.get(f.getAttribute('si')), pos = cellPos(r);
+            if (mst && pos) ftext = shiftFormula(mst.text, pos.r - mst.r, pos.c - mst.c);
+          }
+          if (ftext) val = (val === '' ? '' : val + ' ') + '‹=' + ftext + '›';
           while (cells.length < ci) cells.push('');
           cells[ci] = val.replace(/\r?\n/g, '↵');
         }
@@ -231,9 +335,10 @@ const Office = (() => {
     return out.join('\n');
   }
 
-  async function extract(kind, bytes) {
+  // info を渡すと、読み込んだ文書について知らせること（Word の変更履歴の数 info.tracked）を入れて返す
+  async function extract(kind, bytes, info) {
     const zip = Zip.open(bytes);
-    if (kind === 'docx') return docx(zip);
+    if (kind === 'docx') return docx(zip, info);
     if (kind === 'xlsx') return xlsx(zip);
     if (kind === 'pptx') return pptx(zip);
     throw new Error('unknown office kind');
@@ -251,5 +356,5 @@ const Office = (() => {
     } catch (e) { }
     return null;
   }
-  return { extract, kindOf };
+  return { extract, kindOf, shiftFormula };
 })();

@@ -243,12 +243,12 @@
       <label title="オフにするとサイズだけで判定（高速）"><input type="checkbox" id="fdContent" checked>内容まで比較</label>
       <button id="fdRun" class="primary"><i data-i="play"></i>比較</button>
       <div class="grow"></div>
-      <span class="muted">行をダブルクリックで中身を比較</span>
+      <span class="muted">行をダブルクリック（↑↓ で選んで Enter）で中身を比較</span>
       <div class="sep"></div>
       <button id="fdCsv" title="一覧をCSVファイルに出力（Excelで開けます）"><i data-i="sheet"></i>CSV</button>
       <button id="fdReport" title="一覧をHTMLレポートに出力"><i data-i="clipboard-list"></i>レポート</button>
     </div>
-    <div class="fd-table-wrap"><table class="fd-table" id="fdTable">
+    <div class="fd-table-wrap" tabindex="0" aria-label="フォルダ比較の一覧（↑↓ で行を選び、Enter で中身を比較）"><table class="fd-table" id="fdTable">
       <thead><tr><th data-k="path">ファイル</th><th data-k="st">状態</th><th data-k="ls" class="num">左サイズ</th><th data-k="rs" class="num">右サイズ</th><th data-k="lm">左 更新日時</th><th data-k="rm">右 更新日時</th></tr></thead>
       <tbody></tbody>
     </table></div>

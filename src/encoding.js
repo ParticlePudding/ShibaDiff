@@ -106,11 +106,20 @@ const Enc = (() => {
     const t = table(enc), out = []; let unmapped = 0;
     if (enc === 'iso-2022-jp') {
       let mode = 0; // 0 ascii, 1 jis0208
-      for (const ch of str) {
-        const cp = ch.codePointAt(0);
+      const cps = Array.from(str);
+      for (let i = 0; i < cps.length; i++) {
+        const ch = cps[i], cp = ch.codePointAt(0);
         if (cp < 0x80) { if (mode) { out.push(0x1B, 0x28, 0x42); mode = 0; } out.push(cp); continue; }
-        let v = t.get(cp);
-        if (v === undefined && cp >= 0xFF61 && cp <= 0xFF9F) v = t.get(ch.normalize('NFKC').codePointAt(0));
+        let v;
+        if (cp >= 0xFF61 && cp <= 0xFF9F) {
+          // 半角カナは全角にして出す。濁点・半濁点が続くときは、合わせて1文字にする（ｶﾞ → ガ、ﾊﾟ → パ）。
+          // 1文字にならない組（ｱﾞ など）と、単独の濁点・半濁点は、全角の「゛」「゜」にする
+          const nx = cps[i + 1], pair = nx === '\uFF9E' || nx === '\uFF9F' ? (ch + nx).normalize('NFKC') : '';
+          let z;
+          if (pair && Array.from(pair).length === 1) { z = pair; i++; }
+          else z = cp === 0xFF9E ? '\u309B' : cp === 0xFF9F ? '\u309C' : ch.normalize('NFKC');
+          v = t.get(z.codePointAt(0));
+        } else v = t.get(cp);
         if (v === undefined || v < 0x100 || (v >> 8) === 0x8E) { // unmappable or halfwidth kana
           unmapped++; if (mode) { out.push(0x1B, 0x28, 0x42); mode = 0; } out.push(0x3F); continue;
         }

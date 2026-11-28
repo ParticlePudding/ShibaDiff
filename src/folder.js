@@ -82,7 +82,7 @@ const FD = (() => {
     tb.innerHTML = rows.map(({ r, i }) => {
       const s = ST[r.st];
       const newer = r.a && r.b && r.st === 'diff' ? (r.a.lastModified > r.b.lastModified ? 0 : r.a.lastModified < r.b.lastModified ? 1 : -1) : -1;
-      return `<tr data-i="${i}" class="${i === st.sel ? 'sel' : ''}"><td class="path">${esc(r.path)}</td><td><span class="st ${s[1]}">${s[0]}</span></td>` +
+      return `<tr data-i="${i}" class="${i === st.sel ? 'sel' : ''}" aria-selected="${i === st.sel}"><td class="path">${esc(r.path)}</td><td><span class="st ${s[1]}">${s[0]}</span></td>` +
         `<td class="num">${r.a ? fmtSize(r.a.size) : ''}</td><td class="num">${r.b ? fmtSize(r.b.size) : ''}</td>` +
         `<td${newer === 0 ? ' style="font-weight:700"' : ''}>${r.a ? fmtDate(r.a.lastModified) : ''}</td><td${newer === 1 ? ' style="font-weight:700"' : ''}>${r.b ? fmtDate(r.b.lastModified) : ''}</td></tr>`;
     }).join('');
@@ -150,14 +150,25 @@ const FD = (() => {
   $('#fdContent').onchange = () => { if (st.files[0] && st.files[1]) run(); };
   $$('.fdFilter').forEach(c => c.onchange = render);
   $$('#fdTable th').forEach(th => th.onclick = () => { const k = th.dataset.k; st.sort = { k, d: st.sort.k === k ? -st.sort.d : 1 }; render(); });
-  // クリックでは表を描き直さない（描き直すとダブルクリックが成立しなくなるため）
-  $('#fdTable tbody').addEventListener('click', e => {
-    const tr = e.target.closest('tr'); if (!tr) return;
+  // 行を選ぶ。表は描き直さない（描き直すとダブルクリックが成立しなくなるため）
+  function selectRow(tr, scroll) {
     st.sel = +tr.dataset.i;
-    $$('#fdTable tbody tr').forEach(x => x.classList.toggle('sel', x === tr));
-  });
+    $$('#fdTable tbody tr').forEach(x => { x.classList.toggle('sel', x === tr); x.setAttribute('aria-selected', x === tr); });
+    if (scroll) tr.scrollIntoView({ block: 'nearest' });
+  }
+  $('#fdTable tbody').addEventListener('click', e => { const tr = e.target.closest('tr'); if (tr) selectRow(tr, false); });
+  // キーボード：↑↓（Home・End）で、表示している順に行を選ぶ。Enter で中身を比較する
   document.addEventListener('keydown', e => {
-    if (App.mode !== 'folder' || e.key !== 'Enter' || st.sel < 0 || e.target.matches('input,select,textarea,button')) return;
+    if (App.mode !== 'folder' || $('#modal').classList.contains('on') || e.target.matches('input,select,textarea')) return;
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const trs = $$('#fdTable tbody tr'); if (!trs.length) return;
+      const cur = trs.findIndex(x => +x.dataset.i === st.sel), down = e.key === 'ArrowDown';
+      const k = e.key === 'Home' ? 0 : e.key === 'End' ? trs.length - 1 : cur < 0 ? (down ? 0 : trs.length - 1) : Math.max(0, Math.min(trs.length - 1, cur + (down ? 1 : -1)));
+      // 矢印で行を選んだら、フォーカスも一覧に移す（ボタンにフォーカスが残っていると、Enter がそのボタンを押してしまう）
+      const wrap = $('.fd-table-wrap'); if (document.activeElement !== wrap) wrap.focus({ preventScroll: true });
+      e.preventDefault(); selectRow(trs[k], true); return;
+    }
+    if (e.key !== 'Enter' || st.sel < 0 || e.target.matches('button')) return;
     e.preventDefault(); openRow(st.sel);
   });
   $('#fdTable tbody').addEventListener('dblclick', e => { const tr = e.target.closest('tr'); if (tr) openRow(+tr.dataset.i); });

@@ -37,22 +37,47 @@ async function withBusy(msg, fn) {
 }
 
 /* modal: クリックしたボタンの value で解決する Promise を返す。
-   キーボード操作に配慮：開いたらダイアログ内へフォーカスを移し、Tab はダイアログ内だけを巡回、閉じたら元の位置に戻す */
+   キーボード操作に配慮：開いたらダイアログ内へフォーカスを移し、Tab はダイアログ内だけを巡回、閉じたら元の位置に戻す。
+   ダイアログの要素（#modal）は1つを使い回す。開いている間に別のダイアログが開かれたら（設定の中の確認、
+   ヘルプを開いたままファイルをドロップしたときのパスワード入力など）、下のダイアログの中身を、入力中の値や
+   イベントごと退避して上に重ね、上を閉じたら元に戻す（下のダイアログの Promise とキー操作を置き去りにしない） */
+const modalStack = [];
 function modal({ title, html, buttons = [{ label: '閉じる', value: null }], onOpen, wide }) {
   return new Promise(resolve => {
-    const m = $('#modal'), dlg = $('.dlg', m), h3 = $('h3', m);
+    const m = $('#modal'), dlg = $('.dlg', m), h3 = $('h3', m), bodyEl = $('.body', m), foot = $('.foot', m);
     const prevFocus = document.activeElement;
-    dlg.style.width = wide ? 'min(1100px,96vw)' : '';
+    const under = modalStack[modalStack.length - 1];
+    if (under) under.suspend();
+    const head = () => { dlg.style.width = wide ? 'min(1100px,96vw)' : ''; h3.textContent = title; };
     dlg.setAttribute('role', 'dialog'); dlg.setAttribute('aria-modal', 'true');
     h3.id = 'dlgTitle'; dlg.setAttribute('aria-labelledby', 'dlgTitle');
-    h3.textContent = title;
-    $('.body', m).innerHTML = html;
-    const foot = $('.foot', m); foot.innerHTML = '';
-    let closed = false;
+    head();
+    bodyEl.innerHTML = html;
+    foot.innerHTML = '';
+    let closed = false, saved = null;
+    const me = {
+      // 上に別のダイアログが重なる間：中身の要素をそのまま持っておく（作り直さないので、入力中の値もイベントも残る）
+      suspend() {
+        saved = { body: Array.from(bodyEl.childNodes), foot: Array.from(foot.childNodes), top: bodyEl.scrollTop, focus: dlg.contains(document.activeElement) ? document.activeElement : null };
+        document.removeEventListener('keydown', onKey, true);
+      },
+      resume() {
+        head(); bodyEl.replaceChildren(...saved.body); foot.replaceChildren(...saved.foot); bodyEl.scrollTop = saved.top;
+        document.addEventListener('keydown', onKey, true);
+        const f = saved.focus || $('button.primary', foot) || focusables()[0]; saved = null;
+        if (f && f.focus) f.focus();
+      }
+    };
     const close = v => {
       if (closed) return; closed = true;
-      m.classList.remove('on'); document.removeEventListener('keydown', onKey, true);
-      if (prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus();
+      document.removeEventListener('keydown', onKey, true);
+      const i = modalStack.indexOf(me), top = i === modalStack.length - 1;
+      if (i >= 0) modalStack.splice(i, 1);
+      if (top) {
+        const below = modalStack[modalStack.length - 1];
+        if (below) below.resume();
+        else { m.classList.remove('on'); if (prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus(); }
+      }
       resolve(v);
     };
     for (const b of buttons) {
@@ -72,21 +97,29 @@ function modal({ title, html, buttons = [{ label: '閉じる', value: null }], o
       }
     };
     document.addEventListener('keydown', onKey, true);
+    modalStack.push(me);
     m.classList.add('on');
     if (onOpen) onOpen(m, close);
     if (!dlg.contains(document.activeElement)) {
-      const first = $('textarea,input:not([type=checkbox]),select', $('.body', m)) || $('button.primary', foot) || focusables()[0];
+      const first = $('textarea,input:not([type=checkbox]),select', bodyEl) || $('button.primary', foot) || focusables()[0];
       if (first) first.focus();
     }
   });
 }
-async function askText(title, value = '', { small = true, label = '' } = {}) {
+/* パスワードの入力：伏せ字の1行の入力欄。Enter で確定する。入力した値は返すだけで、どこにも保存しない */
+function askPassword(title, label = 'パスワード') {
   return modal({
     title,
-    html: (label ? `<div style="margin-bottom:6px">${label}</div>` : '') + `<textarea class="${small ? 'small' : ''}" id="askTa"></textarea>`,
-    buttons: [{ label: 'キャンセル', value: null }, { label: 'OK', primary: true, value: m => $('#askTa', m).value }],
-    onOpen: m => { const ta = $('#askTa', m); ta.value = value; ta.focus(); ta.select(); }
-  });
+    html: `<label class="pw-row"><span>${esc(label)}</span><input type="password" id="askPw" autocomplete="off" autocapitalize="off" spellcheck="false"></label>` +
+      `<label class="pw-show"><input type="checkbox" id="askPwShow">入力した文字を表示する</label>`,
+    buttons: [{ label: 'キャンセル', value: null }, { label: 'OK', primary: true, value: m => $('#askPw', m).value }],
+    onOpen: m => {
+      const inp = $('#askPw', m);
+      $('#askPwShow', m).onchange = e => { inp.type = e.target.checked ? 'text' : 'password'; };
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('.foot button.primary', m).click(); } });
+      inp.focus();
+    }
+  }).then(v => { const el = $('#askPw'); if (el) el.value = ''; return v; }); // 閉じたあとの画面の中に、入力した値を残さない
 }
 
 function download(name, data, type = 'application/octet-stream') {
@@ -122,3 +155,13 @@ function baseName(name) { return (name || '').replace(/\.[^.\\/]+$/, ''); }
 /* ツールバーのポップアップ（details.pop）は、外側をクリックするか Esc で閉じる */
 document.addEventListener('click', e => { document.querySelectorAll('details.pop[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('details.pop[open]').forEach(d => { d.open = false; d.querySelector('summary').focus(); }); });
+// 狭い画面ではツールバーが横スクロールになり、その中に置いたポップアップは切り取られて見えない。
+// そのときは画面に固定して（CSS で position:fixed）、開いたときに見出しのすぐ下・画面の中に収まる位置へ置く
+document.addEventListener('toggle', e => {
+  const d = e.target; if (!d.matches || !d.matches('details.pop') || !d.open) return;
+  const body = d.querySelector('.pop-body'), r = d.querySelector('summary').getBoundingClientRect();
+  if (getComputedStyle(body).position !== 'fixed') { body.style.left = body.style.top = ''; return; }
+  body.style.top = (r.bottom + 4) + 'px';
+  body.style.left = Math.max(6, Math.min(r.left, window.innerWidth - body.offsetWidth - 6)) + 'px';
+}, true);
+window.addEventListener('resize', () => document.querySelectorAll('details.pop[open]').forEach(d => { d.open = false; }));

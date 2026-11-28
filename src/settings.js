@@ -51,10 +51,18 @@ ${txt('author', 'コメントの記入者名', '例：山田（空欄なら記�
           el.addEventListener(el.type === 'text' ? 'input' : 'change', async () => {
             const v = el.type === 'checkbox' ? el.checked : el.value;
             if (k === 'persist' && !v) {
-              const n = annKeys().length;
-              if (n) {
-                const del = confirm(`このブラウザに保存されている注釈（${n} 件の文書分）も削除しますか？\n［OK］削除する　［キャンセル］残す`);
-                if (del) annKeys().forEach(key => localStorage.removeItem(key));
+              // 自動保存をやめるとき：それまでに保存した注釈・変更点のコメント・ページの回転を、残すか削除するかを確かめる
+              // （共用のPCに付箋やコメントの文字を残さないため。どれか1種類でも残っていれば聞く）
+              const ks = savedDataKeys();
+              if (ks.length) {
+                const cnt = kind => ks.filter(x => x.startsWith(`doccmp:${kind}:`)).length;
+                const parts = [['ann', '注釈'], ['notes', '変更点のコメント'], ['rot', 'ページの回転']].map(([kind, t]) => [cnt(kind), t]).filter(x => x[0]).map(([n, t]) => `${t} ${n} 件`).join('・');
+                const del = await modal({
+                  title: '保存済みのデータ',
+                  html: `このブラウザには、これまでに自動で保存したデータが残っています（${parts}）。<br>これらも削除しますか？<br><span class="muted">残した場合も、「保存されているデータを確認・削除…」からあとで削除できます。開いている文書の注釈とコメントは、閉じるまで画面に残ります。</span>`,
+                  buttons: [{ label: '削除する', value: true }, { label: '残す', primary: true, value: false }]
+                });
+                if (del) savedDataKeys().forEach(key => { try { localStorage.removeItem(key); } catch (e) { } });
               }
             }
             set(k, v);
@@ -68,7 +76,8 @@ ${txt('author', 'コメントの記入者名', '例：山田（空欄なら記�
   }
 
   function allKeys() { const r = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('doccmp:')) r.push(k); } } catch (e) { } return r.sort(); }
-  const annKeys = () => allKeys().filter(k => k.startsWith('doccmp:ann:') || k.startsWith('doccmp:rot:'));
+  // 自動保存（persist）で残るデータ：注釈・変更点のコメント・ページの回転
+  const savedDataKeys = () => allKeys().filter(k => /^doccmp:(ann|notes|rot):/.test(k));
   function describe(k) {
     const raw = (() => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } })();
     if (k.startsWith('doccmp:ann:')) {
@@ -120,7 +129,13 @@ ${txt('author', 'コメントの記入者名', '例：山田（空欄なら記�
         const btns = $$('.foot button', m);
         const keep = (b, fn) => { const nb = b.cloneNode(true); b.replaceWith(nb); nb.onclick = fn; };
         keep(btns[0], () => { const ks = $$('[data-key]:checked', m).map(c => c.dataset.key); if (!ks.length) return toast('削除するものを選んでください'); ks.forEach(k => localStorage.removeItem(k)); toast(`${ks.length} 件を削除しました`); draw(); });
-        keep(btns[1], () => { if (!confirm('このツールの保存データをすべて削除しますか？（設定も初期状態に戻ります）')) return; allKeys().forEach(k => localStorage.removeItem(k)); resetAll(); toast('すべて削除しました'); draw(); });
+        keep(btns[1], async () => {
+          if (!allKeys().length) return toast('保存されているデータはありません');
+          // 確認はこのダイアログの上に重ねて出し、閉じたら一覧に戻る
+          const ok = await modal({ title: 'すべて削除', html: 'このツールがブラウザに保存しているデータをすべて削除しますか？<br>設定も初期状態に戻ります。', buttons: [{ label: 'キャンセル', value: false }, { label: 'すべて削除する', primary: true, value: true }] });
+          if (!ok) return;
+          allKeys().forEach(k => localStorage.removeItem(k)); resetAll(); toast('すべて削除しました'); draw();
+        });
       }
     });
   }
