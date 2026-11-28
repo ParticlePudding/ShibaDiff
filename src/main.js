@@ -68,6 +68,11 @@ const App = (() => {
     else if (/^(zip|7z|lzh|rar|tar|gz|tgz|bz2|xz|cab)$/.test(ext)) toast(`「${s.name}」は圧縮ファイル（.${ext}）です。中身は比べられません。展開してから、中のファイルやフォルダを渡してください（いまは、バイナリとして表示しています）`, true, 9000);
     else if (/^(xdw|xbd)$/.test(ext)) toast('DocuWorks文書(.xdw)は直接読めないため、バイナリとして比較します。DocuWorksでPDFに変換してから読み込んでください', true);
     else if (sn === 'ole' && /^(doc|xls|ppt)$/.test(ext)) toast(`旧形式の .${ext} はテキストを取り出せないため、バイナリとして比較します。.${ext}x 形式で保存し直すと中身を比較できます`, true);
+    // OLE なのに .docx・.xlsx・.pptx：Office がパスワードで保護した文書は、中身を暗号化して OLE の入れ物に入れる
+    else if (sn === 'ole' && /^(docx|xlsx|pptx|docm|xlsm|pptm)$/.test(ext)) toast(`「${s.name}」はパスワードで保護されている可能性があります（中身が暗号化されていて読めません）。Office で開いてパスワードを外し、保存し直してから読み込んでください（いまは、バイナリとして表示しています）`, true);
+    else if (ext === 'jtd' || ext === 'jtdc') toast('一太郎文書(.jtd)は直接読めないため、バイナリとして比較します。一太郎でPDFまたはWord形式に変換してから読み込んでください', true);
+    else if (sn === 'ole') toast(`「${s.name}」は古い Office 形式の入れ物（OLE）です。テキストを取り出せないため、バイナリとして比較します`, true);
+    else if (!b.length) toast(`「${s.name}」は空のファイル（0バイト）です。中身がないため、反対側の全体が「右のみ（または左のみ）」として出ます`, true);
     s.kind = 'text';
     s.enc = Enc.detect(b);
     s.asciiOnly = s.enc === 'utf-8' && b.every(x => x < 0x80);
@@ -579,13 +584,16 @@ const App = (() => {
   window.addEventListener('dragover', e => { e.preventDefault(); if (isFileDrag(e)) hotZone(e); });
   window.addEventListener('drop', async e => {
     e.preventDefault(); dragDepth = 0; dov.classList.remove('on');
+    // 確認のダイアログが開いている間は受け付けない。裏でファイルが差し替わると、
+    // 「キャンセル」を押しても戻らず、確認の意味がなくなるため
+    if ($('#modal').classList.contains('on')) return toast('いま出ている確認に答えてから、ファイルを置いてください');
     const dt = e.dataTransfer; if (!dt) return;
     const side = e.clientX < window.innerWidth / 2 ? 0 : 1;
     const ents = Array.from(dt.items || []).map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
     if (ents.length && ents.every(en => en.isDirectory)) { setMode('folder'); return FD.dropFolders(dt, side); }
     const fs = Array.from(dt.files).filter((f, i) => !ents[i] || ents[i].isFile);
     if (!fs.length) return;
-    if (fs.length >= 2) return loadPair([fs[0], fs[1]]);
+    if (fs.length >= 2) { if (fs.length > 2) toast(`${fs.length} 個のうち、左右に ${fs[0].name} と ${fs[1].name} を読み込みました（比べられるのは2つまでです）`, false, 7000); return loadPair([fs[0], fs[1]]); }
     if (app.mode === 'folder') { setMode('file'); }
     loadFile(side, fs[0]);
   });
