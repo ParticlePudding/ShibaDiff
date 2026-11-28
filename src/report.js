@@ -35,7 +35,7 @@ figure{margin:8px 0 18px;break-inside:avoid}figure img{max-width:100%;border:1px
 @media print{body{margin:8mm}thead{display:table-header-group}tr{break-inside:avoid}h2{break-after:avoid}}`;
   // 完成した HTML（外部の読み込み・スクリプトを禁止する CSP 付き。画像は data URL で埋め込む）
   function page({ title, heading, meta = '', body, css = '' }) {
-    return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${esc(title)}</title><style>${BASE_CSS}${css}</style></head><body>
+    return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>${esc(title)}</title><style>${BASE_CSS}${css}</style></head><body>
 <h1>${esc(heading || title)}</h1>
 <div class="meta">作成日時: ${fmtDate(Date.now())}　作成: ShibaDiff ${esc(APP.version)}${meta ? '<br>' + meta : ''}</div>
 ${body}</body></html>`;
