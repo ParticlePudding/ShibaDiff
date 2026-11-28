@@ -342,9 +342,6 @@ def r06(d):
     POST.append(post)
     key(d, f'■ 領収書のスキャン（JPEG・200dpi・A5 横）「{s1n}」と「{s2n}」：同じ1枚の領収書を2回スキャンしたもの。中身の違いは**ない**（金額 ¥48,400、2026年11月18日、No. 0038127、有限会社みどり美装、赤い丸印）',
         '違うのは、傾き（+0.35° と −0.45°）、位置のずれ（右5・上7 画素と、左8・下6 画素）、ごみの点の位置、JPEG の圧縮のにじみだけ。位置を合わせれば「変更箇所なし」になるのが正しい。文字情報はない（画像）ので、テキスト比較の対象ではない')
-
-
-# <<<r07>>>
 # ==========================================================================================
 # R07 ゲーム会社 ローカライズ：文言 JSON（3,000行）、多言語 CSV（1,500行）、会話 YAML、XLIFF、スクリーンショット、配布フォルダ（各 約1,200 ファイル）
 # ==========================================================================================
@@ -838,10 +835,6 @@ def r07(d):
         '名前の大文字・小文字だけが違う 2 組（内容は同じ）：' + '、'.join(f'{a} ↔ {os.path.basename(b)}' for a, b in case) + '。別のファイルとして扱うと、左のみ・右のみが 2 つずつ増える（左のみ 12、右のみ 10）',
         '隠しファイル：.DS_Store が右（1.8.1）だけに 3 つ（' + '、'.join(ds) + '）。これを数えると右のみは 8＋2＋3＝13。Assets/Textures/UI/Thumbs.db と Assets/Data/Cache/.gitkeep（0 バイト）は左右にあって同じ',
         f'まとめ（隠しファイルも大文字小文字の違いも、そのまま数えた場合）：同一 {len(g_same):,}・相違 25・左のみ 12・右のみ 13')
-
-
-# <<<end r07>>>
-# <<<r08>>>
 # ==========================================================================================
 # R08 Web サービス会社 SRE：マニフェストのフォルダ（約90ファイル・4階層）、tfstate（4万行）、nginx のログ（3万行×2）、kubectl diff の出力、
 #     CRLF と LF が混ざったシェルスクリプト、証明書（PEM）、crontab、Dockerfile
@@ -1188,10 +1181,6 @@ def r08(d):
         f'tls-secret.yaml（{len(s0_) - 1}行）：10行目 tls.crt の値（base64 を1行に詰めたもの。{len(s0_[9]):,} 文字）だけが違う。11行目 ca.crt（{len(s0_[10]):,} 文字）は同じ。1行が長いときの見え方を確かめる',
         'crontab：バックアップの時刻「10 3 * * *」→「30 2 * * *」、sync_images.sh の行が行頭に # を付けてコメントアウト、queue_monitor.sh の --crit 2000 → 3000、export_orders.sh の行（45 23 * * 1-5）を追加',
         'Dockerfile：ビルド用のイメージ node:20.18-bookworm-slim → node:22.11-bookworm-slim、LABEL の version 11.4.0 → 11.5.2、ENV NGINX_ENTRYPOINT_QUIET_LOGS=1 の行を追加、USER nginx → USER 101')
-
-
-# <<<end r08>>>
-# <<<r09>>>
 # ==========================================================================================
 # R09 電機メーカー 組込みソフト：C ソース（EUC-JP・タブ・LF）、Makefile、マップファイル、ファーム（bin・Intel HEX・S レコード）、
 #     レジスタ仕様書（Excel と PDF）、変更履歴（Shift_JIS・CRLF）
@@ -1364,7 +1353,7 @@ def r09(d):
     mk0 = [i + 1 for i in range(len(K0)) if K0[i] != K1[i]]; assert len(mk0) == 2 and len(K0) == len(K1)
     key(d, f'■ ソース「{A}/」→「{B}/」。src/main.c・src/drv_uart.c・src/config.h・Makefile は **EUC-JP**・LF・字下げはタブ（半角カナのコメントあり）。行番号はファイルの先頭を1行目とした番号',
         f'src/main.c（{len(M0)}行 → {len(M1)}行）',
-        f'　【関数の移動】update_status_led()（前のコメントと後ろの空行を含む {mv_len} 行）が、旧 {mv0}〜{mv0 + mv_len - 1}行目（reply() の前）から、新 {mv1}〜{mv1 + mv_len - 1}行目（SysTick_Handler の前）へ移った。中身は1文字も変わっていない',
+        f'　【関数の移動】update_status_led()（前のコメントと後ろの空行を含む {mv_len} 行）が、旧 {mv0}〜{mv0 + mv_len - 1}行目（reply() の前）から、新 {mv1}〜{mv1 + mv_len - 1}行目（SysTick_Handler の前）へ移った。中身は1文字も変わっていない。ふつうの差分では「左のみ {mv_len} 行」と「右のみ {mv_len} 行」として出る（前後に同じ「}}」と空行があるので、右のみの範囲は2行ほど前にずれて示されることがある）',
         f'　【本当の変更 2】旧 {L(M0, chr(9) + "if (s_err_count > ERR_COUNT_LIMIT) {")}行目／新 {L(M1, chr(9) + "if (s_err_count >= ERR_COUNT_LIMIT) {")}行目：「s_err_count > ERR_COUNT_LIMIT」→「s_err_count >= ERR_COUNT_LIMIT」（> が >= に）。新 {L(M1, chr(9) + "uart_flush_tx(UART_CH_HOST);" + chr(9) + "/* 送り残しを出し切ってから止める */")}行目：st_sleep() の先頭に uart_flush_tx(UART_CH_HOST); の1行を追加',
         '　【行末の空白だけ 4】' + '、'.join(f'新 {L(M1, s + x)}行目「{s.strip()}」の後ろに' + {' ': '空白1つ', '\t': 'タブ1つ', '  ': '空白2つ'}[x] for s, x in tw) + '（見た目は同じ。空白の記号表示で分かること）',
         f'　【コメントだけ 2】新 {[i + 1 for i in range(len(M1)) if "Ver 2.3.1" in M1[i]][0]}行目に改訂履歴の行を追加（「改訂  2026/11/20  Ver 2.3.1 …」）。旧 {L(M0, c_old)}行目／新 {L(M1, c_new)}行目のコメントに「。温度は app_meas.c で見る」を追記',
@@ -1579,9 +1568,246 @@ def r09(d):
     key(d, f'■ 変更履歴「{A}/CHANGELOG.txt」（{len(cl) - 1}行）→「{B}/CHANGELOG.txt」（{len(cl1) - 1}行）。**Shift_JIS・CRLF**（ソースは EUC-JP・LF。同じフォルダに文字コードが混ざっている）。半角カナあり',
         f'4〜10行目に Ver 2.3.1 の節（{len(add)} 行）を追加。旧 7行目／新 14行目の文末に「（コマンド 0x24）」を追記。ほかは同じ',
         f'フォルダ「{A}/」と「{B}/」をフォルダ比較にかけると：src/ の4ファイルと Makefile・CHANGELOG.txt は左右にあり、すべて「相違」（drv_adc.c は改行だけの違い）。build/ の4ファイル（bin・hex・mot・map）は、名前に版が入っているので、左のみ4・右のみ4になる')
+# ==========================================================================================
+# R10 コンサルティング会社 データアナリスト：売上明細 CSV（12万行・全行が変わる）、集計表 Excel（値だけ 3,000行×20列）、
+#     分析ノート（.ipynb。画像の base64 が1行で数十万文字）、SQL（大文字と小文字）、グラフ画像（PNG・JPEG）、parquet
+# ==========================================================================================
+def r10(d):
+    rnd = random.Random(5010)
+    cities = ['札幌大通', '仙台一番町', '新潟万代', '宇都宮', '大宮', '千葉', '柏', '池袋', '新宿', '渋谷', '銀座', '上野', '吉祥寺', '立川', '町田', '横浜西口', '川崎', '藤沢', '静岡', '浜松', '名古屋栄', '名古屋駅前', '岐阜', '金沢', '京都四条', '梅田', '難波', '天王寺', '神戸三宮', '姫路', '岡山', '広島紙屋町', '高松', '松山', '小倉', '博多', '天神', '熊本', '鹿児島', '那覇',
+              '長野', '高崎', '水戸', '船橋', '八王子', '堺', '西宮', '福山']
+    region = lambda i: ['北海道・東北', '北海道・東北', '北陸・甲信越', '関東', '関東', '関東', '関東', '東京', '東京', '東京', '東京', '東京', '東京', '東京', '東京', '関東', '関東', '関東', '東海', '東海', '東海', '東海', '東海', '北陸・甲信越', '近畿', '近畿', '近畿', '近畿', '近畿', '近畿', '中国・四国', '中国・四国', '中国・四国', '中国・四国', '九州・沖縄', '九州・沖縄', '九州・沖縄', '九州・沖縄', '九州・沖縄', '九州・沖縄',
+                        '北陸・甲信越', '関東', '関東', '関東', '東京', '近畿', '近畿', '中国・四国'][i]
+    stores = [(f'S{i + 1:03d}', f'{c}店') for i, c in enumerate(cities)]; assert len(stores) == 48
+    cats = [('KT', 'キッチン', ['フライパン 26cm', '片手鍋 18cm', '両手鍋 22cm', '包丁 三徳 165mm', 'まな板 抗菌 L', '保存容器 4個組', '計量カップ 500ml', 'ケトル 1.2L', '水切りラック', '弁当箱 2段']), ('LV', 'リビング', ['クッション 45×45', 'ブランケット 140×100', 'フロアランプ', '壁掛け時計 30cm', 'ラグ 130×190', '収納ボックス M', 'ゴミ箱 12L', 'スリッパ L', 'カーテン 100×178 2枚組', '座椅子']),
+            ('BD', '寝具', ['枕 低反発', '掛け布団 シングル', '敷きパッド シングル', '布団カバー 3点セット', 'タオルケット', '毛布 シングル', 'マットレス 三つ折り', '抱き枕']), ('BT', 'バス・トイレ', ['バスタオル 2枚組', 'フェイスタオル 5枚組', 'バスマット 珪藻土', 'シャワーヘッド 節水', '風呂ふた 70×110', 'トイレマット', '洗面器', 'ランドリーバスケット']),
+            ('ST', '文具', ['ノート B5 5冊', 'ボールペン 0.5 黒 10本', '付箋 5色', 'クリアファイル 20枚', '卓上カレンダー', 'マスキングテープ 3巻', 'はさみ', '電卓 12桁']), ('EL', '家電', ['電気ケトル 0.8L', 'ハンディ掃除機', '加湿器 4L', 'サーキュレーター', 'LED デスクライト', 'ヘアドライヤー', '電動歯ブラシ', 'モバイルバッテリー 10000mAh']),
+            ('GD', '園芸', ['プランター 65cm', '培養土 14L', 'じょうろ 4L', '剪定ばさみ', '園芸用手袋', '散水ホース 10m']), ('PT', 'ペット', ['ペットシーツ 100枚', '猫砂 7L', 'フードボウル', 'キャリーバッグ', '爪とぎ', 'おもちゃ 3点'])]
+    skus = []
+    for code, cname, items in cats:
+        for k, nm_ in enumerate(items):
+            for col in ('', '（グレー）', '（ベージュ）', '（ネイビー）', '（ホワイト）', '（ブラック）'): skus.append((f'{code}-{k + 1:02d}{len(skus) % 97:02d}{"ABCDEF"[["", "（グレー）", "（ベージュ）", "（ネイビー）", "（ホワイト）", "（ブラック）"].index(col)]}', nm_ + col, cname, {'KT': 600, 'LV': 900, 'BD': 1800, 'BT': 500, 'ST': 120, 'EL': 2400, 'GD': 300, 'PT': 400}[code] + random.Random(nm_).randrange(0, 40) * {'KT': 90, 'LV': 150, 'BD': 300, 'BT': 80, 'ST': 30, 'EL': 240, 'GD': 60, 'PT': 100}[code]))
+    NS = len(skus); assert NS == 384 and len(set(s[0] for s in skus)) == NS
+    # ---------------------------------------------------------------- 売上明細 CSV（12万行）
+    HD = ['伝票番号', '売上日', '店舗コード', '店舗名', 'SKU', '商品名', '数量', '単価', '金額', '備考']; NREC = 120000
+    notes = ['', '', '', '', '', '', '', '', '会員割引', 'セール品', 'まとめ買い割引', 'ギフト包装', '取り寄せ', '店舗受取', '配送（翌日）', '値札の貼り間違いのため手入力', 'クーポン "AUTUMN10" 利用', '返品交換（サイズ違い）', '法人売上、請求書払い']
+    rec = []; day0 = datetime.date(2026, 7, 1)
+    for i in range(NREC):
+        st = stores[rnd.randrange(48)]; sk = skus[rnd.randrange(NS)]; q = rnd.choice([1, 1, 1, 1, 2, 2, 3, 4, 5, 6, 10, 12]); pr = float(sk[3]) if rnd.random() < 0.8 else sk[3] * rnd.choice([0.9, 0.85, 0.7]) + 0.5; dt = day0 + datetime.timedelta(days=i * 92 // NREC)
+        amt = f'{q * pr * rnd.choice([1.0, 1.0, 1.0, 0.95, 0.9, 0.97]):.2f}'; ps = f'{pr:.1f}'; nt = rnd.choice(notes)
+        if i % 997 == 0: q = rnd.choice([100, 200, 500]); pv = rnd.choice([1200.0, 1500.0, 2400.0, 3600.0]); ps = f'{pv:.1f}'; amt = f'{q * pv:.1E}'; nt = '法人売上、請求書払い'      # 大口：金額が指数表記で出ている
+        elif i % 1009 == 3: ps = 'NaN'; amt = 'NaN'; nt = '単価マスタ未登録'
+        elif i % 1511 == 7: amt = 'NULL'
+        elif i % 2999 == 50: nt = f'お客様都合により返品\n（返品伝票 R-{100000 + i}）'
+        elif i % 613 == 11: nt = 'NULL'
+        rec.append([f'SO-2026{i + 1:07d}', dt.strftime('%Y-%m-%d'), st[0], st[1], sk[0], sk[1], str(q), ps, amt, nt])
+    new = [list(r) for r in rec]; LOG = {}     # LOG[分類] = [伝票番号…]
+    isnum = lambda r: r[8] not in ('NaN', 'NULL') and 'E' not in r[8] and '\n' not in r[9]
+    plain = [i for i in range(NREC) if isnum(rec[i])]; pick = random.Random(77).sample(plain, 250)
+    def lg(cat, i): LOG.setdefault(cat, []).append(rec[i][0])
+    for i in pick[:120]: new[i][8] = f'{float(rec[i][8]) + 0.01:.2f}'; lg('金額 +0.01', i)
+    for i in pick[120:180]: q = int(rec[i][6]) + 1; new[i][6] = str(q); new[i][8] = f'{float(rec[i][8]) / int(rec[i][6]) * q:.2f}'; lg('数量 +1（金額も変わる）', i)
+    for i in pick[180:220]: pv = float(rec[i][7]) + 20.0; new[i][7] = f'{pv:.1f}'; new[i][8] = f'{float(rec[i][8]) + 20.0 * int(rec[i][6]):.2f}'; lg('単価 +20.0（金額も変わる）', i)
+    for i in pick[220:240]: new[i][3] = rec[i][3][:-1] + '支店'; lg('店舗名「…店」→「…支店」', i)
+    for i in pick[240:247]: new[i][9] = (rec[i][9] + '／再計上').lstrip('／'); lg('備考に「再計上」を追記', i)
+    nl = [i for i in range(NREC) if '\n' in rec[i][9]][:3]
+    for i in nl: new[i][9] = rec[i][9].replace('\n', '\n※ 返金済み\n'); lg('備考（セル内改行あり）に1行追加', i)
+    nan = [i for i in range(NREC) if rec[i][8] == 'NaN'][:20]
+    for i in nan: sk = next(s for s in skus if s[0] == rec[i][4]); new[i][7] = f'{float(sk[3]):.1f}'; new[i][8] = f'{float(sk[3]) * int(rec[i][6]):.2f}'; new[i][9] = ''; lg('NaN → 数値（単価・金額が入り、備考が空に）', i)
+    nul = [i for i in range(NREC) if rec[i][8] == 'NULL'][:15]
+    for i in nul: new[i][8] = ''; lg('金額 NULL → 空', i)
+    ex = [i for i in range(NREC) if 'E' in rec[i][8]][:15]
+    for i in ex: new[i][8] = f'{float(rec[i][8]):.2f}'; lg('金額の指数表記 → ふつうの表記（値は同じ）', i)
+    for i in pick[247:250]: lg('（予備）', i)
+    del LOG['（予備）']; nchg = sum(len(v) for v in LOG.values()); assert nchg == 300
+    ch = ['店舗', '店舗', '店舗', 'EC', 'アプリ']
+    for i, r in enumerate(new): r.append(ch[(i * 7 + i // 13) % 5])
+    mk = lambda no, dt, k: [no, dt, stores[k % 48][0], stores[k % 48][1], skus[k * 7 % NS][0], skus[k * 7 % NS][1], str(1 + k % 3), f'{float(skus[k * 7 % NS][3]):.1f}', f'{skus[k * 7 % NS][3] * (1 + k % 3):.2f}', '計上漏れの追加', 'EC']
+    ins = []
+    for base in (40000, 80000):
+        blk = [mk(f'{rec[base - 1][0]}-{chr(65 + k)}', rec[base - 1][1], base + k) for k in range(10)]; ins.append((base, blk))
+    for base, blk in reversed(ins): new[base:base] = blk
+    tail = [mk(f'SO-2026{NREC + 1 + k:07d}', '2026-09-30', 500 + k) for k in range(30)]; new += tail
+    def tocsv(rows, hd):
+        b = io.StringIO(); w = csv.writer(b, lineterminator='\n'); w.writerow(hd); w.writerows(rows); return b.getvalue()
+    c0n = '売上明細_2026年7-9月_集計v1（11月14日出力）.csv'; c1n = '売上明細_2026年7-9月_集計v2（11月27日出力）.csv'
+    text(f'{d}/{c0n}', tocsv(rec, HD)); text(f'{d}/{c1n}', tocsv(new, HD + ['販売チャネル']))
+    def rdcsv(n):
+        raw = open(P(f'{d}/{n}'), 'rb').read(); assert b'\r' not in raw and not raw.startswith(b'\xef\xbb\xbf')
+        return list(csv.reader(io.StringIO(raw.decode('utf-8'), newline=''))), raw.count(b'\n'), len(raw)
+    R0, pl0, sz0 = rdcsv(c0n); R1, pl1, sz1 = rdcsv(c1n); D0 = {r[0]: r for r in R0[1:]}; D1 = {r[0]: r for r in R1[1:]}
+    assert len(R0) == NREC + 1 and len(R1) == NREC + 51 and len(D0) == NREC and all(len(r) == 10 for r in R0) and all(len(r) == 11 for r in R1)
+    dif = [k for k in D0 if D0[k] != D1[k][:10]]; added = [k for k in D1 if k not in D0]; assert len(dif) == 300 and set(dif) == {x for v in LOG.values() for x in v} and len(added) == 50 and not [k for k in D0 if k not in D1]
+    samel = len(set(open(P(f'{d}/{c0n}'), encoding='utf-8').read().split('\n')[:-1]) & set(open(P(f'{d}/{c1n}'), encoding='utf-8').read().split('\n')[:-1])); assert samel == 40
+    pos1 = {r[0]: i for i, r in enumerate(R1)}; cnt = lambda R, f: sum(1 for r in R[1:] if f(r))
+    key(d, f'■ 売上明細 CSV「{c0n}」（見出し＋{NREC:,} レコード・10列・{sz0 / 1e6:.1f} MB・ファイルの行数 {pl0:,}）→「{c1n}」（見出し＋{NREC + 50:,} レコード・11列・{sz1 / 1e6:.1f} MB・ファイルの行数 {pl1:,}）。UTF-8（BOM なし）・LF',
+        f'【列の追加】新は、末尾に列「販売チャネル」（店舗／EC／アプリ）が1つ増えた。このため、見出しを含む**全部のレコードが、末尾に「,店舗」などが付いた形で違う**（ファイルの行としては、備考の中に改行がある 40 レコードの1行目だけが、旧と新で同じ文字のまま残る。旧と新で文字まで同じ行は {samel} 行）。左の 10 列の中身は、下の 300 レコードを除いて同じ',
+        f'【値の違うレコード 300】（左の 10 列の中で違うもの。伝票番号で示す）' + '／'.join(f'{k} {len(v)} 件：{"、".join(v[:3])}' + (' ほか' if len(v) > 3 else '') for k, v in LOG.items()),
+        '上の 300 のうち、数値としては同じで書き方だけが違うのは「指数表記 → ふつうの表記」の 15 件（例：1.2E+05 → 120000.00）。「NULL → 空」の 15 件は、欠損の表し方の違い',
+        f'【レコードの追加 50】途中に 10 件ずつ2か所（{ins[0][1][0][0]}〜{ins[0][1][-1][0][-1]}＝新のデータ {pos1[ins[0][1][0][0]]:,}〜{pos1[ins[0][1][-1][0]]:,} 件目、{ins[1][1][0][0]}〜{ins[1][1][-1][0][-1]}＝新のデータ {pos1[ins[1][1][0][0]]:,}〜{pos1[ins[1][1][-1][0]]:,} 件目。備考は「計上漏れの追加」）と、末尾に 30 件（{tail[0][0]}〜{tail[-1][0]}）。削除はない',
+        f'【特別な値の数】金額が指数表記（1.2E+05 など）のレコード：旧 {cnt(R0, lambda r: "E" in r[8])}・新 {cnt(R1, lambda r: "E" in r[8])}。NaN（単価・金額）：旧 {cnt(R0, lambda r: r[8] == "NaN")}・新 {cnt(R1, lambda r: r[8] == "NaN")}。金額が NULL：旧 {cnt(R0, lambda r: r[8] == "NULL")}・新 {cnt(R1, lambda r: r[8] == "NULL")}。金額が空：旧 {cnt(R0, lambda r: r[8] == "")}・新 {cnt(R1, lambda r: r[8] == "")}。備考が文字の NULL：旧新とも {cnt(R0, lambda r: r[9] == "NULL")}',
+        f'引用符の中に改行がある備考（「お客様都合により返品⏎（返品伝票 R-…）」）：旧 {cnt(R0, lambda r: chr(10) in r[9])} レコード・新 {cnt(R1, lambda r: chr(10) in r[9])} レコード。このため、ファイルの行数はレコード数より多い。カンマ（「法人売上、請求書払い」は読点なので引用符なし）や引用符（クーポン "AUTUMN10" 利用）を含む備考もある',
+        '金額は小数2桁（例：1234.50）、単価は小数1桁。12万行の全行が違うときの、読み込み・比較の時間と、画面の反応を見る。「列が1つ増えた」ことが分かるか、300 件の本当の違いを取り出せるかが要点')
 
+    # ---------------------------------------------------------------- 集計表 Excel（値だけ。3,000行×20列＋ピボット風の表）
+    import openpyxl
+    COLS = ['店舗コード', '店舗名', '地域', 'SKU', '商品名', 'カテゴリ', '販売数量', '売上金額', '値引額', '純売上', '原価', '粗利', '粗利率', '客数', '客単価', '前年売上', '前年比', '構成比', '在庫回転率', '更新区分']; ra = random.Random(88); rows = []
+    for i in range(3000):
+        st = stores[i % 48]; sk = skus[(i // 48 * 5 + i % 48 * 11) % NS]; q = ra.randrange(20, 900); sales = q * sk[3]; disc = ra.randrange(0, sales // 12 + 1); net = sales - disc; cost = int(net * ra.uniform(0.48, 0.71)); gp = net - cost; cust = max(1, int(q / ra.uniform(1.1, 2.4))); prev = int(net * ra.uniform(0.7, 1.3))
+        rows.append([st[0], st[1], region(i % 48), sk[0], sk[1], sk[2], q, sales, disc, net, cost, gp, gp / net, cust, net / cust, prev, net / prev, net / 2.5e8, ra.uniform(1.5, 12.0), ra.choice(['', '', '', '確定', '速報'])])
+    nrow = [list(r) for r in rows]; XL = {'誤差': [], '値': []}
+    fl = random.Random(89).sample(range(3000), 70); fixed3 = [(0.3, 0.1 + 0.2), (0.8, 0.1 + 0.7), (0.0003, 0.0001 + 0.0002), (3.3, 1.1 + 2.2), (0.6, 0.1 * 6)]
+    for k, i in enumerate(fl[:30]):
+        j = [12, 16, 17, 18][k % 4]
+        if k < 5: rows[i][j], nrow[i][j] = fixed3[k]
+        else: nrow[i][j] = math.nextafter(rows[i][j], math.inf)
+        assert rows[i][j] != nrow[i][j] and abs(rows[i][j] - nrow[i][j]) < 1e-14; XL['誤差'].append((i, j))
+    for k, i in enumerate(fl[30:70]):
+        j = [6, 7, 10, 15][k % 4]; nrow[i][j] = rows[i][j] + [1, 1000, -500, 12000][k % 4]; XL['値'].append((i, j))
+    SW = (13, 14)     # 新は「客数」と「客単価」の列の順番が入れ替わっている
+    def piv(rs):
+        regs_ = ['北海道・東北', '関東', '東京', '北陸・甲信越', '東海', '近畿', '中国・四国', '九州・沖縄']; cs = [c[1] for c in cats]; m = {(a, b): 0 for a in regs_ for b in cs}
+        for r in rs: m[(r[2], r[5])] += r[7]
+        return [['地域＼カテゴリ'] + cs + ['合計']] + [[a] + [m[(a, b)] for b in cs] + [sum(m[(a, b)] for b in cs)] for a in regs_] + [['合計'] + [sum(m[(a, b)] for a in regs_) for b in cs] + [sum(m.values())]]
+    def wx(path, rs, swap):
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = '店舗×SKU集計'; order = list(range(20))
+        if swap: order[SW[0]], order[SW[1]] = order[SW[1]], order[SW[0]]
+        ws.append([COLS[j] for j in order])
+        for r in rs: ws.append([r[j] for j in order])
+        ws.freeze_panes = 'C2'; w2 = wb.create_sheet('地域×カテゴリ（売上金額）')
+        for r in piv(rs): w2.append(r)
+        wb.save(P(path))
+        # openpyxl は小数を 16 桁で書くので、末尾の誤差（17 桁目）が消える。Excel と同じように、必要な桁まで（repr）書き直す
+        fl_ = {f'{openpyxl.utils.get_column_letter(c + 1)}{i + 2}': repr(r[j]) for i, r in enumerate(rs) for c, j in enumerate(order) if isinstance(r[j], float)}
+        zin = zipfile.ZipFile(P(path)); items = [(it, zin.read(it.filename)) for it in zin.infolist()]; zin.close()
+        with zipfile.ZipFile(P(path), 'w', zipfile.ZIP_DEFLATED) as z:
+            for it, bts in items:
+                if it.filename == 'xl/worksheets/sheet1.xml':
+                    xs, n_ = re.subn(r'(<c r="([A-Z]+[0-9]+)"[^>]*><v>)[^<]*(</v>)', lambda m: m.group(1) + fl_[m.group(2)] + m.group(3) if m.group(2) in fl_ else m.group(0), bts.decode('utf-8')); bts = xs.encode('utf-8')
+                z.writestr(it.filename, bts)
+    x0n = '集計表_店舗×SKU_2026年7-9月_v1.xlsx'; x1n = '集計表_店舗×SKU_2026年7-9月_v2.xlsx'; wx(f'{d}/{x0n}', rows, False); wx(f'{d}/{x1n}', nrow, True)
+    def rx(n): wb = openpyxl.load_workbook(P(f'{d}/{n}'), read_only=True); return [list(r) for r in wb['店舗×SKU集計'].iter_rows(values_only=True)], [list(r) for r in wb['地域×カテゴリ（売上金額）'].iter_rows(values_only=True)]
+    (a1, a2), (b1, b2) = rx(x0n), rx(x1n); assert len(a1) == len(b1) == 3001 and len(a1[0]) == 20 and b1[0][13:15] == ['客単価', '客数'] and a1[0][13:15] == ['客数', '客単価']
+    un = lambda r: r[:13] + [r[14], r[13]] + r[15:]; cd = [(i, j) for i in range(1, 3001) for j in range(20) if a1[i][j] != un(b1[i])[j] and not (a1[i][j] in (None, '') and un(b1[i])[j] in (None, ''))]
+    tiny = [(i, j) for i, j in cd if isinstance(a1[i][j], float) and abs(a1[i][j] - un(b1[i])[j]) < 1e-14]; realc = [c for c in cd if c not in tiny]
+    assert sorted(tiny) == sorted((i + 1, j) for i, j in XL['誤差']) and sorted(realc) == sorted((i + 1, j) for i, j in XL['値']) and len(tiny) == 30 and len(realc) == 40
+    xml1 = zipfile.ZipFile(P(f'{d}/{x1n}')).read('xl/worksheets/sheet1.xml').decode(); xml0 = zipfile.ZipFile(P(f'{d}/{x0n}')).read('xl/worksheets/sheet1.xml').decode(); assert '<v>0.30000000000000004</v>' in xml1 and '<v>0.3</v>' in xml0 and '<v>0.30000000000000004</v>' not in xml0
+    pd_ = [(i, j) for i in range(len(a2)) for j in range(len(a2[0])) if a2[i][j] != b2[i][j]]; cl_ = lambda j: openpyxl.utils.get_column_letter(j + 1); adr0 = lambda i, j: f'{cl_(j)}{i + 1}'; adr1 = lambda i, j: f'{cl_({13: 14, 14: 13}.get(j, j))}{i + 1}'
+    fmt = lambda v: repr(v) if isinstance(v, float) else f'{v:,}'
+    key(d, f'■ 集計表 Excel「{x0n}」→「{x1n}」。値だけ（数式なし）。シート「店舗×SKU集計」は見出し＋3,000行×20列、シート「地域×カテゴリ（売上金額）」は 10行×10列のピボット風の表',
+        '【列の入れ替え】新は、N 列と O 列が入れ替わっている（旧：N＝客数・O＝客単価 → 新：N＝客単価・O＝客数）。値そのものは同じだが、同じ番地どうしで比べると N・O 列は見出しを含む 3,001 行すべてが違う。以下の番地は「旧の番地（新の番地）」',
+        '【末尾の誤差だけの違い 30 セル】（差が 1e-14 未満。計算の順番による浮動小数の誤差）先頭の5つは：' + '、'.join(f'{adr0(i + 1, j)} {COLS[j]} {fmt(rows[i][j])} → {fmt(nrow[i][j])}' for i, j in XL['誤差'][:5]) + '。残り 25 は、最後の桁が1つ違うだけ（例：' + '、'.join(f'{adr0(i + 1, j)} {fmt(rows[i][j])} → {fmt(nrow[i][j])}' for i, j in XL['誤差'][5:8]) + '）。'
+        '列は M（粗利率）・Q（前年比）・R（構成比）・S（在庫回転率）。全部の番地：' + '、'.join(adr0(i + 1, j) for i, j in sorted(XL['誤差'])),
+        '【本当に違う値 40 セル】G（販売数量）+1 が 10、H（売上金額）+1,000 が 10、K（原価）−500 が 10、P（前年売上）+12,000 が 10。番地と値：' + '、'.join(f'{adr0(i + 1, j)} {fmt(rows[i][j])}→{fmt(nrow[i][j])}' for i, j in sorted(XL['値'])),
+        f'【ピボット風のシート】売上金額の合計なので、H 列の 10 セルの変更が映る。違うセルは {len(pd_)} 個：' + '、'.join(f'{adr0(i, j)} {fmt(a2[i][j])}→{fmt(b2[i][j])}' for i, j in pd_),
+        'ファイルの中では、0.3 は <v>0.3</v>、0.1+0.2 は <v>0.30000000000000004</v> と、17 桁で入っている。Excel の画面ではどちらも 0.3 に見える')
 
-# <<<end r09>>>
+    # ---------------------------------------------------------------- グラフ画像（PNG 2枚と、1枚目を JPEG で保存し直したもの）
+    months = ['4月', '5月', '6月', '7月', '8月', '9月']; bars = [182, 204, 196, 238, 251, 227]
+    def chart(v):
+        W, H = 1600, 900; im = Image.new('RGB', (W, H), 'white'); dr = ImageDraw.Draw(im); x0, y0, x1, y1 = 150, 140, 1380, 760; col = (230, 120, 20) if v else (217, 48, 37); box = {}
+        dr.text((150, 40), '月別 売上金額と粗利率（全店・2026年度 上期）', fill=(30, 30, 30), font=font(38, True)); dr.text((150, 96), '単位：売上金額＝百万円（左の軸）、粗利率＝%（右の軸）', fill=(90, 90, 90), font=font(22))
+        ticks = [0, 50, 100, 150, 200, 250, 350 if v else 300]
+        for k, t in enumerate(ticks):
+            y = y1 - k * (y1 - y0) // 6; dr.line([x0, y, x1, y], fill=(220, 220, 220), width=1); s = str(t); w = dr.textlength(s, font=font(24)); dr.text((x0 - 14 - w, y - 16), s, fill=(40, 40, 40), font=font(24))
+            if k == 6: box['目盛り'] = [int(x0 - 16 - w), y - 18, x0 - 10, y + 18]
+            p = f'{20 + k * 4}'; dr.text((x1 + 14, y - 16), p, fill=(40, 40, 40), font=font(24))
+        dr.line([x0, y0, x0, y1, x1, y1, x1, y0], fill=(60, 60, 60), width=2); bw = 110; pts = []
+        rate = [29.4, 30.1, 30.8, 31.6, 32.3, 33.8 if v else 31.2]
+        for k, (m, b) in enumerate(zip(months, bars)):
+            cx = x0 + 110 + k * 200; top = y1 - int(b / 300 * (y1 - y0)); dr.rectangle([cx - bw // 2, top, cx + bw // 2, y1 - 1], fill=(66, 133, 244)); w = dr.textlength(str(b), font=font(22)); dr.text((cx - w / 2, top - 30), str(b), fill=(40, 40, 40), font=font(22))
+            w = dr.textlength(m, font=font(26)); dr.text((cx - w / 2, y1 + 14), m, fill=(40, 40, 40), font=font(26)); pts.append((cx, y1 - int((rate[k] - 20) / 24 * (y1 - y0))))
+        dr.line(pts, fill=col, width=5)
+        for x, y in pts: dr.ellipse([x - 9, y - 9, x + 9, y + 9], fill=col, outline='white', width=2)
+        lx, ly = 1030, 22; leg = '粗利率（%・値引後）' if v else '粗利率（%）'; dr.rectangle([lx, ly, lx + 350, ly + 100], fill='white', outline=(150, 150, 150)); dr.rectangle([lx + 18, ly + 18, lx + 58, ly + 42], fill=(66, 133, 244)); dr.text((lx + 72, ly + 14), '売上金額（百万円）', fill=(40, 40, 40), font=font(24))
+        dr.line([lx + 18, ly + 70, lx + 58, ly + 70], fill=col, width=5); dr.ellipse([lx + 30, ly + 62, lx + 46, ly + 78], fill=col); dr.text((lx + 72, ly + 54), leg, fill=(40, 40, 40), font=font(24)); box['凡例'] = [lx, ly, lx + 350, ly + 100]
+        dr.text((150, 842), '出典：売上明細（集計 v' + ('2' if v else '1') + '）　作成：データ分析チーム', fill=(110, 110, 110), font=font(20)); box['出典'] = [150, 838, 900, 876]; box['線'] = [pts[0][0] - 12, min(y for _, y in pts) - 12, pts[-1][0] + 12, max(y for _, y in pts) + 12]; box['pts'] = pts
+        return im, box
+    g0, bx0 = chart(0); g1, bx1 = chart(1); g0n = 'グラフ_月別売上と粗利率_v1.png'; g1n = 'グラフ_月別売上と粗利率_v2.png'; gjn = 'グラフ_月別売上と粗利率_v1_報告書貼付用.jpg'
+    g0.save(P(f'{d}/{g0n}')); g1.save(P(f'{d}/{g1n}')); g0.save(P(f'{d}/{gjn}'), quality=90)
+    df_ = ImageChops.difference(Image.open(P(f'{d}/{g0n}')), Image.open(P(f'{d}/{g1n}'))).convert('L').point(lambda x: 255 if x else 0); rest = df_.copy(); dr_ = ImageDraw.Draw(rest)
+    ln_box = [min(bx0['線'][0], bx1['線'][0]), min(bx0['線'][1], bx1['線'][1]), max(bx0['線'][2], bx1['線'][2]), max(bx0['線'][3], bx1['線'][3])]; regs_ = {'線': ln_box, '凡例': bx0['凡例'], '目盛り': bx0['目盛り'], '出典': bx0['出典']}; got = {}
+    for k, (a, b, c_, e) in regs_.items(): bb = df_.crop((a, b, c_ + 1, e + 1)).getbbox(); assert bb, k; got[k] = (a + bb[0], b + bb[1], a + bb[2] - 1, b + bb[3] - 1); dr_.rectangle([a, b, c_, e], fill=0)
+    assert rest.getbbox() is None and g0.size == g1.size == Image.open(P(f'{d}/{gjn}')).size
+    jd = ImageChops.difference(Image.open(P(f'{d}/{g0n}')), Image.open(P(f'{d}/{gjn}')).convert('RGB')); bs_ = jd.split(); hg = ImageChops.lighter(ImageChops.lighter(bs_[0], bs_[1]), bs_[2]).histogram(); jn = sum(hg[1:]); j32 = sum(hg[33:]); jmax = max(i for i in range(256) if hg[i])
+    key(d, f'■ グラフ画像「{g0n}」→「{g1n}」（どちらも 1600×900 の PNG。棒＝売上金額、折れ線＝粗利率）。違いは次のとおり（座標は左上が 0,0 の画素）',
+        f'① 1点の値：折れ線の最後の点（9月）が 31.2% → 33.8%（点の位置が y {bx0["pts"][5][1]} → {bx1["pts"][5][1]} に上がり、8月〜9月の線の傾きが変わる）',
+        f'② 線の色：折れ線と点の色が 赤 RGB(217,48,37) → 橙 RGB(230,120,20)（線の全体。x {got["線"][0]}〜{got["線"][2]}、y {got["線"][1]}〜{got["線"][3]} の範囲。形は ① 以外同じ）',
+        f'③ 凡例の文言：「粗利率（%）」→「粗利率（%・値引後）」（凡例の枠 x {bx0["凡例"][0]}〜{bx0["凡例"][2]}、y {bx0["凡例"][1]}〜{bx0["凡例"][3]} の中。凡例の線の見本の色も ② と同じく変わる）',
+        f'④ 軸の目盛りの数字1つ：左の軸のいちばん上「300」→「350」（x {got["目盛り"][0]}〜{got["目盛り"][2]}、y {got["目盛り"][1]}〜{got["目盛り"][3]}。棒の高さは変わっていないので、目盛りの数字だけが食い違っている＝作図の誤り）',
+        f'⑤ 出典の版：下端の「出典：売上明細（集計 v1）」→「（集計 v2）」（x {got["出典"][0]}〜{got["出典"][2]}、y {got["出典"][1]}〜{got["出典"][3]}。1文字）', '棒・棒の上の数字・月の名前・右の軸・題・グリッド線は、1画素も違わない',
+        f'「{gjn}」は、v1 の PNG を JPEG（品質 90）で保存し直したもの。**中身は v1 と同じ**（数字・文言・線の形と色は変えていない）で、違いは圧縮のにじみだけ（v1 の PNG と比べて、{jn:,} 画素（全体の {jn / 1440000 * 100:.1f}%）で色の値が違う。そのうち差が 32 段階（255 段階中）を超えるのは {j32:,} 画素（{j32 / 1440000 * 100:.2f}%）で、最大は {jmax}）。にじみは、文字と線のふち・色の境目に出る。v1.png と比べたときは「中身の違いなし」と分かるのが望ましく、v2.png と比べたときは ①〜⑤ だけが変更箇所として出るのが望ましい')
+
+    # ---------------------------------------------------------------- 分析ノート（.ipynb）。出力の画像は base64 の1行
+    def scatter(v):
+        r = random.Random(4242); W, H = 1500, 1000; im = Image.new('RGB', (W, H), (250, 250, 252)); dr = ImageDraw.Draw(im, 'RGBA'); dr.line([120, 60, 120, 900, 1440, 900], fill=(60, 60, 60, 255), width=2)
+        for k in range(7): dr.text((120 + k * 200 - 20, 912), str(k * 1000), fill=(40, 40, 40, 255), font=font(22)); dr.text((60, 900 - k * 130 - 14), str(k * 2), fill=(40, 40, 40, 255), font=font(22))
+        for _ in range(9000):
+            p = r.lognormvariate(7.3, 0.6); q = max(1, r.gauss(12 - p / 600, 2.2)) if v else max(1, r.gauss(11.5 - p / 640, 2.4)); x = 120 + min(p, 6500) / 5; y = 900 - min(q, 13) * 65
+            c = (66, 133, 244, 90) if r.random() < 0.7 else (217, 48, 37, 90); dr.ellipse([x - 4, y - 4, x + 4, y + 4], fill=c)
+        dr.text((520, 20), '単価と1伝票あたりの数量（run ' + ('2' if v else '1') + '）', fill=(30, 30, 30, 255), font=font(30, True)); dr.text((700, 950), '単価（円）', fill=(40, 40, 40, 255), font=font(24))
+        b = io.BytesIO(); im.save(b, 'PNG'); return base64.b64encode(b.getvalue()).decode()
+    def nb(v):
+        img = scatter(v); tot = [182.4, 204.1, 196.3, 238.2, 251.0, 227.5]; gp = [29.4, 30.1, 30.8, 31.6, 32.3, 33.8 if v else 31.2]; fname = c1n if v else c0n
+        tbl = ['      売上金額(百万円)  粗利率(%)\n', '月                          \n'] + [f'{m:<4}      {t:>8.1f}     {g:>5.1f}\n' for m, t, g in zip(months, tot, gp)]
+        cells = [{'cell_type': 'markdown', 'id': 'a1f0c2d4', 'metadata': {}, 'source': ['# 売上明細の検証（2026年度 上期）\n', '\n', '集計を作り直すたびに、前回の出力と比べて、意図しない変化がないかを確かめる。\n', '\n', '- 入力：売上明細 CSV（12万行）\n', '- 出力：月別の売上金額・粗利率、単価と数量の散布図\n']},
+                 {'cell_type': 'code', 'execution_count': 1, 'id': 'b27e91aa', 'metadata': {}, 'outputs': [], 'source': ['import pandas as pd\n', 'import numpy as np\n', 'import matplotlib.pyplot as plt\n', '\n', "plt.rcParams['font.family'] = 'Noto Sans CJK JP'\n", "pd.options.display.float_format = '{:,.1f}'.format"]},
+                 {'cell_type': 'code', 'execution_count': 2, 'id': 'c3d4e5f6', 'metadata': {}, 'outputs': [{'name': 'stdout', 'output_type': 'stream', 'text': [f'({120050 if v else 120000}, {11 if v else 10})\n']}],
+                  'source': [f"df = pd.read_csv('{fname}', dtype={{'伝票番号': str, '店舗コード': str}}, na_values=['NULL'])\n", "df['売上日'] = pd.to_datetime(df['売上日'])\n", 'print(df.shape)']},
+                 {'cell_type': 'code', 'execution_count': 3, 'id': 'd9a8b7c6', 'metadata': {}, 'outputs': [{'data': {'text/plain': tbl}, 'execution_count': 3, 'metadata': {}, 'output_type': 'execute_result'}],
+                  'source': ['# 返品（数量がマイナス）と、単価が欠けている行は除く\n', "df = df[df['数量'] " + ('>= 1' if v else '> 0') + "]\n", "df = df.dropna(subset=['単価', '金額'])\n", "df['月'] = df['売上日'].dt.month.astype(str) + '月'\n", "monthly = df.groupby('月').agg(売上金額=('金額', 'sum'), 粗利=('粗利', 'sum'))\n",
+                             "monthly['売上金額(百万円)'] = monthly['売上金額'] / 1e6\n", "monthly['粗利率(%)'] = monthly['粗利'] / monthly['売上金額'] * 100\n", "monthly[['売上金額(百万円)', '粗利率(%)']]"]},
+                 {'cell_type': 'code', 'execution_count': 4, 'id': 'e0f1a2b3', 'metadata': {}, 'outputs': [{'data': {'image/png': img, 'text/plain': ['<Figure size 1500x1000 with 1 Axes>']}, 'metadata': {}, 'output_type': 'display_data'}],
+                  'source': ['fig, ax = plt.subplots(figsize=(15, 10))\n', "ax.scatter(df['単価'], df['数量'], s=16, alpha=0.35)\n", "ax.set_xlabel('単価（円）')\n", "ax.set_ylabel('数量')\n", f"ax.set_title('単価と1伝票あたりの数量（run {2 if v else 1}）')\n", 'plt.show()']},
+                 {'cell_type': 'markdown', 'id': 'f4e3d2c1', 'metadata': {}, 'source': ['## メモ\n', '\n', '- 9月の粗利率が前回より高い' + ('。値引後の金額で計算し直したため（要確認）\n' if v else '／低い場合は、単価マスタの欠けを疑う\n'), '- 散布図の右下（高単価・少数量）の点は、法人売上\n']}]
+        return json.dumps({'cells': cells, 'metadata': {'kernelspec': {'display_name': 'Python 3 (ipykernel)', 'language': 'python', 'name': 'python3'}, 'language_info': {'codemirror_mode': {'name': 'ipython', 'version': 3}, 'file_extension': '.py', 'mimetype': 'text/x-python', 'name': 'python', 'nbconvert_exporter': 'python', 'pygments_lexer': 'ipython3', 'version': '3.12.7'}}, 'nbformat': 4, 'nbformat_minor': 5}, ensure_ascii=False, indent=1) + '\n', len(img)
+    n0, li0 = nb(0); n1, li1 = nb(1); n0n = '売上検証ノート_run1.ipynb'; n1n = '売上検証ノート_run2.ipynb'; text(f'{d}/{n0n}', n0); text(f'{d}/{n1n}', n1)
+    a_, b_ = _lines_of(f'{d}/{n0n}')[:-1], _lines_of(f'{d}/{n1n}')[:-1]; assert len(a_) == len(b_) and json.loads(n0)['cells'][4]['outputs'][0]['data']['image/png'] != json.loads(n1)['cells'][4]['outputs'][0]['data']['image/png']
+    nd = [i + 1 for i in range(len(a_)) if a_[i] != b_[i]]; iml = _lineno(a_, '"image/png": '); assert iml in nd and len(a_[iml - 1]) > 200000
+    key(d, f'■ 分析ノート「{n0n}」→「{n1n}」（Jupyter の .ipynb＝JSON・字下げ1・UTF-8・LF。どちらも {len(a_)}行）。違う行は {len(nd)} 行：' + '、'.join(str(x) for x in nd) + '行目（旧・新で同じ行番号）',
+        f'【出力の画像】{iml}行目 "image/png": の値（PNG を base64 にした1行。旧 {li0:,} 文字・新 {li1:,} 文字）が、**ほぼ丸ごと違う**（散布図を描き直したため）。1行が数十万文字ある',
+        '【コードの1行】' + '、'.join(f'{i}行目 {a_[i - 1].strip()} → {b_[i - 1].strip()}' for i in nd if "df['数量']" in a_[i - 1]) + '（> 0 が >= 1 に）',
+        '【読み込むファイル名・件数・題】' + '、'.join(f'{i}行目 {a_[i - 1].strip()[:60]}… → {b_[i - 1].strip()[:60]}…' if len(a_[i - 1]) > 90 else f'{i}行目 {a_[i - 1].strip()} → {b_[i - 1].strip()}' for i in nd if 'read_csv' in a_[i - 1] or '(120000, 10)' in a_[i - 1] or 'set_title' in a_[i - 1]),
+        '【出力の数値】' + '、'.join(f'{i}行目 {a_[i - 1].strip()} → {b_[i - 1].strip()}' for i in nd if '9月  ' in a_[i - 1]) + '（9月の粗利率 31.2 → 33.8）', '【メモ（markdown）】' + '、'.join(f'{i}行目 {a_[i - 1].strip()} → {b_[i - 1].strip()}' for i in nd if '粗利率が前回より' in a_[i - 1]))
+
+    # ---------------------------------------------------------------- SQL（大文字のキーワードと小文字。整形も少し違う）
+    Q = ['-- 月別・カテゴリ別の売上集計（売上明細の検証用）', '-- 実行：BigQuery 互換の方言を想定。日付は売上日（JST）', 'WITH base AS (', '    SELECT', '        s.order_id,', '        s.order_date,', "        FORMAT_DATE('%Y-%m', s.order_date) AS ym,", '        s.store_id,', '        st.store_name,', '        st.region,', '        s.sku,', '        p.category,', '        s.qty,', '        s.unit_price,', '        s.amount,',
+         '        COALESCE(s.discount, 0) AS discount,', '        s.amount - COALESCE(s.discount, 0) AS net_amount,', '        p.cost * s.qty AS cost_amount', '    FROM sales_detail AS s', '    INNER JOIN store_master AS st', '        ON s.store_id = st.store_id', '    LEFT JOIN product_master AS p', '        ON s.sku = p.sku', "    WHERE s.order_date >= DATE '2026-07-01'", "        AND s.order_date < DATE '2026-10-01'", '        AND s.qty > 0', '        AND s.amount IS NOT NULL', "        AND st.store_type IN ('direct', 'franchise')", '),',
+         'monthly AS (', '    SELECT', '        ym,', '        region,', '        category,', '        COUNT(DISTINCT order_id) AS orders,', '        SUM(qty) AS qty,', '        SUM(amount) AS amount,', '        SUM(net_amount) AS net_amount,', '        SUM(cost_amount) AS cost_amount,', '        SUM(net_amount) - SUM(cost_amount) AS gross_profit', '    FROM base', '    GROUP BY ym, region, category', '    HAVING SUM(amount) >= 100000', '),',
+         'ranked AS (', '    SELECT', '        m.*,', '        SAFE_DIVIDE(m.gross_profit, m.net_amount) AS gp_rate,', '        RANK() OVER (PARTITION BY m.ym ORDER BY m.net_amount DESC) AS rank_in_month,', '        SUM(m.net_amount) OVER (PARTITION BY m.ym) AS month_total,', '        LAG(m.net_amount) OVER (PARTITION BY m.region, m.category ORDER BY m.ym) AS prev_net_amount', '    FROM monthly AS m', '),',
+         'store_rank AS (', '    SELECT', '        b.ym,', '        b.store_id,', '        b.store_name,', '        SUM(b.net_amount) AS net_amount,', '        ROW_NUMBER() OVER (PARTITION BY b.ym ORDER BY SUM(b.net_amount) DESC) AS rn', '    FROM base AS b', '    GROUP BY b.ym, b.store_id, b.store_name', ')',
+         'SELECT', '    r.ym,', '    r.region,', '    r.category,', '    r.orders,', '    r.qty,', '    ROUND(r.amount, 2) AS amount,', '    ROUND(r.net_amount, 2) AS net_amount,', '    ROUND(r.gross_profit, 2) AS gross_profit,', '    ROUND(r.gp_rate * 100, 1) AS gp_rate_pct,', '    ROUND(SAFE_DIVIDE(r.net_amount, r.month_total) * 100, 2) AS share_pct,', '    ROUND(SAFE_DIVIDE(r.net_amount - r.prev_net_amount, r.prev_net_amount) * 100, 1) AS mom_pct,', '    r.rank_in_month,',
+         '    CASE', '        WHEN r.gp_rate >= 0.35 THEN \'A\'', '        WHEN r.gp_rate >= 0.28 THEN \'B\'', "        ELSE 'C'", '    END AS gp_class,', '    (SELECT sr.store_name FROM store_rank AS sr WHERE sr.ym = r.ym AND sr.rn = 1) AS top_store', 'FROM ranked AS r', 'WHERE r.rank_in_month <= 20', 'ORDER BY r.ym, r.rank_in_month', 'LIMIT 500;']
+    KW = ['WITH', 'SELECT', 'FROM', 'WHERE', 'AND', 'INNER JOIN', 'LEFT JOIN', 'ON', 'AS', 'GROUP BY', 'HAVING', 'ORDER BY', 'PARTITION BY', 'OVER', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'IN', 'IS NOT NULL', 'DESC', 'LIMIT', 'DISTINCT', 'DATE', 'COUNT', 'SUM', 'ROUND', 'RANK', 'ROW_NUMBER', 'LAG', 'COALESCE', 'SAFE_DIVIDE', 'FORMAT_DATE']
+    def low(l):
+        if l.startswith('--'): return l
+        parts = re.split(r"('[^']*')", l)        # 引用符の中（文字列）は変えない
+        for k in range(0, len(parts), 2):
+            for w in KW: parts[k] = re.sub(rf'\b{w}\b', w.lower(), parts[k])
+        l = ''.join(parts); n = len(l) - len(l.lstrip(' ')); return ' ' * (n // 2) + l.lstrip(' ')
+    Q1 = [low(l) for l in Q]; SQL = []
+    def sq(a, b):
+        i = Q1.index(low(a)); assert Q1.count(low(a)) == 1; Q1[i] = b; SQL.append((Q.index(a) + 1, a.strip(), b.strip()))
+    sq("    WHERE s.order_date >= DATE '2026-07-01'", "  where s.order_date > date '2026-07-01'"); sq('    HAVING SUM(amount) >= 100000', '  having sum(amount) > 100000'); sq('WHERE r.rank_in_month <= 20', 'where r.rank_in_month <= 30')
+    k_ = Q1.index(low('        AND s.amount IS NOT NULL')); Q1.insert(k_ + 1, "    and s.channel <> 'test'")
+    k2 = Q1.index(low('    GROUP BY ym, region, category')); Q1[k2:k2 + 1] = ['  group by', '    ym, region, category']
+    k3 = Q1.index(low('        COALESCE(s.discount, 0) AS discount,')); Q1[k3] = '    coalesce(s.discount,0)   as discount,'
+    q0n = '月別集計_v1（大文字）.sql'; q1n = '月別集計_v2（小文字・整形し直し）.sql'; text(f'{d}/{q0n}', '\n'.join(Q) + '\n'); text(f'{d}/{q1n}', '\n'.join(Q1) + '\n')
+    a_, b_ = _lines_of(f'{d}/{q0n}')[:-1], _lines_of(f'{d}/{q1n}')[:-1]; nz = lambda s: re.sub(r'\s+', '', s).lower(); sm = difflib.SequenceMatcher(None, [nz(x) for x in a_], [nz(x) for x in b_], autojunk=False); ops = [o for o in sm.get_opcodes() if o[0] != 'equal']
+    same_txt = sum(1 for x, y in zip(a_, b_[:k_ + 1] + b_[k_ + 2:]) if x == y)
+    assert len(ops) == 4 and [o[0] for o in ops] == ['replace', 'insert', 'replace', 'replace'] and (ops[2][2] - ops[2][1], ops[2][4] - ops[2][3]) == (2, 3) and len(b_) == len(a_) + 2      # GROUP BY と HAVING は隣どうしなので、1つのまとまりになる
+    key(d, f'■ SQL「{q0n}」（{len(a_)}行。キーワードが大文字・字下げ 4）→「{q1n}」（{len(b_)}行。キーワードが小文字・字下げ 2）。UTF-8・LF',
+        f'ほとんどの行は、大文字小文字と行頭の空白だけが違う（文字まで同じ行は、コメント2行など {sum(1 for x in a_ if x in b_)} 行だけ）。「大文字小文字を無視」＋「空白をすべて無視」で比べると、残るのは次の5つ（GROUP BY と HAVING は隣の行なので、差分のまとまりとしては4か所）',
+        '【条件が変わった行 3】' + '、'.join(f'旧 {n}行目「{a}」→「{b}」' for n, a, b in SQL) + '（>= が > に2か所、20 が 30 に1か所。キーワードの大文字小文字も違うので、行の中の印が、本当に違う所（> と =、数字）だけに付くかを見る）',
+        f'【条件の追加 1】新 {k_ + 2}行目「and s.channel <> \'test\'」を追加（旧 {k_ + 1}行目「AND s.amount IS NOT NULL」の次）',
+        f'【整形だけの違い（改行の位置）1】旧 {Q.index("    GROUP BY ym, region, category") + 1}行目「GROUP BY ym, region, category」が、新では2行（「group by」と「ym, region, category」）に分かれた。意味は同じだが、行が分かれているので、空白を無視しても差として残る',
+        f'【空白の量だけの違い】旧 {Q.index("        COALESCE(s.discount, 0) AS discount,") + 1}行目「COALESCE(s.discount, 0) AS discount,」→ 新「coalesce(s.discount,0)   as discount,」（カンマの後の空白がなくなり、as の前の空白が3つに。「空白をすべて無視」なら同じ、「量を無視」では「, 0」と「,0」が違う）',
+        '文字列の中（\'direct\'、\'%Y-%m\'、\'A\' など）は、大文字小文字を変えていない')
+
+    # ---------------------------------------------------------------- parquet（中身は読めないバイト列）
+    for v, n in ((0, '売上集計_run1.parquet'), (1, '売上集計_run2.parquet')):
+        body = random.Random(f'pq{v}').randbytes(180000 + v * 2048); wbytes(f'{d}/{n}', b'PAR1' + body + struct.pack('<I', 1432 + v * 16) + b'PAR1')
+    key(d, '■「売上集計_run1.parquet」（180,012 バイト）と「売上集計_run2.parquet」（182,060 バイト）：列指向のバイナリ（先頭と末尾が PAR1）。中身は別物で、大きさも違う。このツールでは中身を表として比べられないはずなので、どう案内されるか（バイナリとしての扱い、言葉）を見る')
 SPEC = [
     (6, '購買・経理担当', '商社', r06, {
         'who': 'あなたは、商社（湊川商事）の購買部で、発注と支払の事務を7年担当しています。仕入先から届く見積書・請求書の「再提出版」「訂正版」を前の版と比べ、金額・数量・振込先が変わっていないかを確かめるのが日課です。'
@@ -1594,7 +1820,6 @@ SPEC = [
             '領収書のスキャン2枚（「…スキャン1回目.jpg」と「…スキャン2回目（取り直し）.jpg」）を重ね合わせで比べる。同じ領収書を2回取り込んだだけなので、「違いなし」と分かる結果になるか（位置合わせ、枠の数、表示される言葉）。テキスト比較のタブではどう案内されるか。',
             '課題1と課題2の結果を、上司に渡す形にする（レポートの出力、印刷 / PDF、変更点の一覧）。Excel の比較結果と PDF の重ね合わせの結果のそれぞれで、「何が・どこで・どう変わったか」が、ツールを知らない上司に伝わるかを見る。'],
         'note': '要件定義書などの資料は読まず、画面と［？］の説明だけで進めてください（IT に詳しくない利用者の役です）。金額や番号は、1桁ずつ自分の目でも確かめてください。'}),
-    # <<<spec r07>>>
     (7, 'ローカライズ担当', 'ゲーム会社', r07, {
         'who': 'あなたは、ゲーム会社でローカライズのリードを5年務めています。翻訳会社から戻ってきた文言ファイル（JSON・CSV・YAML・XLIFF）を前の版と比べ、頼んでいない変更や、壊れた制御タグ（{0}、<color=…>、\\n）を出荷前に見つけるのが仕事です。'
                '日本語のほかに英語・中国語・韓国語・アラビア語・タイ語と絵文字を扱うので、文字が正しく表示されるか、見た目が同じ別の文字（波ダッシュと全角チルダ、濁点の付け方）を見分けられるかを気にします。配布前には、ビルドのフォルダどうしも比べます。',
@@ -1607,8 +1832,6 @@ SPEC = [
             '「build_1.8.0」と「build_1.8.1」をフォルダ比較で比べる。「フォルダを選択」と、ウィンドウへのドロップの両方で読み込み、結果（件数）が同じになるかを確かめる。同一・相違・左のみ・右のみの件数、状態での絞り込み、並べ替え、行を開いて比較して一覧に戻る操作、CSV・レポートの出力を試す。名前の大文字小文字だけが違うファイル、隠しファイル（.DS_Store・Thumbs.db・.gitkeep）、0 バイトのファイル、内容が同じで更新日時だけが違うファイル、バイナリ（png・ogg）がどう扱われるかを見る。',
             '課題1〜4で見つけた「頼んでいない変更」を、翻訳会社へ差し戻すための資料にする（変更点へのコメント、CSV・レポートの出力）。多言語と絵文字が、出力したファイルでも崩れないかを確かめる。'],
         'note': 'CSV は、Excel で書き出した形（レコードの区切りは CRLF、セルの中の改行は LF）です。フォルダは各 約1,200 ファイルあります。読み込みと比較にかかる時間を測ってください。'}),
-    # <<<endspec r07>>>
-    # <<<spec r08>>>
     (8, 'SRE', 'Webサービス会社', r08, {
         'who': 'あなたは、EC サイトを運営する会社でインフラ運用（SRE）を8年担当しています。本番への反映の前に、設定ファイル（Kubernetes の YAML・Terraform）のフォルダを前回の反映時のものと比べて、意図しない変更が混ざっていないかをレビューします。'
                '障害の調査では、ログや Terraform の状態ファイルも比べます。ふだんは diff・git diff・vimdiff を使っていて、キーボードだけで操作したい人です。行末の空白、改行コード、ドットで始まるファイルの扱いには、特にうるさいです。',
@@ -1621,8 +1844,6 @@ SPEC = [
             '「単体ファイル_反映前」と「単体ファイル_反映後」の5組を比べる。backup_db.sh は改行コードが混在している。混在していることが分かるか、中身の変更（1行）だけを取り出せるか、保存・パッチ出力で改行がどうなるか。証明書（PEM）と tls-secret.yaml（1行が数千文字の base64）の見え方、拡張子のない crontab・Dockerfile の読み込みも確かめる。',
             '「kubectl-diff/…_事前確認.txt」と「…_反映直前.txt」は、ファイルの中身そのものが diff 形式（行頭が + や -）。これを比べたとき、元の +/- と、このツールが付ける記号・色が紛らわしくないか。レポートやパッチにしたときに読めるか。'],
         'note': 'キーボードでの操作（Tab・矢印・Enter・ショートカット）を、マウスと同じだけ試してください。tfstate とログは大きいので、読み込みと比較の秒数を測って報告してください。'}),
-    # <<<endspec r08>>>
-    # <<<spec r09>>>
     (9, '組込みソフト開発', '電機メーカー', r09, {
         'who': 'あなたは、電機メーカーでマイコンのファームウェアを15年開発しています。リリースの前に、ソース・Makefile・マップファイル・バイナリを前の版と比べて、変更票に書いた変更だけが入っていることを確かめます。'
                '10年以上前からの資産なので、ソースのコメントは EUC-JP、変更履歴は Shift_JIS と、文字コードが混ざっています。タブと空白の違い、行末の空白、改行コードには厳しく、16進のアドレスやバイト列を読むのにも慣れています。',
@@ -1635,5 +1856,16 @@ SPEC = [
             'src/main.c と src/drv_uart.c の差分をパッチで出力し、fw_v2.3.0 のコピー（自分の出力フォルダに作る）に `patch -p1` または `git apply` で当てて、fw_v2.3.1 と1バイトも違わない結果になるかを確かめる（EUC-JP・タブ・行末の空白が保たれるか）。',
             '「仕様書/レジスタ仕様書_…_Rev1.2.xlsx」と「…_Rev1.3.xlsx」をテキスト比較で、同じ名前の PDF どうしをテキスト比較と重ね合わせで比べる。初期値・ビット幅・予約ビットの行の追加を見つけられるか。行が1つ増えたあとの対応、結合セル、「0x1F」「[7:4]」のような表記の扱い（数字の差の札など）を見る。「fw_v2.3.0」と「fw_v2.3.1」をフォルダ比較にかけ、CHANGELOG.txt（Shift_JIS）とソース（EUC-JP）が混ざっていても正しく開けるかも確かめる。'],
         'note': 'ソースのタブ幅は 4 のつもりで書かれています。正解.md の行番号は、ファイルの先頭を1行目とした番号です。'}),
-    # <<<endspec r09>>>
+    (10, 'データアナリスト', 'コンサルティング会社', r10, {
+        'who': 'あなたは、コンサルティング会社でデータ分析を6年担当しています。集計の処理を作り直すたびに、出力（CSV・Excel・グラフ・ノートブック）を前回のものと比べ、意図しない変化が入っていないかを確かめます。'
+               '扱うデータは十万行を超えるのがふつうで、Python（pandas）も書けますが、まず全体をざっと目で見たいときに比較ツールを使います。浮動小数の末尾の誤差と本当の違いの区別、指数表記・NaN・NULL の扱い、待ち時間を気にします。',
+        'tasks': [
+            '「売上明細_…_集計v1（11月14日出力）.csv」と「…_集計v2（11月27日出力）.csv」（各 12 万行・約 12MB）をテキスト比較で比べる。読み込みと比較にかかる秒数を測り、その間の画面の反応（進み具合の表示、中止、固まらないか）を確かめる。新は列が1つ増えているので全行が違う。「列が増えた」と分かるか、その中から本当に値が違う行・追加された行を探せるか（検索、差分の単位、位置マップ、「次の変更」）。',
+            '同じ CSV で、数字の扱いを見る。金額の小さな違い（+0.01）に数字の差の札が付くか、指数表記（1.2E+05）と 120000.00、NaN・NULL・空の違いがどう示されるか。引用符の中に改行がある行で、行の対応が崩れないか。スクロールや折り返しの切り替えが、12万行でも重くないか。',
+            '「集計表_店舗×SKU_…_v1.xlsx」と「…_v2.xlsx」（3,000行×20列、値だけ）を比べる。Excel の画面では同じに見える末尾の誤差（0.3 と 0.30000000000000004）と、本当に違う値を見分けられるか。列が入れ替わっていることに気づけるか。2枚目のシート（ピボット風の表）の違いも確かめる。',
+            '「売上検証ノート_run1.ipynb」と「…_run2.ipynb」を比べる。1行が数十万文字ある行（画像の base64）があっても、表示・スクロール・変更点の一覧・レポートが使えるか。コードの1行の変更と、出力の数値の変更を見つけられるか。',
+            '「月別集計_v1（大文字）.sql」と「月別集計_v2（小文字・整形し直し）.sql」を比べる。比較の条件（大文字小文字を無視・空白を無視）を組み合わせて、本当に条件が変わった行だけを残せるか。そのとき、行の中の印（変わった文字）も条件に合っているか（大文字小文字だけが違う語に印が付いていないか）。',
+            '「グラフ_月別売上と粗利率_v1.png」と「…_v2.png」を重ね合わせで比べる（1点の値・凡例・線の色・目盛りの数字）。次に、v1.png と「…_v1_報告書貼付用.jpg」（同じグラフを JPEG で保存し直したもの）を比べ、「違いなし」と分かる結果になるか、圧縮のにじみを違いとして拾いすぎないかを確かめる。v2.png と JPEG の組も試す。',
+            '「売上集計_run1.parquet」と「…_run2.parquet」を読み込んだときの案内を確かめる。最後に、課題1（12万行の CSV）と課題3（Excel）の結果をレポートに出力し、ファイルの大きさ・出力にかかる時間・開いたときの重さを確かめる（全行を載せる設定と、差分のある所だけの設定の両方）。'],
+        'note': '重い処理が多いので、1回の実行を数分以内に区切り、秒数を測りながら進めてください。待っている間にほかの操作をして「固まった」と決めつけないよう、処理の終わりを確かめてから次へ進んでください。'}),
 ]
