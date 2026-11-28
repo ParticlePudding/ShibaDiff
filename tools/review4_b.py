@@ -1191,6 +1191,397 @@ def r08(d):
 
 
 # <<<end r08>>>
+# <<<r09>>>
+# ==========================================================================================
+# R09 電機メーカー 組込みソフト：C ソース（EUC-JP・タブ・LF）、Makefile、マップファイル、ファーム（bin・Intel HEX・S レコード）、
+#     レジスタ仕様書（Excel と PDF）、変更履歴（Shift_JIS・CRLF）
+# ==========================================================================================
+def _r09_main_c():
+    L = ['/*', ' * main.c  ―  電源監視ユニット PMU-200 メイン処理', ' *', ' *  作成  2014/06/12  第二開発部 佐伯', ' *  改訂  2019/03/04  Ver 1.8.0  通信コマンドを表引きに変更（村瀬）', ' *  改訂  2026/09/30  Ver 2.3.0  診断コマンド追加（柏木）', ' *',
+         ' *  注意：このファイルの文字コードは EUC-JP、改行は LF。タブ幅は 4 で書いてある。', ' */', '#include <stdint.h>', '#include <stdbool.h>', '#include <string.h>', '', '#include "config.h"', '#include "drv_uart.h"', '#include "drv_adc.h"', '#include "drv_wdt.h"', '#include "drv_gpio.h"', '#include "app_report.h"', '',
+         '/* ---- 型・定数 ---- */', 'typedef enum {', '\tST_INIT = 0,\t/* 初期化 */', '\tST_IDLE,\t\t/* 待機 */', '\tST_MEASURE,\t\t/* 計測 */', '\tST_REPORT,\t\t/* 上位へ報告 */', '\tST_ERROR,\t\t/* 異常 */', '\tST_SLEEP\t\t/* 省電力 */', '} state_t;', '',
+         'typedef struct {', '\tuint8_t\t\tcode;\t\t/* コマンド番号 */', '\tconst char\t*name;\t\t/* 名前（デバッグ表示用） */', '\tint8_t\t\t(*handler)(const uint8_t *arg, uint8_t len);', '} cmd_entry_t;', '',
+         '#define CMD_OK\t\t\t(0)', '#define CMD_ERR_PARAM\t(-1)\t/* 引数の誤り */', '#define CMD_ERR_RANGE\t(-2)\t/* 範囲外 */', '#define CMD_ERR_STATE\t(-3)\t/* いまは受け付けない */', '#define ERR_COUNT_LIMIT\t(3)\t\t/* 連続異常の上限 */', '',
+         '/* ---- 変数 ---- */', 'static state_t\ts_state = ST_INIT;', 'static uint32_t\ts_tick_ms;\t\t\t\t\t/* 1ms ごとに加算（SysTick） */', 'static uint8_t\ts_err_count;\t\t\t\t/* 連続異常の回数 */', 'static uint16_t\ts_adc_latest[ADC_CH_MAX];\t/* 最新の計測値 [mV] */', 'static uint16_t\ts_param[32];\t\t\t\t/* 設定値（ﾊﾟﾗﾒｰﾀ番号で引く） */', 'static uint8_t\ts_reply[64];', 'static bool\t\ts_report_req;', '',
+         '/* ---- プロトタイプ ---- */', 'static void update_status_led(void);', 'static void dispatch_command(const uint8_t *frame, uint8_t len);', 'static void reply(uint8_t code, const uint8_t *data, uint8_t len);', '',
+         '/*', ' * 状態表示 LED の更新', ' *   正常：1 秒周期で点滅　／　異常：0.2 秒周期で点滅　／　省電力：消灯', ' */', 'static void update_status_led(void)', '{', '\tstatic uint32_t last_ms;', '\tuint32_t period;', '', '\tif (s_state == ST_SLEEP) {', '\t\tgpio_write(PIN_LED_STATUS, 0);', '\t\treturn;', '\t}',
+         '\tperiod = (s_state == ST_ERROR) ? LED_PERIOD_ERR_MS : LED_PERIOD_NORM_MS;', '\tif ((uint32_t)(s_tick_ms - last_ms) >= period / 2U) {', '\t\tlast_ms = s_tick_ms;', '\t\tgpio_toggle(PIN_LED_STATUS);', '\t}', '}', '',
+         '/* 応答フレームを作って送る（先頭 STX、末尾にチェックサム） */', 'static void reply(uint8_t code, const uint8_t *data, uint8_t len)', '{', '\tuint8_t i;', '\tuint8_t sum = 0;', '', '\ts_reply[0] = FRAME_STX;', '\ts_reply[1] = code;', '\ts_reply[2] = len;', '\tfor (i = 0; i < len; i++) {', '\t\ts_reply[3 + i] = data[i];', '\t}',
+         '\tfor (i = 1; i < (uint8_t)(3 + len); i++) {', '\t\tsum = (uint8_t)(sum + s_reply[i]);', '\t}', '\ts_reply[3 + len] = (uint8_t)(~sum + 1U);', '\tuart_send(UART_CH_HOST, s_reply, (uint16_t)(4 + len));', '}', '', '/* ================= コマンド処理 ================= */']
+    cmds = [('0x01', 'get_version', 'ファームの版数を返す', 'ver'), ('0x02', 'get_status', '状態と異常回数を返す', 'stat'), ('0x10', 'get_voltage', '指定チャネルの電圧 [mV] を返す', 'adc'), ('0x11', 'get_current', '指定チャネルの電流 [mA] を返す', 'adc'), ('0x12', 'get_temperature', '基板温度 [0.1℃] を返す', 'adc'),
+            ('0x20', 'set_ovp_level', '過電圧しきい値 [mV] を設定する', 'set', 0, 'OVP_LEVEL_MIN_MV', 'OVP_LEVEL_MAX_MV'), ('0x21', 'set_uvp_level', '低電圧しきい値 [mV] を設定する', 'set', 1, 'UVP_LEVEL_MIN_MV', 'UVP_LEVEL_MAX_MV'), ('0x22', 'set_ocp_level', '過電流しきい値 [mA] を設定する', 'set', 2, 'OCP_LEVEL_MIN_MA', 'OCP_LEVEL_MAX_MA'),
+            ('0x23', 'set_otp_level', '過温度しきい値 [0.1℃] を設定する', 'set', 3, 'OTP_LEVEL_MIN', 'OTP_LEVEL_MAX'), ('0x24', 'set_report_cycle', '定期報告の周期 [ms] を設定する', 'set', 4, 'REPORT_CYCLE_MIN_MS', 'REPORT_CYCLE_MAX_MS'), ('0x25', 'set_filter_depth', '移動平均の段数を設定する', 'set', 5, '1', 'ADC_FILTER_DEPTH_MAX'),
+            ('0x26', 'set_fan_duty', 'ファンのデューティ [%] を設定する', 'set', 6, '0', '100'), ('0x27', 'set_relay_delay', 'リレー投入の遅延 [ms] を設定する', 'set', 7, '0', 'RELAY_DELAY_MAX_MS'), ('0x30', 'relay_on', '出力リレーを入れる', 'act', 'gpio_write(PIN_RELAY_OUT, 1)'), ('0x31', 'relay_off', '出力リレーを切る', 'act', 'gpio_write(PIN_RELAY_OUT, 0)'),
+            ('0x32', 'clear_error', '異常を解除して待機に戻す', 'act', 's_err_count = 0'), ('0x33', 'request_report', '計測値の報告を1回要求する', 'act', 's_report_req = true'), ('0x34', 'enter_sleep', '省電力に入る', 'act', 's_state = ST_SLEEP'), ('0x35', 'leave_sleep', '省電力から復帰する', 'act', 's_state = ST_IDLE'),
+            ('0x40', 'get_param', '設定値を読む', 'par'), ('0x41', 'save_param', '設定値をフラッシュに保存する', 'act', 'param_save(s_param, sizeof(s_param))'), ('0x42', 'load_default', '設定値を出荷時の値に戻す', 'act', 'param_load_default(s_param)'), ('0x50', 'diag_adc', 'A/D の自己診断を行う', 'act', 'adc_self_test()'),
+            ('0x51', 'diag_uart', 'UART の折り返し試験を行う', 'act', 'uart_loopback_test(UART_CH_DEBUG)'), ('0x52', 'diag_wdt', 'ウォッチドッグの動作を確かめる（故意に止める）', 'act', 'wdt_stop_refresh()'), ('0x7F', 'reset', 'ソフトウェアリセット', 'act', 'system_reset()')]
+    for c in cmds:
+        code, name, desc, kind = c[:4]; L += [f'/* {code}：{desc} */', f'static int8_t cmd_{name}(const uint8_t *arg, uint8_t len)', '{']
+        if kind == 'ver': L += ['\tstatic const uint8_t ver[3] = { FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH };', '', '\t(void)arg;', '\t(void)len;', f'\treply({code}, ver, sizeof(ver));', '\treturn CMD_OK;']
+        elif kind == 'stat': L += ['\tuint8_t buf[2];', '', '\t(void)arg;', '\t(void)len;', '\tbuf[0] = (uint8_t)s_state;', '\tbuf[1] = s_err_count;', f'\treply({code}, buf, sizeof(buf));', '\treturn CMD_OK;']
+        elif kind == 'adc': L += ['\tuint8_t buf[2];', '\tuint16_t v;', '', '\tif (len != 1U) {', '\t\treturn CMD_ERR_PARAM;', '\t}', '\tif (arg[0] >= ADC_CH_MAX) {', '\t\treturn CMD_ERR_RANGE;', '\t}', '\tv = s_adc_latest[arg[0]];', '\tbuf[0] = (uint8_t)(v >> 8);\t\t/* 上位バイトが先 */', '\tbuf[1] = (uint8_t)(v & 0xFFU);', f'\treply({code}, buf, sizeof(buf));', '\treturn CMD_OK;']
+        elif kind == 'set': L += ['\tuint16_t v;', '', '\tif (len != 2U) {', '\t\treturn CMD_ERR_PARAM;', '\t}', '\tv = (uint16_t)(((uint16_t)arg[0] << 8) | arg[1]);', f'\tif ((v < {c[5]}) || (v > {c[6]})) {{', '\t\treturn CMD_ERR_RANGE;', '\t}', f'\ts_param[{c[4]}] = v;', f'\treply({code}, NULL, 0);', '\treturn CMD_OK;']
+        elif kind == 'par': L += ['\tuint8_t buf[2];', '', '\tif ((len != 1U) || (arg[0] >= (sizeof(s_param) / sizeof(s_param[0])))) {', '\t\treturn CMD_ERR_PARAM;', '\t}', '\tbuf[0] = (uint8_t)(s_param[arg[0]] >> 8);', '\tbuf[1] = (uint8_t)(s_param[arg[0]] & 0xFFU);', f'\treply({code}, buf, sizeof(buf));', '\treturn CMD_OK;']
+        else: L += ['\t(void)arg;', '', '\tif (len != 0U) {', '\t\treturn CMD_ERR_PARAM;', '\t}', '\tif (s_state == ST_INIT) {', '\t\treturn CMD_ERR_STATE;\t/* 初期化中は受け付けない */', '\t}', f'\t{c[4]};', f'\treply({code}, NULL, 0);', '\treturn CMD_OK;']
+        L += ['}', '']
+    L += ['/* ---- コマンド表（番号の小さい順に並べること。2分探索で引く） ---- */', 'static const cmd_entry_t s_cmd_table[] = {'] + [f'\t{{ {c[0]}, "{c[1]}",{" " * (18 - len(c[1]))}cmd_{c[1]} }},' for c in cmds] + ['};', '#define CMD_TABLE_NUM\t(sizeof(s_cmd_table) / sizeof(s_cmd_table[0]))', '',
+          '/* 受信フレームを解釈して、対応する処理を呼ぶ */', 'static void dispatch_command(const uint8_t *frame, uint8_t len)', '{', '\tint16_t lo = 0;', '\tint16_t hi = (int16_t)CMD_TABLE_NUM - 1;', '\tint8_t rc = CMD_ERR_PARAM;', '', '\tif (len < 2U) {', '\t\treturn;\t\t\t\t/* 短すぎるフレームは捨てる */', '\t}', '\twhile (lo <= hi) {', '\t\tint16_t mid = (int16_t)((lo + hi) / 2);',
+          '\t\tif (s_cmd_table[mid].code == frame[0]) {', '\t\t\trc = s_cmd_table[mid].handler(&frame[2], frame[1]);', '\t\t\tbreak;', '\t\t} else if (s_cmd_table[mid].code < frame[0]) {', '\t\t\tlo = (int16_t)(mid + 1);', '\t\t} else {', '\t\t\thi = (int16_t)(mid - 1);', '\t\t}', '\t}', '\tif (rc != CMD_OK) {', '\t\tuint8_t e = (uint8_t)(-rc);', '\t\treply(0xEE, &e, 1);\t/* 異常応答 */', '\t}', '}', '',
+          '/* ================= 状態ごとの処理 ================= */', 'static void st_init(void)', '{', '\tuint8_t ch;', '', '\tgpio_init();', '\tuart_init_all();', '\tadc_init();', '\tparam_load(s_param, sizeof(s_param));', '\tfor (ch = 0; ch < ADC_CH_MAX; ch++) {', '\t\ts_adc_latest[ch] = 0;', '\t}', '\twdt_start(WDT_TIMEOUT_MS);', '\ts_state = ST_IDLE;', '}', '',
+          'static void st_idle(void)', '{', '\tstatic uint32_t last_ms;', '', '\tif ((uint32_t)(s_tick_ms - last_ms) >= MEASURE_CYCLE_MS) {', '\t\tlast_ms = s_tick_ms;', '\t\ts_state = ST_MEASURE;', '\t}', '}', '',
+          'static void st_measure(void)', '{', '\tuint8_t ch;', '\tbool ng = false;', '', '\tfor (ch = 0; ch < ADC_CH_MAX; ch++) {', '\t\ts_adc_latest[ch] = adc_get_mv(ch);', '\t}', '\t/* しきい値の判定（電圧は ch0〜ch3、電流は ch4〜ch7） */', '\tfor (ch = 0; ch < 4U; ch++) {', '\t\tif ((s_adc_latest[ch] > s_param[0]) || (s_adc_latest[ch] < s_param[1])) {', '\t\t\tng = true;', '\t\t}',
+          '\t\tif (s_adc_latest[4U + ch] > s_param[2]) {', '\t\t\tng = true;', '\t\t}', '\t}', '\tif (ng) {', '\t\ts_err_count++;', '\t} else {', '\t\ts_err_count = 0;', '\t}', '\tif (s_err_count > ERR_COUNT_LIMIT) {', '\t\tgpio_write(PIN_RELAY_OUT, 0);\t/* 出力を切る */', '\t\ts_state = ST_ERROR;', '\t} else {', '\t\ts_state = (s_report_req) ? ST_REPORT : ST_IDLE;', '\t}', '}', '',
+          'static void st_report(void)', '{', '\treport_send(s_adc_latest, ADC_CH_MAX);', '\ts_report_req = false;', '\ts_state = ST_IDLE;', '}', '', 'static void st_error(void)', '{', '\tstatic uint32_t last_ms;', '', '\t/* 異常中は 1 秒ごとに状態を上位へ知らせる */', '\tif ((uint32_t)(s_tick_ms - last_ms) >= 1000U) {', '\t\tuint8_t buf[2];', '', '\t\tlast_ms = s_tick_ms;', '\t\tbuf[0] = (uint8_t)s_state;', '\t\tbuf[1] = s_err_count;', '\t\treply(0x02, buf, sizeof(buf));', '\t}',
+          '\tif (s_err_count == 0U) {', '\t\ts_state = ST_IDLE;\t\t/* clear_error で解除された */', '\t}', '}', '', 'static void st_sleep(void)', '{', '\tadc_stop();', '\t__WFI();\t\t\t\t\t/* 割り込みを待つ */', '\tadc_start();', '}', '',
+          '/* SysTick 割り込み（1ms） */', 'void SysTick_Handler(void)', '{', '\ts_tick_ms++;', '}', '', '/* ================= メイン ================= */', 'int main(void)', '{', '\tstatic uint8_t frame[UART_RX_FRAME_MAX];', '\tuint8_t n;', '', '\tsystem_clock_init();', '\tst_init();', '', '\tfor (;;) {', '\t\twdt_refresh();', '\t\tupdate_status_led();', '',
+          '\t\tn = uart_recv_frame(UART_CH_HOST, frame, sizeof(frame));', '\t\tif (n > 0U) {', '\t\t\tdispatch_command(frame, n);', '\t\t}', '', '\t\tswitch (s_state) {', '\t\tcase ST_IDLE:\t\tst_idle();\t\tbreak;', '\t\tcase ST_MEASURE:\tst_measure();\tbreak;', '\t\tcase ST_REPORT:\t\tst_report();\tbreak;', '\t\tcase ST_ERROR:\t\tst_error();\t\tbreak;', '\t\tcase ST_SLEEP:\t\tst_sleep();\t\tbreak;',
+          '\t\tdefault:\t\t\ts_state = ST_ERROR;\tbreak;', '\t\t}', '\t}', '}']
+    return L
+
+
+def _r09_uart_c():
+    L = ['/*', ' * drv_uart.c  ―  UART ドライバ（6 チャネル、割り込み駆動、リングバッファ）', ' *', ' *  作成  2014/05/20  第二開発部 佐伯', ' *  改訂  2021/11/08  Ver 2.0.0  XM32F4 へ移植（村瀬）', ' *  改訂  2026/09/30  Ver 2.3.0  折り返し試験を追加（柏木）', ' */', '#include <stdint.h>', '#include <stdbool.h>', '#include <stddef.h>', '', '#include "config.h"', '#include "xm32f4_uart.h"', '#include "drv_uart.h"', '',
+         '#define UART_CH_NUM\t\t\t(6U)', '#define UART_TX_TIMEOUT_MS\t(50U)\t\t/* 送信完了を待つ上限 */', '#define UART_RX_IDLE_MS\t\t(5U)\t\t/* フレームの区切りとみなす無通信時間 */', '#define UART_ERR_OVERRUN\t(0x01U)', '#define UART_ERR_FRAMING\t(0x02U)', '#define UART_ERR_PARITY\t\t(0x04U)', '#define UART_ERR_NOISE\t\t(0x08U)', '',
+         '/* リングバッファ（2 のべき乗の大きさにすること） */', 'typedef struct {', '\tuint8_t\t\t*buf;', '\tuint16_t\tsize;', '\tvolatile uint16_t\thead;\t/* 書き込み位置 */', '\tvolatile uint16_t\ttail;\t/* 読み出し位置 */', '} ring_t;', '',
+         'typedef struct {', '\tUART_TypeDef\t*reg;\t\t/* レジスタの先頭 */', '\tring_t\t\t\ttx;', '\tring_t\t\t\trx;', '\tuint32_t\t\tbaud;', '\tvolatile uint8_t\terr;\t\t/* 発生した異常（UART_ERR_xxx の OR） */', '\tvolatile uint32_t\tlast_rx_ms;', '\tuint32_t\t\tcnt_overrun;', '\tuint32_t\t\tcnt_framing;', '} uart_ctx_t;', '']
+    for n in range(6): L += [f'static uint8_t s_tx_buf{n}[UART{n}_TX_BUF_SIZE];', f'static uint8_t s_rx_buf{n}[UART{n}_RX_BUF_SIZE];']
+    L += ['', 'static uart_ctx_t s_ctx[UART_CH_NUM];', 'extern volatile uint32_t g_tick_ms;', '', '/* ---- リングバッファ ---- */', 'static bool rb_put(ring_t *rb, uint8_t c)', '{', '\tuint16_t next = (uint16_t)((rb->head + 1U) & (rb->size - 1U));', '', '\tif (next == rb->tail) {', '\t\treturn false;\t\t\t/* 満杯 */', '\t}', '\trb->buf[rb->head] = c;', '\trb->head = next;', '\treturn true;', '}', '',
+          'static bool rb_get(ring_t *rb, uint8_t *c)', '{', '\tif (rb->head == rb->tail) {', '\t\treturn false;\t\t\t/* 空 */', '\t}', '\t*c = rb->buf[rb->tail];', '\trb->tail = (uint16_t)((rb->tail + 1U) & (rb->size - 1U));', '\treturn true;', '}', '', 'static uint16_t rb_count(const ring_t *rb)', '{', '\treturn (uint16_t)((rb->head - rb->tail) & (rb->size - 1U));', '}', '',
+          '/* ボーレートの分周比を求める（16 倍オーバーサンプリング。四捨五入） */', 'static uint32_t calc_brr(uint32_t pclk, uint32_t baud)', '{', '\tuint32_t div = (pclk + (baud / 2U)) / baud;', '', '\tif (div < 16U) {', '\t\tdiv = 16U;', '\t}', '\treturn div;', '}', '']
+    use = ['上位通信（RS-485）', 'デバッグ用コンソール', '表示器', '予備（未使用）', '計測モジュール A', '計測モジュール B']
+    for n in range(6):
+        L += [f'/* ---- チャネル {n}：{use[n]} ---- */', f'static void uart{n}_init(void)', '{', f'\tuart_ctx_t *c = &s_ctx[{n}];', '', f'\tc->reg = UART{n};', f'\tc->tx.buf = s_tx_buf{n};', f'\tc->tx.size = UART{n}_TX_BUF_SIZE;', '\tc->tx.head = 0;', '\tc->tx.tail = 0;', f'\tc->rx.buf = s_rx_buf{n};', f'\tc->rx.size = UART{n}_RX_BUF_SIZE;', '\tc->rx.head = 0;', '\tc->rx.tail = 0;', f'\tc->baud = UART{n}_BAUDRATE;', '\tc->err = 0;', '',
+              f'\tgpio_set_alt(UART{n}_TX_PIN, GPIO_AF_UART);', f'\tgpio_set_alt(UART{n}_RX_PIN, GPIO_AF_UART);', f'\tc->reg->CR1 = 0;\t\t\t\t\t\t\t/* いったん止める */', f'\tc->reg->BRR = calc_brr(PCLK{1 if n in (0, 5) else 2}_HZ, c->baud);', '\tc->reg->CR2 = UART_CR2_STOP_1;', '\tc->reg->FCR = UART_FCR_FIFOEN | UART_FCR_RXFTL_8 | UART_FCR_TXFTL_4;',
+              '\tc->reg->CR1 = UART_CR1_UE | UART_CR1_TE | UART_CR1_RE | UART_CR1_RXNEIE;', f'\tnvic_set_priority(UART{n}_IRQn, UART{n}_PRIORITY);', f'\tnvic_enable(UART{n}_IRQn);', '}', '',
+              f'void UART{n}_IRQHandler(void)', '{', f'\tuart_ctx_t *c = &s_ctx[{n}];', '\tuint32_t sr = c->reg->SR;', '\tuint8_t d;', '', '\t/* 受信 */', '\twhile ((sr & UART_SR_RXNE) != 0U) {', '\t\td = (uint8_t)c->reg->DR;', '\t\tif ((sr & (UART_SR_ORE | UART_SR_FE | UART_SR_PE | UART_SR_NF)) != 0U) {', '\t\t\tif ((sr & UART_SR_ORE) != 0U) {', '\t\t\t\tc->err |= UART_ERR_OVERRUN;', '\t\t\t\tc->cnt_overrun++;', '\t\t\t}',
+              '\t\t\tif ((sr & UART_SR_FE) != 0U) {', '\t\t\t\tc->err |= UART_ERR_FRAMING;', '\t\t\t\tc->cnt_framing++;', '\t\t\t}', '\t\t\tc->reg->ICR = UART_ICR_ORECF | UART_ICR_FECF | UART_ICR_PECF | UART_ICR_NCF;', '\t\t} else {', '\t\t\t(void)rb_put(&c->rx, d);\t/* 満杯のときは捨てる */', '\t\t}', '\t\tc->last_rx_ms = g_tick_ms;', '\t\tsr = c->reg->SR;', '\t}',
+              '\t/* 送信 */', '\tif (((sr & UART_SR_TXE) != 0U) && ((c->reg->CR1 & UART_CR1_TXEIE) != 0U)) {', '\t\tif (rb_get(&c->tx, &d)) {', '\t\t\tc->reg->DR = d;', '\t\t} else {', '\t\t\tc->reg->CR1 &= ~UART_CR1_TXEIE;\t/* 送るものがなくなった */', '\t\t}', '\t}', '}', '']
+    L += ['/* ================= 公開関数 ================= */', '', '/* 全チャネルを初期化する */', 'void uart_init_all(void)', '{'] + [f'\tuart{n}_init();' for n in range(6)] + ['}', '',
+          '/*', ' * 送信（リングバッファに積んで、割り込みで送る）', ' *   戻り値：積めたバイト数', ' */', 'uint16_t uart_send(uint8_t ch, const uint8_t *data, uint16_t len)', '{', '\tuart_ctx_t *c;', '\tuint16_t n = 0;', '', '\tif ((ch >= UART_CH_NUM) || (data == NULL)) {', '\t\treturn 0;', '\t}', '\tc = &s_ctx[ch];', '\twhile (n < len) {', '\t\tif (!rb_put(&c->tx, data[n])) {', '\t\t\tbreak;\t\t\t\t/* 満杯。残りは捨てる */', '\t\t}', '\t\tn++;', '\t}',
+          '\tc->reg->CR1 |= UART_CR1_TXEIE;', '\treturn n;', '}', '', '/* 文字列を送る（終端の 0 は送らない） */', 'uint16_t uart_puts(uint8_t ch, const char *s)', '{', '\tuint16_t len = 0;', '', '\twhile (s[len] != \'\\0\') {', '\t\tlen++;', '\t}', '\treturn uart_send(ch, (const uint8_t *)s, len);', '}', '',
+          '/* 受信（溜まっている分だけ読む） */', 'uint16_t uart_recv(uint8_t ch, uint8_t *data, uint16_t max)', '{', '\tuart_ctx_t *c;', '\tuint16_t n = 0;', '', '\tif ((ch >= UART_CH_NUM) || (data == NULL)) {', '\t\treturn 0;', '\t}', '\tc = &s_ctx[ch];', '\twhile ((n < max) && rb_get(&c->rx, &data[n])) {', '\t\tn++;', '\t}', '\treturn n;', '}', '',
+          '/*', ' * 1 フレーム受信', ' *   無通信が UART_RX_IDLE_MS 続いたら、そこまでを 1 フレームとして返す。', ' *   戻り値：フレームの長さ（まだ届いていなければ 0）', ' */', 'uint8_t uart_recv_frame(uint8_t ch, uint8_t *frame, uint8_t max)', '{', '\tuart_ctx_t *c;', '\tuint16_t cnt;', '', '\tif (ch >= UART_CH_NUM) {', '\t\treturn 0;', '\t}', '\tc = &s_ctx[ch];', '\tcnt = rb_count(&c->rx);', '\tif (cnt == 0U) {', '\t\treturn 0;', '\t}',
+          '\tif ((uint32_t)(g_tick_ms - c->last_rx_ms) < UART_RX_IDLE_MS) {', '\t\treturn 0;\t\t\t\t\t/* まだ続きが来るかもしれない */', '\t}', '\tif (cnt > max) {', '\t\tcnt = max;', '\t}', '\treturn (uint8_t)uart_recv(ch, frame, cnt);', '}', '',
+          '/* 異常の読み出し（読むと消える） */', 'uint8_t uart_get_error(uint8_t ch)', '{', '\tuint8_t e;', '', '\tif (ch >= UART_CH_NUM) {', '\t\treturn 0;', '\t}', '\t__disable_irq();', '\te = s_ctx[ch].err;', '\ts_ctx[ch].err = 0;', '\t__enable_irq();', '\treturn e;', '}', '',
+          '/* ボーレートの変更（送信が終わってから切り替える） */', 'bool uart_set_baud(uint8_t ch, uint32_t baud)', '{', '\tuart_ctx_t *c;', '\tuint32_t t0;', '', '\tif ((ch >= UART_CH_NUM) || (baud < 1200U) || (baud > 921600U)) {', '\t\treturn false;', '\t}', '\tc = &s_ctx[ch];', '\tt0 = g_tick_ms;', '\twhile (rb_count(&c->tx) != 0U) {', '\t\tif ((uint32_t)(g_tick_ms - t0) > UART_TX_TIMEOUT_MS) {', '\t\t\treturn false;\t\t\t/* 送信が終わらない */', '\t\t}', '\t}',
+          '\tc->reg->CR1 &= ~UART_CR1_UE;', '\tc->reg->BRR = calc_brr((ch == 0U || ch == 5U) ? PCLK1_HZ : PCLK2_HZ, baud);', '\tc->reg->CR1 |= UART_CR1_UE;', '\tc->baud = baud;', '\treturn true;', '}', '',
+          '/* 折り返し試験（TX と RX をつないだ状態で呼ぶ。診断コマンド 0x51） */', 'bool uart_loopback_test(uint8_t ch)', '{', '\tstatic const uint8_t pat[8] = { 0x00, 0xFF, 0x55, 0xAA, 0x0F, 0xF0, 0x33, 0xCC };', '\tuint8_t rx[8];', '\tuint32_t t0;', '\tuint8_t i;', '', '\tif (ch >= UART_CH_NUM) {', '\t\treturn false;', '\t}', '\t(void)uart_recv(ch, rx, sizeof(rx));\t/* 残りを捨てる */', '\t(void)uart_send(ch, pat, sizeof(pat));', '\tt0 = g_tick_ms;',
+          '\twhile (rb_count(&s_ctx[ch].rx) < sizeof(pat)) {', '\t\tif ((uint32_t)(g_tick_ms - t0) > UART_TX_TIMEOUT_MS) {', '\t\t\treturn false;', '\t\t}', '\t}', '\t(void)uart_recv(ch, rx, sizeof(rx));', '\tfor (i = 0; i < sizeof(pat); i++) {', '\t\tif (rx[i] != pat[i]) {', '\t\t\treturn false;', '\t\t}', '\t}', '\treturn true;', '}', '',
+          '/* 統計（デバッグ用コンソールの stat コマンドから呼ぶ） */', 'void uart_get_stat(uint8_t ch, uint32_t *overrun, uint32_t *framing)', '{', '\tif (ch >= UART_CH_NUM) {', '\t\treturn;', '\t}', '\t*overrun = s_ctx[ch].cnt_overrun;', '\t*framing = s_ctx[ch].cnt_framing;', '}']
+    return L
+
+
+def _r09_adc_c():
+    L = ['/*', ' * drv_adc.c  ―  A/D 変換ドライバ（16 チャネル、DMA 連続変換、移動平均）', ' *', ' *  作成  2014/07/01  第二開発部 佐伯', ' *  改訂  2023/02/14  Ver 2.1.0  校正値をチャネルごとに持つ（柏木）', ' */', '#include <stdint.h>', '#include <stdbool.h>', '', '#include "config.h"', '#include "xm32f4_adc.h"', '#include "drv_adc.h"', '',
+         '#define ADC_VREF_MV\t\t\t(3300U)', '#define ADC_FULL_SCALE\t\t(4095U)', '', 'typedef struct {', '\tuint16_t\tgain;\t\t/* 倍率 ×1000 */', '\tint16_t\t\toffset;\t\t/* オフセット [mV] */', '\tconst char\t*name;', '} adc_ch_t;', '', '/* チャネルの割り当て（回路図 PMU200-E-003 Rev.D による） */', 'static const adc_ch_t s_ch[ADC_CH_MAX] = {']
+    names = ['入力電圧 1', '入力電圧 2', '出力電圧 1', '出力電圧 2', '入力電流 1', '入力電流 2', '出力電流 1', '出力電流 2', '基板温度', 'ヒートシンク温度', 'ファン電流', '補助電源 12V', '補助電源 5V', '補助電源 3.3V', 'バッテリ電圧', '基準電圧（自己診断）']
+    L += [f'\t{{ ADC_CH{n}_GAIN, ADC_CH{n}_OFFSET, "CH{n}" }},\t/* {names[n]} */' for n in range(16)] + ['};', '', 'static volatile uint16_t s_raw[ADC_CH_MAX];\t\t\t\t\t\t\t/* DMA が書く */', 'static uint16_t s_hist[ADC_CH_MAX][ADC_FILTER_DEPTH_MAX];\t/* 移動平均用 */', 'static uint8_t s_hist_pos;', 'static uint8_t s_depth = ADC_FILTER_DEPTH_DEFAULT;', '',
+          '/* 初期化（連続変換・DMA 循環モード） */', 'void adc_init(void)', '{', '\tuint8_t ch;', '\tuint8_t i;', '', '\tfor (ch = 0; ch < ADC_CH_MAX; ch++) {', '\t\tfor (i = 0; i < ADC_FILTER_DEPTH_MAX; i++) {', '\t\t\ts_hist[ch][i] = 0;', '\t\t}', '\t}', '\tADC1->CR = 0;', '\tADC1->SMPR = ADC_SMPR_56CYC;\t\t\t/* 入力インピーダンスが高いので長めに */', '\tADC1->SQR = ADC_SQR_ALL16;', '\tdma_setup(DMA_CH_ADC, (uint32_t)&ADC1->DR, (uint32_t)s_raw, ADC_CH_MAX);',
+          '\tADC1->CR = ADC_CR_ADEN | ADC_CR_CONT | ADC_CR_DMAEN;', '\tadc_start();', '}', '', 'void adc_start(void)', '{', '\tADC1->CR |= ADC_CR_ADSTART;', '}', '', 'void adc_stop(void)', '{', '\tADC1->CR |= ADC_CR_ADSTP;', '\twhile ((ADC1->CR & ADC_CR_ADSTP) != 0U) {', '\t\t/* 止まるのを待つ（最大でも 1 変換分） */', '\t}', '}', '',
+          '/* 移動平均の段数を変える（1〜ADC_FILTER_DEPTH_MAX） */', 'bool adc_set_depth(uint8_t depth)', '{', '\tif ((depth == 0U) || (depth > ADC_FILTER_DEPTH_MAX)) {', '\t\treturn false;', '\t}', '\ts_depth = depth;', '\ts_hist_pos = 0;', '\treturn true;', '}', '',
+          '/* 1ms ごとに呼ぶ：最新値を履歴に積む */', 'void adc_tick(void)', '{', '\tuint8_t ch;', '', '\tfor (ch = 0; ch < ADC_CH_MAX; ch++) {', '\t\ts_hist[ch][s_hist_pos] = s_raw[ch];', '\t}', '\ts_hist_pos++;', '\tif (s_hist_pos >= s_depth) {', '\t\ts_hist_pos = 0;', '\t}', '}', '',
+          '/* 生の値（移動平均後） */', 'uint16_t adc_get_raw(uint8_t ch)', '{', '\tuint32_t sum = 0;', '\tuint8_t i;', '', '\tif (ch >= ADC_CH_MAX) {', '\t\treturn 0;', '\t}', '\tfor (i = 0; i < s_depth; i++) {', '\t\tsum += s_hist[ch][i];', '\t}', '\treturn (uint16_t)(sum / s_depth);', '}', '',
+          '/* 物理量 [mV] に直した値 */', 'uint16_t adc_get_mv(uint8_t ch)', '{', '\tuint32_t mv;', '\tint32_t v;', '', '\tif (ch >= ADC_CH_MAX) {', '\t\treturn 0;', '\t}', '\tmv = ((uint32_t)adc_get_raw(ch) * ADC_VREF_MV) / ADC_FULL_SCALE;', '\tv = (int32_t)((mv * s_ch[ch].gain) / 1000U) + s_ch[ch].offset;', '\tif (v < 0) {', '\t\tv = 0;', '\t}', '\tif (v > 65535) {', '\t\tv = 65535;', '\t}', '\treturn (uint16_t)v;', '}', '']
+    for n in range(16):
+        L += [f'/* CH{n}（{names[n]}）の上下限の判定。戻り値：0=正常、1=上限超え、2=下限割れ */', f'uint8_t adc_check_ch{n}(void)', '{', f'\tuint16_t v = adc_get_mv({n});', '', f'\tif (v > ADC_CH{n}_ALARM_HI) {{', '\t\treturn 1;', '\t}', f'\tif (v < ADC_CH{n}_ALARM_LO) {{', '\t\treturn 2;', '\t}', '\treturn 0;', '}', '']
+    L += ['/* 自己診断：基準電圧チャネル（CH15）が 1.20V ±3% に入っているか */', 'bool adc_self_test(void)', '{', '\tuint16_t v = adc_get_mv(15);', '', '\treturn (v >= 1164U) && (v <= 1236U);', '}']
+    return L
+
+
+def _r09_config_h():
+    L = ['/*', ' * config.h  ―  PMU-200 機種別の設定', ' *', ' *  機種を追加するときは、このファイルだけを書き換えること。', ' *  数値の単位は、名前の末尾（_MS、_MV、_HZ など）に書いてある。', ' */', '#ifndef CONFIG_H', '#define CONFIG_H', '',
+         '/* ---- 版数 ---- */', '#define FW_VERSION_MAJOR\t\t(2)', '#define FW_VERSION_MINOR\t\t(3)', '#define FW_VERSION_PATCH\t\t(0)', '#define FW_VERSION_STRING\t\t"2.3.0"', '#define FW_BUILD_DATE\t\t\t"2026-09-30"', '',
+         '/* ---- クロック ---- */', '#define HSE_HZ\t\t\t\t\t(8000000UL)\t\t/* 外部発振子 8MHz */', '#define SYSCLK_HZ\t\t\t\t(72000000UL)\t/* PLL ×9 */', '#define PCLK1_HZ\t\t\t\t(36000000UL)', '#define PCLK2_HZ\t\t\t\t(72000000UL)', '#define SYSTICK_HZ\t\t\t\t(1000U)', '',
+         '/* ---- 周期・時間 ---- */', '#define MEASURE_CYCLE_MS\t\t(10U)\t\t/* 計測の周期 */', '#define REPORT_CYCLE_MIN_MS\t\t(100U)', '#define REPORT_CYCLE_MAX_MS\t\t(60000U)', '#define LED_PERIOD_NORM_MS\t\t(1000U)', '#define LED_PERIOD_ERR_MS\t\t(200U)', '#define WDT_TIMEOUT_MS\t\t\t(500U)\t\t/* ウォッチドッグの時間 */', '#define RELAY_DELAY_MAX_MS\t\t(5000U)', '',
+         '/* ---- 保護のしきい値（設定できる範囲） ---- */', '#define OVP_LEVEL_MIN_MV\t\t(20000U)', '#define OVP_LEVEL_MAX_MV\t\t(60000U)', '#define UVP_LEVEL_MIN_MV\t\t(9000U)', '#define UVP_LEVEL_MAX_MV\t\t(40000U)', '#define OCP_LEVEL_MIN_MA\t\t(500U)', '#define OCP_LEVEL_MAX_MA\t\t(30000U)', '#define OTP_LEVEL_MIN\t\t\t(400U)\t\t/* 40.0℃ */', '#define OTP_LEVEL_MAX\t\t\t(1050U)\t\t/* 105.0℃ */', '',
+         '/* ---- 通信フレーム ---- */', '#define FRAME_STX\t\t\t\t(0x02U)', '#define UART_RX_FRAME_MAX\t\t(64U)', '#define UART_CH_HOST\t\t\t(0U)\t\t/* 上位通信 */', '#define UART_CH_DEBUG\t\t\t(1U)\t\t/* ﾃﾞﾊﾞｯｸﾞ用ｺﾝｿｰﾙ */', '#define UART_CH_DISPLAY\t\t\t(2U)', '', '/* ---- UART（チャネルごと） ---- */']
+    baud = [38400, 115200, 19200, 9600, 57600, 57600]; pins = [('PA9', 'PA10'), ('PA2', 'PA3'), ('PB10', 'PB11'), ('PC10', 'PC11'), ('PC12', 'PD2'), ('PC6', 'PC7')]
+    for n in range(6): L += [f'#define UART{n}_BAUDRATE\t\t\t({baud[n]}UL)', f'#define UART{n}_TX_PIN\t\t\t\tPIN_{pins[n][0]}', f'#define UART{n}_RX_PIN\t\t\t\tPIN_{pins[n][1]}', f'#define UART{n}_TX_BUF_SIZE\t\t({256 if n < 2 else 128}U)', f'#define UART{n}_RX_BUF_SIZE\t\t({256 if n < 2 else 128}U)', f'#define UART{n}_PRIORITY\t\t\t({3 + n}U)', '']
+    L += ['/* ---- A/D（チャネルごと。GAIN は ×1000、OFFSET・ALARM は mV） ---- */', '#define ADC_CH_MAX\t\t\t\t(16U)', '#define ADC_FILTER_DEPTH_MAX\t(32U)', '#define ADC_FILTER_DEPTH_DEFAULT\t(8U)']
+    g = [(18182, 0, 52000, 18000), (18182, 0, 52000, 18000), (18182, 0, 50000, 20000), (18182, 0, 50000, 20000), (10000, -25, 28000, 0), (10000, -25, 28000, 0), (10000, -30, 26000, 0), (10000, -30, 26000, 0), (1000, -500, 1050, 0), (1000, -500, 1150, 0), (2000, 0, 3000, 50), (4000, 0, 12600, 11400), (2000, 0, 5250, 4750), (1000, 0, 3465, 3135), (6000, 0, 16800, 10500), (1000, 0, 1236, 1164)]
+    for n in range(16): L += [f'#define ADC_CH{n}_GAIN\t\t\t({g[n][0]}U)', f'#define ADC_CH{n}_OFFSET\t\t\t({g[n][1]})', f'#define ADC_CH{n}_ALARM_HI\t\t({g[n][2]}U)', f'#define ADC_CH{n}_ALARM_LO\t\t({g[n][3]}U)']
+    L += ['', '/* ---- 端子の割り当て（回路図 PMU200-E-003 Rev.D） ---- */']
+    pn = [('LED_STATUS', 'PB0', '状態表示 LED（緑）'), ('LED_ALARM', 'PB1', '警報 LED（赤）'), ('RELAY_OUT', 'PB5', '出力リレー'), ('RELAY_PRE', 'PB6', '突入防止リレー'), ('FAN_PWM', 'PA8', 'ファン PWM'), ('FAN_TACH', 'PA15', 'ファン回転数'), ('RS485_DE', 'PA11', 'RS-485 送信許可'), ('SW_ADDR0', 'PC0', 'アドレス設定 bit0'), ('SW_ADDR1', 'PC1', 'アドレス設定 bit1'),
+          ('SW_ADDR2', 'PC2', 'アドレス設定 bit2'), ('SW_ADDR3', 'PC3', 'アドレス設定 bit3'), ('DI_INTERLOCK', 'PC4', 'インターロック入力'), ('DI_REMOTE', 'PC5', '遠隔操作入力'), ('DO_ALARM', 'PC8', '警報接点出力'), ('DO_READY', 'PC9', '準備完了接点出力'), ('EEP_WP', 'PB12', 'EEPROM 書き込み保護'), ('TP_DEBUG', 'PB15', '試験用端子')]
+    for i, (a, b, c) in enumerate(pn): L.append(f'#define PIN_{a}\t\t\tPIN_{b}\t\t/* {c} */')
+    L += ['', '/* ---- 端子番号（ポート×16＋ビット） ----  */']
+    for pi, port in enumerate('ABCD'):
+        for bit in range(16): L.append(f'#define PIN_P{port}{bit}\t\t\t\t\t({pi * 16 + bit}U)')
+    L += ['', '/* ---- 機能の切り替え（1=有効、0=無効） ---- */', '#define USE_CAN_DIAG\t\t\t(1)', '#define USE_DISPLAY\t\t\t\t(1)', '#define USE_FAN_TACH\t\t\t(1)', '#define USE_BATTERY_BACKUP\t\t(0)\t\t/* PMU-200B のみ */', '#define USE_DEBUG_CONSOLE\t\t(1)', '', '#endif /* CONFIG_H */']
+    return L
+
+
+def _r09_makefile(v):
+    return ['# PMU-200 ファームウェアのビルド', '#   make            … build/ に bin・hex・mot・map を作る', '#   make clean      … build/ を消す', '#   make flash      … 書き込み器で書き込む', '', 'TARGET   := firmware', f'VERSION  := {"2.3.1" if v else "2.3.0"}', 'BUILD    := build', '', 'CROSS    := arm-none-eabi-', 'CC       := $(CROSS)gcc', 'AS       := $(CROSS)gcc -x assembler-with-cpp', 'LD       := $(CROSS)gcc', 'OBJCOPY  := $(CROSS)objcopy', 'OBJDUMP  := $(CROSS)objdump', 'SIZE     := $(CROSS)size', '',
+            'MCU      := -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard', 'DEFS     := -DXM32F407xx -DUSE_FULL_ASSERT=0', 'INCS     := -Isrc -Ilib/xm32f4/inc -Ilib/cmsis/inc', 'OPT      := -Os -g3', 'WARN     := -Wall -Wextra -Wshadow -Wundef -Wconversion -Werror=implicit-function-declaration',
+            'CFLAGS   := $(MCU) $(DEFS) $(INCS) $(OPT) $(WARN) -std=c99 -ffunction-sections -fdata-sections -fno-common -finput-charset=EUC-JP', 'ASFLAGS  := $(MCU) $(DEFS) $(INCS)', 'LDSCRIPT := ld/xm32f407_flash.ld', 'LDFLAGS  := $(MCU) -T$(LDSCRIPT) -Wl,--gc-sections -Wl,-Map=$(BUILD)/$(TARGET)_v$(VERSION).map,--cref -specs=nano.specs -lc -lm -lnosys', '',
+            'SRCS_C := \\', '\tsrc/main.c \\', '\tsrc/drv_uart.c \\', '\tsrc/drv_adc.c \\', '\tsrc/drv_can.c \\', '\tsrc/drv_i2c.c \\', '\tsrc/drv_spi.c \\', '\tsrc/drv_tim.c \\', '\tsrc/drv_gpio.c \\', '\tsrc/drv_flash.c \\', '\tsrc/drv_wdt.c \\', '\tsrc/app_meas.c \\', '\tsrc/app_report.c \\', '\tsrc/app_diag.c \\', '\tsrc/app_cal.c \\', '\tsrc/lib_crc.c \\', '\tsrc/lib_fmt.c \\', '\tsrc/lib_ring.c \\', '\tsrc/system_xm32f4.c', '',
+            'SRCS_S := src/startup_xm32f4.s', '', 'OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS_C)) $(patsubst src/%.s,$(BUILD)/%.o,$(SRCS_S))', 'DEPS := $(OBJS:.o=.d)', '', 'ELF := $(BUILD)/$(TARGET)_v$(VERSION).elf', 'BIN := $(BUILD)/$(TARGET)_v$(VERSION).bin', 'HEX := $(BUILD)/$(TARGET)_v$(VERSION).hex', 'MOT := $(BUILD)/$(TARGET)_v$(VERSION).mot', '',
+            '.PHONY: all clean flash size list', '', 'all: $(BIN) $(HEX) $(MOT) size', '', '$(BUILD):', '\tmkdir -p $(BUILD)', '', '$(BUILD)/%.o: src/%.c | $(BUILD)', '\t@echo "CC   $<"', '\t$(CC) $(CFLAGS) -MMD -MP -c $< -o $@', '', '$(BUILD)/%.o: src/%.s | $(BUILD)', '\t@echo "AS   $<"', '\t$(AS) $(ASFLAGS) -c $< -o $@', '',
+            '$(ELF): $(OBJS) $(LDSCRIPT)', '\t@echo "LD   $@"', '\t$(LD) $(OBJS) $(LDFLAGS) -o $@', '', '# 末尾に CRC32 を付ける（tools/append_crc.py）。書き込み後の照合に使う', '$(BIN): $(ELF)', '\t$(OBJCOPY) -O binary --gap-fill 0xFF --pad-to 0x0803FFFC $< $@', '\tpython3 tools/append_crc.py $@', '',
+            '$(HEX): $(BIN)', ('        ' if v else '\t') + '$(OBJCOPY) -I binary -O ihex --change-addresses 0x08000000 $< $@', '', '$(MOT): $(BIN)', '\t$(OBJCOPY) -I binary -O srec --srec-forceS3 --change-addresses 0x08000000 $< $@', '', 'size: $(ELF)', '\t$(SIZE) --format=berkeley $<', '', 'list: $(ELF)', '\t$(OBJDUMP) -d -S $< > $(BUILD)/$(TARGET)_v$(VERSION).lst', '',
+            'flash: $(HEX)', '\txm32prog --port swd --erase --write $< --verify --reset', '', 'clean:', '\trm -rf $(BUILD)', '', '-include $(DEPS)']
+
+
+def r09(d):
+    rnd = random.Random(4909); A, B = 'fw_v2.3.0', 'fw_v2.3.1'
+    ix = lambda L, s: (L.index(s) if L.count(s) == 1 else (_ for _ in ()).throw(AssertionError(('not unique', s, L.count(s)))))
+    # ---------------------------------------------------------------- C のソース（EUC-JP・タブ・LF）
+    M0 = _r09_main_c(); M1 = list(M0)
+    M1.insert(ix(M1, ' *  改訂  2026/09/30  Ver 2.3.0  診断コマンド追加（柏木）') + 1, ' *  改訂  2026/11/20  Ver 2.3.1  省電力に入る前の送信待ちを追加、連続異常の判定を修正（柏木）')
+    a = ix(M1, ' * 状態表示 LED の更新') - 1; b = ix(M1, '/* 応答フレームを作って送る（先頭 STX、末尾にチェックサム） */'); blk = M1[a:b]; del M1[a:b]; mv_len = len(blk); assert blk[0] == '/*' and blk[-1] == '' and blk[-2] == '}'
+    p = ix(M1, '/* SysTick 割り込み（1ms） */'); M1[p:p] = blk
+    tw = [('\ts_reply[0] = FRAME_STX;', ' '), ('\tgpio_init();', '\t'), ('\ts_report_req = false;', '  '), ('\t\twdt_refresh();', ' ')]
+    for s, x in tw: M1[ix(M1, s)] = s + x
+    c_old = '\t/* しきい値の判定（電圧は ch0〜ch3、電流は ch4〜ch7） */'; c_new = '\t/* しきい値の判定（電圧は ch0〜ch3、電流は ch4〜ch7。温度は app_meas.c で見る） */'; M1[ix(M1, c_old)] = c_new
+    M1[ix(M1, '\tif (s_err_count > ERR_COUNT_LIMIT) {')] = '\tif (s_err_count >= ERR_COUNT_LIMIT) {'
+    M1.insert(ix(M1, '\tadc_stop();'), '\tuart_flush_tx(UART_CH_HOST);\t/* 送り残しを出し切ってから止める */')
+    U0 = _r09_uart_c(); U1 = list(U0)
+    U1.insert(ix(U1, ' *  改訂  2026/09/30  Ver 2.3.0  折り返し試験を追加（柏木）') + 1, ' *  改訂  2026/11/20  Ver 2.3.1  uart_flush_tx() を追加、送信待ちの上限を 100ms に（柏木）')
+    U1[ix(U1, '#define UART_TX_TIMEOUT_MS\t(50U)\t\t/* 送信完了を待つ上限 */')] = '#define UART_TX_TIMEOUT_MS\t(100U)\t\t/* 送信完了を待つ上限 */'
+    U1[ix(U1, '/* ---- チャネル 3：予備（未使用） ---- */')] = '/* ---- チャネル 3：予備（PMU-200B では拡張 I/O に使う） ---- */'
+    h = ix(U1, 'void UART2_IRQHandler(void)'); t0 = next(i for i in range(h, len(U1)) if U1[i] == '\t\t\tif ((sr & UART_SR_ORE) != 0U) {'); sp = list(range(t0, t0 + 6))
+    for i in sp: n = len(U1[i]) - len(U1[i].lstrip('\t')); U1[i] = '    ' * n + U1[i].lstrip('\t')
+    newf = ['/*', ' * 送信バッファが空になるまで待つ（省電力に入る前、ボーレートを変える前に呼ぶ）', ' *   戻り値：true=出し切った、false=時間切れ（UART_TX_TIMEOUT_MS）', ' */', 'bool uart_flush_tx(uint8_t ch)', '{', '\tuart_ctx_t *c;', '\tuint32_t t0;', '', '\tif (ch >= UART_CH_NUM) {', '\t\treturn false;', '\t}', '\tc = &s_ctx[ch];', '\tt0 = g_tick_ms;',
+            '\twhile ((rb_count(&c->tx) != 0U) || ((c->reg->SR & UART_SR_TC) == 0U)) {', '\t\tif ((uint32_t)(g_tick_ms - t0) > UART_TX_TIMEOUT_MS) {', '\t\t\treturn false;', '\t\t}', '\t}', '\treturn true;', '}', '']
+    fp = ix(U1, '/* 受信（溜まっている分だけ読む） */'); U1[fp:fp] = newf
+    C0 = _r09_config_h(); C1 = list(C0)
+    for a_, b_ in [('#define FW_VERSION_PATCH\t\t(0)', '#define FW_VERSION_PATCH\t\t(1)'), ('#define FW_VERSION_STRING\t\t"2.3.0"', '#define FW_VERSION_STRING\t\t"2.3.1"'), ('#define FW_BUILD_DATE\t\t\t"2026-09-30"', '#define FW_BUILD_DATE\t\t\t"2026-11-20"'),
+                   ('#define WDT_TIMEOUT_MS\t\t\t(500U)\t\t/* ウォッチドッグの時間 */', '#define WDT_TIMEOUT_MS\t\t\t(800U)\t\t/* ウォッチドッグの時間 */'), ('#define UART1_BAUDRATE\t\t\t(115200UL)', '#define UART1_BAUDRATE\t\t\t(230400UL)'),
+                   ('#define OTP_LEVEL_MAX\t\t\t(1050U)\t\t/* 105.0℃ */', '#define OTP_LEVEL_MAX\t\t\t(1050U)\t\t/* 105.0℃（部品の定格による上限） */')]: C1[ix(C1, a_)] = b_
+    D0 = _r09_adc_c(); K0, K1 = _r09_makefile(0), _r09_makefile(1)
+    J = lambda L, eol='\n': eol.join(L) + eol
+    for nm_, L0_, L1_ in (('src/main.c', M0, M1), ('src/drv_uart.c', U0, U1), ('src/config.h', C0, C1)): text(f'{d}/{A}/{nm_}', J(L0_), enc='euc_jp'); text(f'{d}/{B}/{nm_}', J(L1_), enc='euc_jp')
+    text(f'{d}/{A}/src/drv_adc.c', J(D0), enc='euc_jp'); text(f'{d}/{B}/src/drv_adc.c', J(D0), enc='euc_jp', eol='\r\n'); text(f'{d}/{A}/Makefile', J(K0), enc='euc_jp'); text(f'{d}/{B}/Makefile', J(K1), enc='euc_jp')
+    rd = lambda n: open(P(f'{d}/{n}'), 'rb').read()
+    for nm_, L0_, L1_ in (('src/main.c', M0, M1), ('src/drv_uart.c', U0, U1), ('src/config.h', C0, C1), ('Makefile', K0, K1)):
+        assert rd(f'{A}/{nm_}').decode('euc_jp') == J(L0_) and rd(f'{B}/{nm_}').decode('euc_jp') == J(L1_) and b'\r' not in rd(f'{B}/{nm_}')
+        try: rd(f'{A}/{nm_}').decode('utf-8'); raise AssertionError('utf-8 として読めてしまう')
+        except UnicodeDecodeError: pass
+    assert rd(f'{B}/src/drv_adc.c').replace(b'\r\n', b'\n') == rd(f'{A}/src/drv_adc.c') and rd(f'{B}/src/drv_adc.c').count(b'\r\n') == len(D0) and b'\r' not in rd(f'{A}/src/drv_adc.c')
+    L = lambda X, s: ix(X, s) + 1
+    mv0 = L(M0, ' * 状態表示 LED の更新') - 1; mv1 = L(M1, ' * 状態表示 LED の更新') - 1
+    mk0 = [i + 1 for i in range(len(K0)) if K0[i] != K1[i]]; assert len(mk0) == 2 and len(K0) == len(K1)
+    key(d, f'■ ソース「{A}/」→「{B}/」。src/main.c・src/drv_uart.c・src/config.h・Makefile は **EUC-JP**・LF・字下げはタブ（半角カナのコメントあり）。行番号はファイルの先頭を1行目とした番号',
+        f'src/main.c（{len(M0)}行 → {len(M1)}行）',
+        f'　【関数の移動】update_status_led()（前のコメントと後ろの空行を含む {mv_len} 行）が、旧 {mv0}〜{mv0 + mv_len - 1}行目（reply() の前）から、新 {mv1}〜{mv1 + mv_len - 1}行目（SysTick_Handler の前）へ移った。中身は1文字も変わっていない',
+        f'　【本当の変更 2】旧 {L(M0, chr(9) + "if (s_err_count > ERR_COUNT_LIMIT) {")}行目／新 {L(M1, chr(9) + "if (s_err_count >= ERR_COUNT_LIMIT) {")}行目：「s_err_count > ERR_COUNT_LIMIT」→「s_err_count >= ERR_COUNT_LIMIT」（> が >= に）。新 {L(M1, chr(9) + "uart_flush_tx(UART_CH_HOST);" + chr(9) + "/* 送り残しを出し切ってから止める */")}行目：st_sleep() の先頭に uart_flush_tx(UART_CH_HOST); の1行を追加',
+        '　【行末の空白だけ 4】' + '、'.join(f'新 {L(M1, s + x)}行目「{s.strip()}」の後ろに' + {' ': '空白1つ', '\t': 'タブ1つ', '  ': '空白2つ'}[x] for s, x in tw) + '（見た目は同じ。空白の記号表示で分かること）',
+        f'　【コメントだけ 2】新 {[i + 1 for i in range(len(M1)) if "Ver 2.3.1" in M1[i]][0]}行目に改訂履歴の行を追加（「改訂  2026/11/20  Ver 2.3.1 …」）。旧 {L(M0, c_old)}行目／新 {L(M1, c_new)}行目のコメントに「。温度は app_meas.c で見る」を追記',
+        f'src/drv_uart.c（{len(U0)}行 → {len(U1)}行）',
+        f'　【#define の値】旧 {L(U0, "#define UART_TX_TIMEOUT_MS" + chr(9) + "(50U)" + chr(9) * 2 + "/* 送信完了を待つ上限 */")}行目／新 {L(U1, "#define UART_TX_TIMEOUT_MS" + chr(9) + "(100U)" + chr(9) * 2 + "/* 送信完了を待つ上限 */")}行目：UART_TX_TIMEOUT_MS (50U) → (100U)',
+        f'　【関数の追加】uart_flush_tx()：新 {fp + 1}〜{fp + len(newf)}行目の {len(newf)} 行（コメント4行・本体・空行）。uart_puts() と uart_recv() の間',
+        f'　【タブ → 空白 6 行】新 {sp[0] + 1}〜{sp[-1] + 1}行目（UART2_IRQHandler の中）：行頭のタブ 3〜4 個が、タブ1個につき空白4つに変わった。文字は同じ。ほかの5チャネルの同じ行はタブのまま',
+        f'　【コメントだけ 2】新 {[i + 1 for i in range(len(U1)) if "Ver 2.3.1" in U1[i]][0]}行目に改訂履歴の行を追加。旧 {L(U0, "/* ---- チャネル 3：予備（未使用） ---- */")}行目／新 {L(U1, "/* ---- チャネル 3：予備（PMU-200B では拡張 I/O に使う） ---- */")}行目「予備（未使用）」→「予備（PMU-200B では拡張 I/O に使う）」',
+        f'src/config.h（{len(C0)}行。行数は同じ）：【#define の値 5】{L(C0, "#define FW_VERSION_PATCH" + chr(9) * 2 + "(0)")}行目 FW_VERSION_PATCH (0)→(1)、{L(C1, "#define FW_VERSION_STRING" + chr(9) * 2 + chr(34) + "2.3.1" + chr(34))}行目 FW_VERSION_STRING "2.3.0"→"2.3.1"、{L(C1, "#define FW_BUILD_DATE" + chr(9) * 3 + chr(34) + "2026-11-20" + chr(34))}行目 FW_BUILD_DATE "2026-09-30"→"2026-11-20"、'
+        f'{[i + 1 for i in range(len(C0)) if "WDT_TIMEOUT_MS" in C0[i]][0]}行目 WDT_TIMEOUT_MS (500U)→(800U)、{L(C1, "#define UART1_BAUDRATE" + chr(9) * 3 + "(230400UL)")}行目 UART1_BAUDRATE (115200UL)→(230400UL)。【コメントだけ 1】{[i + 1 for i in range(len(C0)) if "OTP_LEVEL_MAX" in C0[i]][0]}行目のコメント「105.0℃」→「105.0℃（部品の定格による上限）」',
+        f'src/drv_adc.c（{len(D0)}行）：中身は同じ。**新だけ改行が CRLF**（旧は LF）。文字コードはどちらも EUC-JP。「改行コードだけが違う」と分かること',
+        f'Makefile（{len(K0)}行。行数は同じ）：{mk0[0]}行目 VERSION := 2.3.0 → 2.3.1。【仕込んだ誤り】{mk0[1]}行目（$(HEX) の規則の実行行「$(OBJCOPY) -I binary -O ihex …」）の行頭が、タブ1つ → 空白8つに変わっている。見た目は同じだが、Makefile では実行行の行頭はタブでなければならず、このままでは make が「missing separator」で止まる。空白を無視して比べると見えなくなる')
+
+    # ---------------------------------------------------------------- リンカのマップファイル（関数が1つ増えて、以降のアドレスがすべてずれる）
+    def mapfile(v):
+        r = random.Random(909); verbs = ['init', 'start', 'stop', 'read', 'write', 'get', 'set', 'clear', 'check', 'update', 'reset', 'enable', 'disable', 'send', 'recv', 'calc', 'load', 'save', 'poll', 'handle']
+        nouns = ['status', 'config', 'buffer', 'frame', 'error', 'timer', 'counter', 'channel', 'filter', 'mode', 'level', 'table', 'state', 'event', 'queue', 'limit', 'offset', 'gain', 'flag', 'param', 'block', 'page', 'mask', 'irq', 'clock']
+        objs = [('main', ['main', 'SysTick_Handler']), ('drv_uart', [f'UART{n}_IRQHandler' for n in range(6)] + ['uart_init_all', 'uart_send', 'uart_puts'] + (['uart_flush_tx'] if v else []) + ['uart_recv', 'uart_recv_frame', 'uart_get_error', 'uart_set_baud', 'uart_loopback_test', 'uart_get_stat']),
+                ('drv_adc', ['adc_init', 'adc_start', 'adc_stop', 'adc_set_depth', 'adc_tick', 'adc_get_raw', 'adc_get_mv'] + [f'adc_check_ch{n}' for n in range(16)] + ['adc_self_test'])]
+        for pre, n in [('drv_can', 46), ('drv_i2c', 38), ('drv_spi', 34), ('drv_tim', 52), ('drv_gpio', 28), ('drv_flash', 30), ('drv_wdt', 12), ('app_meas', 64), ('app_report', 48), ('app_diag', 72), ('app_cal', 40), ('lib_crc', 10), ('lib_fmt', 36), ('lib_ring', 14), ('system_xm32f4', 18),
+                       ('hal_rcc', 44), ('hal_nvic', 22), ('hal_dma', 40), ('hal_pwr', 26), ('hal_rtc', 34), ('hal_exti', 20), ('hal_crc', 12), ('hal_iwdg', 10), ('hal_usart', 58), ('hal_adc', 62), ('hal_can', 54), ('hal_i2c', 50), ('hal_spi', 44), ('hal_tim', 96), ('hal_flash', 38), ('hal_gpio', 24)]:
+            names = []; p = pre.split('_', 1)[-1] if pre.startswith(('drv', 'app', 'lib')) else pre
+            while len(names) < n:
+                s = f'{p}_{r.choice(verbs)}_{r.choice(nouns)}'
+                if s not in names: names.append(s)
+            objs.append((pre, names))
+        objs.append(('libc_nano', ['memcpy', 'memset', 'memcmp', 'memmove', 'strlen', 'strcmp', 'strncmp', 'strcpy', 'strncpy', 'strchr', 'abs', 'atoi', 'qsort', 'bsearch', '__aeabi_uldivmod', '__aeabi_ldivmod', '__udivmoddi4', '__aeabi_memcpy', '__aeabi_memclr', '__libc_init_array', '_sbrk', '_exit']))
+        size = {}; nn = lambda ns: len(ns) - (1 if 'uart_flush_tx' in ns else 0)      # 表の数を決めるときは、増えた関数を数えない（版によらず同じにする）
+        for o, ns in objs:
+            for s in ns: size[s] = random.Random('size.' + s).randrange(3, 30) * 4
+        size['uart_flush_tx'] = 0x48; size['SysTick_Handler'] = 0x10; size['main'] = 0x2ac + (0x0c if v else 0)
+        L = ['Archive member included to satisfy reference by file (symbol)', '', '/opt/gcc-arm/lib/thumb/v7e-m+fp/hard/libc_nano.a(lib_a-memcpy.o)', '                              build/app_report.o (memcpy)', '/opt/gcc-arm/lib/thumb/v7e-m+fp/hard/libc_nano.a(lib_a-memset.o)', '                              build/startup_xm32f4.o (memset)', '',
+             'Memory Configuration', '', 'Name             Origin             Length             Attributes', 'FLASH            0x08000000         0x00040000         xr', 'RAM              0x20000000         0x00008000         xrw', '*default*        0x00000000         0xffffffff', '', 'Linker script and memory map', '',
+             '.isr_vector     0x08000000      0x1c4', ' *(.isr_vector)', ' .isr_vector    0x08000000      0x1c4 build/startup_xm32f4.o', '                0x08000000                g_pfnVectors', '']
+        addr = 0x080001c4; body = []
+        def ent(sec, sym, sz, obj, a):
+            out = [f' {sec}'] if len(sec) > 14 else []
+            out.append((f' {sec:<15}' if len(sec) <= 14 else ' ' * 16) + f'0x{a:08x} {"0x%x" % sz:>10} {obj}')
+            if sym: out.append(f'                0x{a:08x}                {sym}')
+            return out
+        for o, ns in objs:
+            for s in ns: body += ent(f'.text.{s}', s, size[s], f'build/{o}.o' if o != 'libc_nano' else f'/opt/gcc-arm/lib/thumb/v7e-m+fp/hard/libc_nano.a(lib_a-{s}.o)', addr); addr += size[s]
+        L += [f'.text           0x080001c4 {"0x%x" % (addr - 0x080001c4):>10}', ' *(.text*)'] + body + ['', f'                0x{addr:08x}                _etext = .', '']
+        ro = addr; rb = []; rr = random.Random(911)
+        for o, ns in objs[:-1]:
+            for k in range(2 + nn(ns) // 12):
+                sz = rr.randrange(2, 60) * 4; nm_ = ['s_cmd_table', 's_ch'][k] if o in ('main', 'drv_adc') and k < 1 else f's_{o.split("_")[-1]}_tbl{k}'
+                if o == 'main' and k == 0: nm_ = 's_cmd_table'
+                if o == 'drv_adc' and k == 0: nm_ = 's_ch'
+                rb += ent(f'.rodata.{nm_}', None, sz, f'build/{o}.o', addr); addr += sz
+        rb += ent('.rodata.str1.4', None, 0x1a3c, 'build/app_diag.o', addr); addr += 0x1a3c
+        L += [f'.rodata         0x{ro:08x} {"0x%x" % (addr - ro):>10}', ' *(.rodata*)'] + rb + ['', f'                0x{addr:08x}                _sidata = LOADADDR (.data)', '']
+        ram = 0x20000000; db = []; rd_ = random.Random(912)
+        for o, ns in objs[:-1]:
+            for k in range(1 + nn(ns) // 16):
+                sz = rd_.randrange(1, 12) * 4; db += ent(f'.data.g_{o.split("_")[-1]}_cfg{k}', f'g_{o.split("_")[-1]}_cfg{k}', sz, f'build/{o}.o', ram); ram += sz
+        L += [f'.data           0x20000000 {"0x%x" % (ram - 0x20000000):>10} load address 0x{addr:08x}', '                0x20000000                _sdata = .', ' *(.data*)'] + db + [f'                0x{ram:08x}                _edata = .', '']
+        bs = ram; bb = []
+        for o, ns in objs[:-1]:
+            for k in range(2 + nn(ns) // 8):
+                sz = rd_.randrange(1, 80) * 4; nm_ = f's_{o.split("_")[-1]}_work{k}'; bb += ent(f'.bss.{nm_}', None, sz, f'build/{o}.o', ram); ram += sz
+        L += [f'.bss            0x{bs:08x} {"0x%x" % (ram - bs):>10}', '                0x' + f'{bs:08x}' + '                _sbss = .', ' *(.bss*)'] + bb + [f'                0x{ram:08x}                _ebss = .', '', '._user_heap_stack', f'                0x{ram:08x}      0x600', f'                0x{ram + 0x200:08x}                . = (. + _Min_Heap_Size)', f'                0x{ram + 0x600:08x}                . = (. + _Min_Stack_Size)', '',
+              f'OUTPUT(build/firmware_v{"2.3.1" if v else "2.3.0"}.elf elf32-littlearm)', 'LOAD linker stubs', '']
+        assert addr + (ram - 0x20000000) <= 0x0801E800 or True; return L, sum(len(ns) for _, ns in objs)
+    P0, nf0 = mapfile(0); P1, nf1 = mapfile(1); mp0, mp1 = f'{A}/build/firmware_v2.3.0.map', f'{B}/build/firmware_v2.3.1.map'; text(f'{d}/{mp0}', '\n'.join(P0)); text(f'{d}/{mp1}', '\n'.join(P1))
+    a_, b_ = _lines_of(f'{d}/{mp0}'), _lines_of(f'{d}/{mp1}'); ni = _lineno(b_, ' .text.uart_flush_tx'); assert len(b_) == len(a_) + 3 and nf1 == nf0 + 1 and 'uart_flush_tx' in b_[ni + 1]
+    b_wo = b_[:ni - 1] + b_[ni + 2:]; dl = [i for i in range(len(a_)) if a_[i] != b_wo[i]]; hexoff = lambda s: re.sub(r'0x[0-9a-f]+', '0x#', s)
+    assert all(hexoff(a_[i]) == hexoff(b_wo[i]) for i in dl[:-1]) and 'OUTPUT(' in a_[dl[-1]] and dl[1] == _lineno(a_, ' .text.main ') - 1 and dl[0] == _lineno(a_, '.text           0x080001c4') - 1
+    sh12 = sum(1 for i in dl[:-1] if i < ni - 1); ram_same = all(('0x2000' not in a_[i]) or 'load address' in a_[i] or '_sidata' in a_[i] for i in dl[:-1])
+    tx0, tx1 = _lineno(a_, '.text           0x080001c4'), _lineno(b_, '.text           0x080001c4'); assert ram_same
+    key(d, f'■ マップファイル「{mp0}」（{len(a_) - 1:,}行・関数 {nf0:,}）→「{mp1}」（{len(b_) - 1:,}行・関数 {nf1:,}）。ASCII・LF。アドレスは 0x0800xxxx（フラッシュ）と 0x2000xxxx（RAM）',
+        f'【本当に増えたシンボル 1】uart_flush_tx（大きさ 0x48、build/drv_uart.o）：新の {ni}〜{ni + 2}行目の3行（「 .text.uart_flush_tx」「アドレス・大きさ・オブジェクト」「アドレス・シンボル名」）が挿入。uart_puts と uart_recv の間',
+        f'【大きさが変わった関数 1】main：{dl[1] + 1}行目「0x080001c4 0x2ac」→「0x080001c4 0x2b8」（+0x0c。アドレスは同じで、大きさだけが違う）',
+        f'【数字だけが違う行】上の挿入の3行を除くと、旧と新で違う行は {len(dl):,} 行。うち {len(dl) - 1:,} 行は、16進の数字（アドレス・大きさ）だけが違い、シンボル名・オブジェクト名は同じ。main が 0x0c 大きくなり、uart_flush_tx が 0x48 入ったので、main より後ろのフラッシュのアドレスは +0x0c（挿入の前。{sh12 - 2:,} 行）、uart_flush_tx より後ろは +0x54 ずれる',
+        f'数字だけが違う行に含まれるもの：{tx0}行目の .text 全体の大きさ（+0x54）、.rodata の先頭、_etext、_sidata、.data の load address。残る1行は最後の「OUTPUT(build/firmware_v2.3.0.elf …」→「…v2.3.1.elf」（版の文字）',
+        'RAM（0x2000xxxx）のアドレスと大きさ（.data・.bss・ヒープ・スタック）は、1つも変わっていない。数千行の「ずれただけ」の中から、本当の追加（3行）と大きさの変更（1行）を探せるか、アドレスに「数字の差」の札が付かないか（16進は量ではない）を見る')
+
+    # ---------------------------------------------------------------- ファームウェア（bin・Intel HEX・S レコード）
+    def image(v):
+        r = random.Random(2300); b = bytearray(r.randbytes(0x1E800))
+        for i in range(113): struct.pack_into('<I', b, i * 4, 0x20008000 if i == 0 else (0x080001c4 + r.randrange(0, 0x1B000, 4)) | 1)
+        b[0x0A40:0x0A42] = struct.pack('<H', 800 if v else 500)                         # WDT_TIMEOUT_MS（movw の即値のつもり）
+        s = b'PMU-200 FW ' + (b'2.3.1 (2026-11-20)' if v else b'2.3.0 (2026-09-30)') + b'\x00Copyright (C) 2014-2026 Towa Denki Co., Ltd.\x00'; b[0x1C200:0x1C200 + len(s)] = s
+        b += b'\xff' * (0x3FFFC - len(b)); b += struct.pack('<I', zlib.crc32(bytes(b)) & 0xFFFFFFFF)
+        if v: b += b'PMUSIG01' + bytes.fromhex('5ac3e1077b2d94f0')
+        return bytes(b)
+    I0, I1 = image(0), image(1); BASE = 0x08000000
+    def ihex(b):
+        rec = lambda a, t, dt: ':' + (bytes([len(dt), a >> 8, a & 0xFF, t]) + dt + bytes([(-(len(dt) + (a >> 8) + (a & 0xFF) + t + sum(dt))) & 0xFF])).hex().upper()
+        L = []; at = {}
+        for off in range(0, len(b), 16):
+            a = BASE + off
+            if a & 0xFFFF == 0: L.append(rec(0, 4, struct.pack('>H', a >> 16)))
+            L.append(rec(a & 0xFFFF, 0, b[off:off + 16])); at[off] = len(L)
+        return L + [rec(0, 5, struct.pack('>I', BASE + 0x1c5)), ':00000001FF'], at
+    def srec(b, name):
+        rec = lambda t, body: f'S{t}' + (bytes([len(body) + 1]) + body + bytes([~(len(body) + 1 + sum(body)) & 0xFF])).hex().upper()
+        L = [rec(0, b'\x00\x00' + name.encode('ascii'))]; at = {}
+        for off in range(0, len(b), 16): L.append(rec(3, struct.pack('>I', BASE + off) + b[off:off + 16])); at[off] = len(L)
+        return L + [rec(7, struct.pack('>I', BASE + 0x1c5))], at
+    def un_ihex(L):
+        out = bytearray(); hi = 0
+        for l in L:
+            raw = bytes.fromhex(l[1:]); assert sum(raw) & 0xFF == 0
+            if raw[3] == 4: hi = struct.unpack('>H', raw[4:6])[0]
+            elif raw[3] == 0: assert (hi << 16 | raw[1] << 8 | raw[2]) == BASE + len(out); out += raw[4:-1]
+        return bytes(out)
+    def un_srec(L):
+        out = bytearray()
+        for l in L:
+            raw = bytes.fromhex(l[2:]); assert (sum(raw) & 0xFF) == 0xFF
+            if l[1] == '3': assert struct.unpack('>I', raw[1:5])[0] == BASE + len(out); out += raw[5:-1]
+        return bytes(out)
+    out = {}
+    for ver, fol, img in (('2.3.0', A, I0), ('2.3.1', B, I1)):
+        wbytes(f'{d}/{fol}/build/firmware_v{ver}.bin', img); hx_, hat = ihex(img); sr_, sat = srec(img, f'firmware_v{ver}.mot')
+        text(f'{d}/{fol}/build/firmware_v{ver}.hex', '\n'.join(hx_) + '\n', enc='ascii', eol='\r\n'); text(f'{d}/{fol}/build/firmware_v{ver}.mot', '\n'.join(sr_) + '\n', enc='ascii', eol='\r\n')
+        assert un_ihex([x.rstrip('\r') for x in _lines_of(f'{d}/{fol}/build/firmware_v{ver}.hex', 'ascii')[:-1]]) == img
+        assert un_srec([x.rstrip('\r') for x in _lines_of(f'{d}/{fol}/build/firmware_v{ver}.mot', 'ascii')[:-1]]) == img and open(P(f'{d}/{fol}/build/firmware_v{ver}.bin'), 'rb').read() == img
+        out[ver] = (hx_, hat, sr_, sat)
+    dfo = [i for i in range(len(I0)) if I0[i] != I1[i]]; runs = []
+    for o in dfo:
+        if runs and o - runs[-1][-1] <= 16: runs[-1].append(o)
+        else: runs.append([o])
+    assert len(I0) == 0x40000 and len(I1) == 0x40010 and len(runs) == 3 and I1[:0x40000] != I0 and I1[0x40000:].startswith(b'PMUSIG01')
+    hx0, hat0, sr0, sat0 = out['2.3.0']; hx1, hat1, sr1, sat1 = out['2.3.1']
+    hd_ = [i + 1 for i in range(len(hx0) - 2) if hx0[i] != hx1[i]]; sd_ = [i + 1 for i in range(1, len(sr0) - 1) if sr0[i] != sr1[i]]
+    assert hd_ == sorted({hat0[o // 16 * 16] for o in dfo}) and sd_ == sorted({sat0[o // 16 * 16] for o in dfo}) and len(hx1) == len(hx0) + 2 and len(sr1) == len(sr0) + 1 and hx1[-2:] == hx0[-2:] and sr1[-1] == sr0[-1] and sr0[0] != sr1[0]
+    hexs = lambda b: ' '.join(f'{x:02X}' for x in b); desc = ['WDT の時間の定数（500＝0x01F4 → 800＝0x0320。下位バイトが先）', '版と日付の文字列「PMU-200 FW 2.3.0 (2026-09-30)」→「…2.3.1 (2026-11-20)」', '末尾の CRC32（最後の4バイト）']
+    key(d, f'■ ファームウェア「{A}/build/firmware_v2.3.0.bin」（{len(I0):,} バイト＝256 KB）→「{B}/build/firmware_v2.3.1.bin」（{len(I1):,} バイト。16 バイト大きい）。中身は実行できるコードではない（それらしいバイト列）',
+        f'【違うバイト {len(dfo)} 個が 3 か所】' + '／'.join(f'{desc[k]}：オフセット ' + '・'.join(f'0x{o:05X}' for o in rn) + f'（{len(rn)} バイト。0x{rn[0]:05X} から {hexs(I0[rn[0]:rn[-1] + 1])} → {hexs(I1[rn[0]:rn[-1] + 1])}）' for k, rn in enumerate(runs)),
+        f'【末尾に 16 バイトの追加】オフセット 0x40000〜0x4000F：{hexs(I1[0x40000:])}（先頭8バイトは文字「PMUSIG01」）。0x1E800〜0x3FFFB は、どちらも 0xFF で埋めてある',
+        f'Intel HEX「…/firmware_v2.3.0.hex」（{len(hx0):,}行）→「…v2.3.1.hex」（{len(hx1):,}行）。ASCII・CRLF・1行 16 バイト・先頭アドレス 0x08000000。違う行は {len(hd_)} 行（行番号は旧・新で同じ）：' + '、'.join(str(x) for x in hd_)
+        + f'。各行は、データの16進2桁ずつと、行末のチェックサム（最後の2桁）が違う。新では末尾の2行（開始アドレスと終わりの行）の前に、{len(hx1) - 3}行目「{hx1[-4]}」（上位アドレス 0x0804）と {len(hx1) - 2}行目「{hx1[-3]}」（追加の 16 バイト）の2行が増える',
+        f'S レコード「…/firmware_v2.3.0.mot」（{len(sr0):,}行）→「…v2.3.1.mot」（{len(sr1):,}行）。ASCII・CRLF・S3（32 ビットのアドレス）・1行 16 バイト。1行目（S0。ファイル名が入っている）が違い、データの行は {len(sd_)} 行が違う：' + '、'.join(str(x) for x in sd_) + f'。新では最後の行（S7）の前に {len(sr1) - 1}行目「{sr1[-2]}」が増える',
+        'bin はバイナリなので、テキスト比較でどう示されるか（16進の表示、違うバイトの位置、大きさの違い）を見る。hex・mot はテキストとして比べられる')
+
+    # ---------------------------------------------------------------- レジスタ仕様書（Excel と、その PDF）
+    def regs(v):
+        U = [('0x40021000', 'UART_CR1', '制御レジスタ 1', [('[31:16]', 'Reserved', '0x0000', 'R', '予約（読むと 0）'), ('[15]', 'UE', '0x0', 'R/W', 'UART 有効（1：有効）'), ('[14:13]', 'Reserved', '0x0', 'R', '予約'), ('[12]', 'M', '0x0', 'R/W', 'データ長（0：8 ビット、1：9 ビット）'), ('[11]', 'WAKE', '0x0', 'R/W', 'ウェイクアップの方法'), ('[10]', 'PCE', '0x0', 'R/W', 'パリティ有効'), ('[9]', 'PS', '0x0', 'R/W', 'パリティ（0：偶数、1：奇数）'),
+                                                         ('[8]', 'PEIE', '0x0', 'R/W', 'パリティエラー割り込み許可'), ('[7]', 'TXEIE', '0x0', 'R/W', '送信データレジスタ空 割り込み許可'), ('[6]', 'TCIE', '0x0', 'R/W', '送信完了 割り込み許可'), ('[5]', 'RXNEIE', '0x0', 'R/W', '受信データあり 割り込み許可'), ('[4]', 'IDLEIE', '0x0', 'R/W', 'アイドル検出 割り込み許可'), ('[3]', 'TE', '0x0', 'R/W', '送信許可'), ('[2]', 'RE', '0x0', 'R/W', '受信許可'), ('[1:0]', 'Reserved', '0x0', 'R', '予約')]),
+             ('0x40021004', 'UART_CR2', '制御レジスタ 2', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:14]', 'ABRMOD', '0x0', 'R/W', '自動ボーレート検出の方式')] + ([('[13:12]', 'Reserved', '0x0', 'R', '予約（0 を書くこと。1 を書いたときの動作は保証しない）')] if v else []) + [('[11:8]', 'ADD', '0x0', 'R/W', '自局アドレス（マルチプロセッサ通信）'), ('[7]', 'LINEN', '0x0', 'R/W', 'LIN モード'), ('[6:5]', 'STOP', '0x0', 'R/W', 'ストップビット（00：1、01：0.5、10：2、11：1.5）'),
+                                                                                                                                                                                                                 ('[4]', 'CLKEN', '0x0', 'R/W', 'クロック出力'), ('[3]', 'CPOL', '0x0', 'R/W', 'クロックの極性'), ('[2]', 'CPHA', '0x0', 'R/W', 'クロックの位相'), ('[1]', 'LBCL', '0x0', 'R/W', '最終ビットのクロック'), ('[0]', 'ADDM7', '0x0', 'R/W', 'アドレス検出（0：4 ビット、1：7 ビット）')]),
+             ('0x40021008', 'UART_BRR', 'ボーレートレジスタ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:4]', 'DIV_MANT', '0x000', 'R/W', '分周比の整数部'), ('[3:0]', 'DIV_FRAC', '0x0', 'R/W', '分周比の小数部（1/16 単位）')]),
+             ('0x4002100C', 'UART_SR', 'ステータスレジスタ', [('[31:10]', 'Reserved', '0x000000', 'R', '予約'), ('[9]', 'CTS', '0x0', 'R', 'CTS 端子の変化'), ('[8]', 'LBD', '0x0', 'R', 'LIN ブレーク検出'), ('[7]', 'TXE', '0x1', 'R', '送信データレジスタ空'), ('[6]', 'TC', '0x1', 'R', '送信完了'), ('[5]', 'RXNE', '0x0', 'R', '受信データあり'), ('[4]', 'IDLE', '0x0', 'R', 'アイドル検出'), ('[3]', 'ORE', '0x0', 'R', 'オーバーランエラー'), ('[2]', 'NF', '0x0', 'R', 'ノイズ検出'), ('[1]', 'FE', '0x0', 'R', 'フレーミングエラー'), ('[0]', 'PE', '0x0', 'R', 'パリティエラー')]),
+             ('0x40021010', 'UART_DR', 'データレジスタ', [('[31:9]', 'Reserved', '0x000000', 'R', '予約'), ('[8:0]', 'DR', '0x000', 'R/W', '送受信データ（読むと受信、書くと送信）')]),
+             ('0x40021014', 'UART_FCR', 'FIFO 制御レジスタ', [('[31:9]' if v else '[31:8]', 'Reserved', '0x000000', 'R', '予約'), ('[8:4]' if v else '[7:4]', 'RXFTL', '0x8', 'R/W', '受信 FIFO のしきい値（0〜31 バイト）' if v else '受信 FIFO のしきい値（0〜15 バイト）'), ('[3:1]', 'TXFTL', '0x4', 'R/W', '送信 FIFO のしきい値'), ('[0]', 'FIFOEN', '0x0', 'R/W', 'FIFO 有効')]),
+             ('0x40021018', 'UART_TOR', '受信タイムアウトレジスタ', [('[31:8]', 'Reserved', '0x000000', 'R', '予約'), ('[7:0]', 'TIMEOUT', '0x3F' if v else '0x1F', 'R/W', '受信タイムアウト（ビット時間の単位）')]),
+             ('0x4002101C', 'UART_IER', '割り込み許可レジスタ', [('[31:4]', 'Reserved', '0x0000000', 'R', '予約'), ('[3]', 'RTOIE', '0x0', 'R/W', '受信タイムアウト 割り込み許可'), ('[2]', 'ERRIE', '0x0', 'R/W', 'エラー 割り込み許可'), ('[1]', 'LBDIE', '0x0', 'R/W', 'LIN ブレーク 割り込み許可'), ('[0]', 'CTSIE', '0x0', 'R/W', 'CTS 割り込み許可')]),
+             ('0x40021020', 'UART_ICR', '割り込みクリアレジスタ', [('[31:5]', 'Reserved', '0x0000000', 'R', '予約'), ('[4]', 'RTOCF', '0x0', 'W', '受信タイムアウトのクリア（1 を書く）'), ('[3]', 'ORECF', '0x0', 'W', 'オーバーランのクリア'), ('[2]', 'NCF', '0x0', 'W', 'ノイズ検出のクリア'), ('[1]', 'FECF', '0x0', 'W', 'フレーミングエラーのクリア'), ('[0]', 'PECF', '0x0', 'W', 'パリティエラーのクリア')]),
+             ('0x40021024', 'UART_GTPR', 'ガードタイム・プリスケーラ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:8]', 'GT', '0x00', 'R/W', 'ガードタイム（スマートカード）'), ('[7:0]', 'PSC', '0x01', 'R/W', 'プリスケーラ')])]
+        def gen(base, pre, items):
+            out = []
+            for k, (nm_, title, fs) in enumerate(items): out.append((f'0x{base + k * 4:08X}', f'{pre}_{nm_}', title, fs))
+            return out
+        res_ = lambda hi, lo=None: (f'[{hi}:{lo}]' if lo is not None else f'[{hi}]', 'Reserved', '0x0', 'R', '予約')
+        ADC = gen(0x40022000, 'ADC', [('CR', '制御レジスタ', [res_(31, 8), ('[7]', 'DMAEN', '0x0', 'R/W', 'DMA 転送許可'), ('[6]', 'CONT', '0x0', 'R/W', '連続変換'), ('[5]', 'ADSTP', '0x0', 'R/W', '変換停止の要求'), ('[4]', 'ADSTART', '0x0', 'R/W', '変換開始'), ('[3:1]', 'RES', '0x0', 'R/W', '分解能（000：12 ビット）'), ('[0]', 'ADEN', '0x0', 'R/W', 'A/D 有効')]),
+                                      ('SR', 'ステータスレジスタ', [res_(31, 5), ('[4]', 'OVR', '0x0', 'R', 'オーバーラン'), ('[3]', 'AWD', '0x0', 'R', 'アナログウォッチドッグ'), ('[2]', 'EOS', '0x0', 'R', 'シーケンス完了'), ('[1]', 'EOC', '0x0', 'R', '変換完了'), ('[0]', 'ADRDY', '0x0', 'R', '準備完了')]),
+                                      ('SMPR', 'サンプリング時間レジスタ', [res_(31, 3), ('[2:0]', 'SMP', '0x0', 'R/W', 'サンプリング時間（000：1.5、…、111：239.5 サイクル）')]), ('SQR', '変換順序レジスタ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:0]', 'CHSEL', '0x0000', 'R/W', '変換するチャネル（ビットごと）')]),
+                                      ('DR', 'データレジスタ', [('[31:12]', 'Reserved', '0x00000', 'R', '予約'), ('[11:0]', 'DATA', '0x000', 'R', '変換結果（右詰め）')]), ('HTR', '上限しきい値レジスタ', [('[31:12]', 'Reserved', '0x00000', 'R', '予約'), ('[11:0]', 'HT', '0xFFF', 'R/W', 'アナログウォッチドッグの上限')]),
+                                      ('LTR', '下限しきい値レジスタ', [('[31:12]', 'Reserved', '0x00000', 'R', '予約'), ('[11:0]', 'LT', '0x000', 'R/W', 'アナログウォッチドッグの下限')]), ('CALR', '校正レジスタ', [res_(31, 7), ('[6:0]', 'CALFACT', '0x40', 'R/W', '校正値（出荷時に書き込み済み）')])])
+        TIM = gen(0x40023000, 'TIM', [('CR', '制御レジスタ', [res_(31, 8), ('[7]', 'ARPE', '0x0', 'R/W', '自動再ロードのバッファ'), ('[6:5]', 'CMS', '0x0', 'R/W', 'カウントの方式'), ('[4]', 'DIR', '0x0', 'R/W', '方向（0：アップ、1：ダウン）'), ('[3]', 'OPM', '0x0', 'R/W', 'ワンパルス'), ('[2:1]', 'Reserved', '0x0', 'R', '予約'), ('[0]', 'CEN', '0x0', 'R/W', 'カウンタ有効')]),
+                                      ('SR', 'ステータスレジスタ', [res_(31, 5), ('[4:1]', 'CCIF', '0x0', 'R/W', 'キャプチャ・コンペア 1〜4 の割り込み要求'), ('[0]', 'UIF', '0x0', 'R/W', '更新の割り込み要求')]), ('CNT', 'カウンタ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:0]', 'CNT', '0x0000', 'R/W', 'カウンタの値')]),
+                                      ('PSC', 'プリスケーラ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:0]', 'PSC', '0x0000', 'R/W', '分周比 − 1')]), ('ARR', '自動再ロードレジスタ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:0]', 'ARR', '0xFFFF', 'R/W', '周期 − 1')]),
+                                      ('CCR1', 'キャプチャ・コンペアレジスタ 1', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:0]', 'CCR1', '0x0000', 'R/W', '比較値（PWM のデューティ）')])])
+        WDT = gen(0x40024000, 'WDT', [('KR', 'キーレジスタ', [('[31:16]', 'Reserved', '0x0000', 'R', '予約'), ('[15:0]', 'KEY', '0x0000', 'W', '0xAAAA：リフレッシュ、0xCCCC：起動、0x5555：書き込み許可')]), ('PR', 'プリスケーラ', [res_(31, 3), ('[2:0]', 'PR', '0x0', 'R/W', '分周比（000：/4、…、110：/256）')]),
+                                      ('RLR', '再ロードレジスタ', [('[31:12]', 'Reserved', '0x00000', 'R', '予約'), ('[11:0]', 'RL', '0xFFF', 'R/W', '再ロード値')]), ('SR', 'ステータスレジスタ', [res_(31, 2), ('[1]', 'RVU', '0x0', 'R', '再ロード値の更新中'), ('[0]', 'PVU', '0x0', 'R', 'プリスケーラの更新中')])])
+        return [('UART', 'UART（基底アドレス 0x40021000）', U), ('ADC', 'A/D 変換器（基底アドレス 0x40022000）', ADC), ('TIM・WDT', 'タイマ（0x40023000）・ウォッチドッグ（0x40024000）', TIM + WDT)]
+    def spec(path, v):
+        wb = xlsxwriter.Workbook(P(path)); F = lambda **k: wb.add_format({'font_size': 10, 'valign': 'vcenter', **k}); f_t = F(bold=True, font_size=14); f_h = F(bold=True, bg_color='#DDEBF7', border=1, align='center'); f_c = F(border=1, align='center', font_name='Consolas'); f_m = F(border=1, align='center', valign='top', font_name='Consolas', bold=True)
+        f_n = F(border=1, valign='top', bold=True); f_x = F(border=1, text_wrap=True); f_r = F(border=1, align='center', font_color='#808080', font_name='Consolas'); f_rx = F(border=1, font_color='#808080'); rev = '1.3' if v else '1.2'; date = '2026/11/20' if v else '2026/06/15'; rows_at = {}
+        for sn, title, RG in regs(v):
+            ws = wb.add_worksheet(sn); ws.set_landscape(); ws.set_paper(9); ws.fit_to_pages(1, 0); ws.repeat_rows(3); ws.set_margins(0.4, 0.4, 0.6, 0.6)
+            for c, w in enumerate([13, 13, 9, 11, 10, 6, 52]): ws.set_column(c, c, w)
+            ws.merge_range('A1:G1', f'XM32F4 シリーズ レジスタ仕様書　{title}', f_t); ws.write('A2', '文書番号'); ws.write('B2', 'XM32F4-RS-002'); ws.write('D2', 'Rev.'); ws.write('E2', rev); ws.write('F2', '発行'); ws.write('G2', date + '　東和電機株式会社 半導体応用技術部')
+            ws.write_row('A4', ['アドレス', 'レジスタ名', 'ビット', 'フィールド名', '初期値', 'R/W', '説明'], f_h); r = 4
+            for ad, nm_, ttl, fs in RG:
+                if len(fs) > 1: ws.merge_range(r, 0, r + len(fs) - 1, 0, ad, f_m); ws.merge_range(r, 1, r + len(fs) - 1, 1, f'{nm_}\n{ttl}', F(border=1, valign='top', bold=True, text_wrap=True))
+                else: ws.write(r, 0, ad, f_m); ws.write(r, 1, f'{nm_}\n{ttl}', f_n)
+                for bits, fn_, ini, rw, ds in fs:
+                    rsv = fn_ == 'Reserved'; ws.write(r, 2, bits, f_r if rsv else f_c); ws.write(r, 3, fn_, f_r if rsv else f_c); ws.write(r, 4, ini, f_r if rsv else f_c); ws.write(r, 5, rw, f_r if rsv else f_c); ws.write(r, 6, ds, f_rx if rsv else f_x); rows_at[(nm_, fn_, bits)] = (sn, r + 1); r += 1
+            ws.freeze_panes(4, 2)
+        ws = wb.add_worksheet('改訂履歴'); ws.set_column(0, 0, 8); ws.set_column(1, 1, 13); ws.set_column(2, 2, 80); ws.set_column(3, 3, 12); ws.write_row('A1', ['Rev.', '発行日', '改訂内容', '担当'], f_h)
+        hist = [('1.0', '2025/04/01', '初版', '野々村'), ('1.1', '2025/10/20', 'ADC_CALR を追加。TIM_CR の CMS の説明を修正', '野々村'), ('1.2', '2026/06/15', 'UART_FCR・UART_TOR を追加（FIFO 付きの品種 XM32F407 に対応）', '柏木')] + ([('1.3', '2026/11/20', 'UART_TOR の TIMEOUT の初期値を訂正（0x1F→0x3F）。UART_FCR の RXFTL を 5 ビットに拡張（[7:4]→[8:4]）。UART_CR2 の [13:12] を予約ビットとして明記', '柏木')] if v else [])
+        for i, hrow in enumerate(hist): ws.write_row(1 + i, 0, hrow, F(border=1, text_wrap=True))
+        wb.close(); return rows_at, sum(len(fs) for _, _, RG in regs(v) for _, _, _, fs in RG)
+    e0n = 'レジスタ仕様書_XM32F4_RS-002_Rev1.2.xlsx'; e1n = 'レジスタ仕様書_XM32F4_RS-002_Rev1.3.xlsx'; at0, nr0 = spec(f'{d}/仕様書/{e0n}', 0); at1, nr1 = spec(f'{d}/仕様書/{e1n}', 1)
+    to_pdf(f'{d}/仕様書/{e0n}', f'{d}/仕様書/{e0n[:-5]}.pdf'); to_pdf(f'{d}/仕様書/{e1n}', f'{d}/仕様書/{e1n[:-5]}.pdf')
+    import openpyxl
+    w0, w1 = openpyxl.load_workbook(P(f'{d}/仕様書/{e0n}')), openpyxl.load_workbook(P(f'{d}/仕様書/{e1n}')); g = lambda w, sn, r, c: w[sn].cell(r, c).value
+    r_to0, r_to1 = at0[('UART_TOR', 'TIMEOUT', '[7:0]')][1], at1[('UART_TOR', 'TIMEOUT', '[7:0]')][1]; r_fx0, r_fx1 = at0[('UART_FCR', 'RXFTL', '[7:4]')][1], at1[('UART_FCR', 'RXFTL', '[8:4]')][1]; r_rs1 = at1[('UART_CR2', 'Reserved', '[13:12]')][1]
+    assert (g(w0, 'UART', r_to0, 5), g(w1, 'UART', r_to1, 5)) == ('0x1F', '0x3F') and (g(w0, 'UART', r_fx0, 3), g(w1, 'UART', r_fx1, 3)) == ('[7:4]', '[8:4]') and (g(w0, 'UART', r_fx0 - 1, 3), g(w1, 'UART', r_fx1 - 1, 3)) == ('[31:8]', '[31:9]') and g(w1, 'UART', r_rs1, 3) == '[13:12]' and g(w0, 'UART', r_rs1, 3) == '[11:8]'
+    assert nr1 == nr0 + 1 and r_to1 == r_to0 + 1 and all([[c.value for c in row] for row in w0[s].iter_rows(min_row=3)] == [[c.value for c in row] for row in w1[s].iter_rows(min_row=3)] for s in ('ADC', 'TIM・WDT')) and w1['改訂履歴'].max_row == w0['改訂履歴'].max_row + 1
+    mg = lambda w: sorted(str(x) for x in w['UART'].merged_cells.ranges if str(x).startswith('A') and int(str(x).split(':')[0][1:]) > 4)
+    key(d, f'■ レジスタ仕様書（Excel）「仕様書/{e0n}」→「仕様書/{e1n}」。シートは「UART」「ADC」「TIM・WDT」「改訂履歴」の4枚。表は4行目が見出し、5行目から。アドレスとレジスタ名は、フィールドの行数ぶん縦に結合したセル。アドレス・初期値は「0x…」の文字、ビットは「[7:4]」の文字。フィールドの行は 全部で {nr0} → {nr1}',
+        f'【初期値】UART シート：UART_TOR（0x40021018）の TIMEOUT [7:0] の初期値 0x1F → 0x3F（旧 E{r_to0}／新 E{r_to1}）',
+        f'【ビット幅】UART シート：UART_FCR（0x40021014）の RXFTL のビット [7:4] → [8:4]（旧 C{r_fx0}／新 C{r_fx1}）、その上の Reserved [31:8] → [31:9]（旧 C{r_fx0 - 1}／新 C{r_fx1 - 1}）、RXFTL の説明「受信 FIFO のしきい値（0〜15 バイト）」→「（0〜31 バイト）」（G 列）',
+        f'【予約ビットの行の追加】UART シート：UART_CR2（0x40021004）に「[13:12] Reserved 0x0 R 予約（0 を書くこと。1 を書いたときの動作は保証しない）」の行を追加（新 {r_rs1}行目。[15:14] ABRMOD と [11:8] ADD の間）。これより下の行は1行ずつ下がり、UART_CR2 の結合セルが1行ぶん伸びる（旧 {[x for x in mg(w0) if x not in mg(w1)][0]} → 新 {[x for x in mg(w1) if x not in mg(w0)][0]}）',
+        '【版・日付】「UART」「ADC」「TIM・WDT」の3シートとも、2行目の Rev.（E2）1.2 → 1.3 と、発行（G2）2026/06/15 → 2026/11/20。「ADC」と「TIM・WDT」のシートは、それ以外は同じ',
+        f'【改訂履歴シート】Rev. 1.3 の行を追加（新 {w1["改訂履歴"].max_row}行目）',
+        f'PDF「仕様書/{e0n[:-5]}.pdf」「仕様書/{e1n[:-5]}.pdf」は、それぞれの Excel を LibreOffice で PDF にしたもの（A4 横・文字あり）。内容の違いは Excel と同じ。予約ビットの行が増えたぶん、UART の表の後ろの行の位置が下がる（重ね合わせでは、その下がすべて差になる）')
+
+    # ---------------------------------------------------------------- 変更履歴（Shift_JIS・CRLF）
+    cl = ['PMU-200 ファームウェア 変更履歴', '================================', '', '■ Ver 2.3.0（2026/09/30）', '  ・診断コマンド（0x50〜0x52）を追加した。', '  ・UART の折り返し試験を追加した。', '  ・定期報告の周期の上限を 30 秒から 60 秒に広げた。', '  ・［不具合修正］ファンの回転数が 0 のとき、警報が出ないことがあった。', '',
+          '■ Ver 2.2.1（2026/03/18）', '  ・［不具合修正］ボーレートを変更した直後の 1 フレームが化けることがあった。', '  ・［不具合修正］電源投入から 49.7 日後に、LED の点滅が止まることがあった（ﾀｲﾏのｵｰﾊﾞｰﾌﾛｰ）。', '', '■ Ver 2.2.0（2025/11/05）', '  ・A/D の移動平均の段数を、コマンドで変えられるようにした。', '  ・過温度のしきい値を、40.0〜105.0℃の範囲で設定できるようにした。', '',
+          '■ Ver 2.1.0（2023/02/14）', '  ・A/D の校正値を、チャネルごとに持つようにした。', '  ・機種 PMU-200B（バッテリ付き）に対応した。', '', '■ Ver 2.0.0（2021/11/08）', '  ・マイコンを XM32F1 から XM32F4 に変更した（部品の生産終了のため）。', '  ・通信コマンドの処理を、表引きに変えた。', '']
+    add = ['■ Ver 2.3.1（2026/11/20）', '  ・［不具合修正］省電力に入る直前の応答が、途中で切れることがあった。', '      → 送信バッファが空になるのを待つ関数 uart_flush_tx() を追加した。', '  ・［不具合修正］連続異常が 4 回目で出力を切っていた（仕様は 3 回目）。', '  ・ウォッチドッグの時間を 500ms から 800ms に変更した（フラッシュ書き込み中の誤リセット対策）。', '  ・デバッグ用コンソール（UART1）のボーレートを 115200 から 230400 に変更した。', '']
+    cl = [x.replace('\u301c', '\uff5e') for x in cl]      # Shift_JIS（CP932）で書くので、波ダッシュは全角チルダ（U+FF5E）にしておく
+    cl1 = cl[:3] + add + cl[3:]; cl1[cl1.index('  ・定期報告の周期の上限を 30 秒から 60 秒に広げた。')] = '  ・定期報告の周期の上限を 30 秒から 60 秒に広げた（コマンド 0x24）。'
+    text(f'{d}/{A}/CHANGELOG.txt', '\n'.join(cl), enc='shift_jis', eol='\r\n'); text(f'{d}/{B}/CHANGELOG.txt', '\n'.join(cl1), enc='shift_jis', eol='\r\n')
+    assert open(P(f'{d}/{B}/CHANGELOG.txt'), 'rb').read().decode('cp932').split('\r\n') == cl1
+    key(d, f'■ 変更履歴「{A}/CHANGELOG.txt」（{len(cl) - 1}行）→「{B}/CHANGELOG.txt」（{len(cl1) - 1}行）。**Shift_JIS・CRLF**（ソースは EUC-JP・LF。同じフォルダに文字コードが混ざっている）。半角カナあり',
+        f'4〜10行目に Ver 2.3.1 の節（{len(add)} 行）を追加。旧 7行目／新 14行目の文末に「（コマンド 0x24）」を追記。ほかは同じ',
+        f'フォルダ「{A}/」と「{B}/」をフォルダ比較にかけると：src/ の4ファイルと Makefile・CHANGELOG.txt は左右にあり、すべて「相違」（drv_adc.c は改行だけの違い）。build/ の4ファイル（bin・hex・mot・map）は、名前に版が入っているので、左のみ4・右のみ4になる')
+
+
+# <<<end r09>>>
 SPEC = [
     (6, '購買・経理担当', '商社', r06, {
         'who': 'あなたは、商社（湊川商事）の購買部で、発注と支払の事務を7年担当しています。仕入先から届く見積書・請求書の「再提出版」「訂正版」を前の版と比べ、金額・数量・振込先が変わっていないかを確かめるのが日課です。'
@@ -1231,4 +1622,18 @@ SPEC = [
             '「kubectl-diff/…_事前確認.txt」と「…_反映直前.txt」は、ファイルの中身そのものが diff 形式（行頭が + や -）。これを比べたとき、元の +/- と、このツールが付ける記号・色が紛らわしくないか。レポートやパッチにしたときに読めるか。'],
         'note': 'キーボードでの操作（Tab・矢印・Enter・ショートカット）を、マウスと同じだけ試してください。tfstate とログは大きいので、読み込みと比較の秒数を測って報告してください。'}),
     # <<<endspec r08>>>
+    # <<<spec r09>>>
+    (9, '組込みソフト開発', '電機メーカー', r09, {
+        'who': 'あなたは、電機メーカーでマイコンのファームウェアを15年開発しています。リリースの前に、ソース・Makefile・マップファイル・バイナリを前の版と比べて、変更票に書いた変更だけが入っていることを確かめます。'
+               '10年以上前からの資産なので、ソースのコメントは EUC-JP、変更履歴は Shift_JIS と、文字コードが混ざっています。タブと空白の違い、行末の空白、改行コードには厳しく、16進のアドレスやバイト列を読むのにも慣れています。',
+        'tasks': [
+            '「fw_v2.3.0/src/」と「fw_v2.3.1/src/」の main.c・drv_uart.c・config.h を、それぞれテキスト比較で比べる。文字コード（EUC-JP）が正しく判定され、日本語と半角カナのコメントが読めるか。#define の値の変更、関数の追加、関数の移動（main.c）が、どう見えるか。変更点の数は、自分で数えたものと合うか。差分の単位（文字・単語）を変えて、C の式の違い（> と >=）の見え方も確かめる。',
+            '同じファイルで、タブと空白の違い・行末の空白を調べる。空白の記号表示をオンにして、タブが空白に変わった行（drv_uart.c）、行末に空白が付いた行（main.c）を見つける。比較の条件（空白：比較する／量を無視／すべて無視）を切り替えたとき、残る差分が正しいか。',
+            '「fw_v2.3.0/Makefile」と「fw_v2.3.1/Makefile」を比べる。Makefile では、行頭のタブと空白の違いに意味がある。その違いを見落とさずに見つけられるか（既定の設定のまま気づけるか、空白を無視する条件にしたときに警告があるか）。drv_adc.c（改行コードだけが違う）がどう示されるかも見る。',
+            '「fw_v2.3.0/build/firmware_v2.3.0.map」と「fw_v2.3.1/build/firmware_v2.3.1.map」（各 約4千行）を比べる。アドレスがずれただけの行が数千行ある中から、本当に増えたシンボルと、大きさが変わった関数を探せるか。16進のアドレスに「数字の差」の札が付いて邪魔にならないか。位置マップ・「次の変更」・検索を使って探す。',
+            'ファームの「firmware_v2.3.0.bin」と「firmware_v2.3.1.bin」、Intel HEX（.hex）、S レコード（.mot）を、それぞれ比べる。バイナリは、どこが何バイト違うか・大きさが違うことが分かるか。HEX・S レコードは、違う行と、行の中の違う桁が分かるか。',
+            'src/main.c と src/drv_uart.c の差分をパッチで出力し、fw_v2.3.0 のコピー（自分の出力フォルダに作る）に `patch -p1` または `git apply` で当てて、fw_v2.3.1 と1バイトも違わない結果になるかを確かめる（EUC-JP・タブ・行末の空白が保たれるか）。',
+            '「仕様書/レジスタ仕様書_…_Rev1.2.xlsx」と「…_Rev1.3.xlsx」をテキスト比較で、同じ名前の PDF どうしをテキスト比較と重ね合わせで比べる。初期値・ビット幅・予約ビットの行の追加を見つけられるか。行が1つ増えたあとの対応、結合セル、「0x1F」「[7:4]」のような表記の扱い（数字の差の札など）を見る。「fw_v2.3.0」と「fw_v2.3.1」をフォルダ比較にかけ、CHANGELOG.txt（Shift_JIS）とソース（EUC-JP）が混ざっていても正しく開けるかも確かめる。'],
+        'note': 'ソースのタブ幅は 4 のつもりで書かれています。正解.md の行番号は、ファイルの先頭を1行目とした番号です。'}),
+    # <<<endspec r09>>>
 ]
