@@ -76,7 +76,12 @@ const App = (() => {
     s.kind = 'text';
     s.enc = Enc.detect(b);
     s.asciiOnly = s.enc === 'utf-8' && b.every(x => x < 0x80);
-    if (s.enc === 'binary') s.kind = 'binary';
+    if (s.enc === 'binary') {
+      s.kind = 'binary';
+      // ここまでに形式ごとの案内を出していなければ、16進で比べることを知らせる
+      // （parquet・データベースなど、中身を読めない形式を「比較できた」と誤解させないため）
+      if (!$('#toast').classList.contains('on')) toast(`「${s.name}」は中身を読み取れない形式のため、バイナリ（16進）として比較します。中身を比べるには、テキスト・CSV・PDF などに変換してください`, true);
+    }
     setText(s, Enc.decode(b, s.enc));
     s.getPages = async () => (s._pages || (s._pages = Pages.fromText(s.lines, s.name)));
   }

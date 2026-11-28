@@ -643,7 +643,7 @@ const TV = (() => {
     let c = 0, d = 0, n = 0; for (let q = b.r0; q < b.r1; q++) { const t = st.rows[q].t; if (t === 'c') c++; else if (t === 'd') d++; else if (t === 'i') n++; }
     const rest = b.r1 - b.r0 - 1, more = rest > 0 ? `<div class="more muted">ほか ${fmtNum(rest)} 行（このまとまり：${[c ? `変更 ${fmtNum(c)}` : '', d ? `左のみ ${fmtNum(d)}` : '', n ? `右のみ ${fmtNum(n)}` : ''].filter(Boolean).join('・')}）</div>` : '';
     return `<div class="nt-item${i === st.cur ? ' cur' : ''}${st.noteCls[i] || ''}" data-b="${i}" tabindex="-1">` +
-      `<div class="nt-h"><b>#${i + 1}</b> ${blockKind(b)} <span class="muted">左 ${lineRange(b.a0, b.a1)}・右 ${lineRange(b.b0, b.b1)}</span></div>` +
+      `<div class="nt-h"><b>#${i + 1}</b> <span class="nt-k">${blockKind(b)}</span> <span class="muted">左 ${lineRange(b.a0, b.a1)}・右 ${lineRange(b.b0, b.b1)}</span></div>` +
       `<div class="nt-pv">${a !== null ? `<div class="del">− ${esc(ex(a))}</div>` : ''}${bb !== null ? `<div class="add">＋ ${esc(ex(bb))}</div>` : ''}${more}</div>` +
       `<div class="nt-sum">${Notes.chip(id)}</div></div>`;
   }

@@ -452,6 +452,7 @@ button:has(>.ic),summary:has(>.ic){display:inline-flex;align-items:center;justif
 .nt-empty{padding:16px 12px}
 .nt-item{padding:6px 10px 7px 12px;border-bottom:1px solid #eceff3;cursor:pointer;font-size:12.5px;border-left:4px solid transparent}
 .nt-item:hover{background:#f1f5fb}
+.nt-item .nt-k{white-space:nowrap}  /* 行番号が6桁になっても「変更」が2行に割れないように */
 .nt-item.cur{background:#eef3ff;border-left-color:var(--cur)}
 .nt-item.nt-ok{border-left-color:#2f9e44}.nt-item.nt-ask{border-left-color:#e8590c}.nt-item.nt-c{border-left-color:#868e96}
 .nt-item.cur.nt-ok,.nt-item.cur.nt-ask,.nt-item.cur.nt-c{background:#eef3ff}
