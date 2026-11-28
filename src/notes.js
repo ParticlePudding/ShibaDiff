@@ -29,7 +29,7 @@ const Notes = (() => {
     return mem.get(k);
   }
   function save(k) {
-    if (!persist()) return;
+    if (!persist()) { Unsaved.mark(); return; }
     const o = mem.get(k) || {};
     if (Object.keys(o).length) store.set(storeKey(k), o); else store.del(storeKey(k));
   }
@@ -105,5 +105,10 @@ const Notes = (() => {
   function downloadCsv(name, header, rows) {
     download(name, '﻿' + [header, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n', 'text/csv;charset=utf-8');
   }
-  return { pairKey, all, get, set, merge, clear, on, textIds, ovId, editor, chip, stateName, STATES, downloadCsv, clean };
+  const count = () => { let n = 0; for (const o of mem.values()) n += Object.keys(o || {}).length; return n; };
+  // 閉じたファイルを含む組のコメント（keys：ファイルの識別キー）
+  const pairsOf = keys => [...mem.keys()].filter(k => k.split('||').some(x => keys.includes(x)));
+  const countOf = keys => pairsOf(keys).reduce((n, k) => n + Object.keys(mem.get(k) || {}).length, 0);
+  const forget = keys => { pairsOf(keys).forEach(k => mem.delete(k)); subs.forEach(f => f(null)); };
+  return { pairKey, all, get, set, merge, clear, on, textIds, ovId, editor, chip, stateName, STATES, downloadCsv, clean, count, countOf, forget };
 })();

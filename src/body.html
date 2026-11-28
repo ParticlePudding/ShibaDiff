@@ -5,9 +5,9 @@
     <button data-mode="folder" aria-pressed="false" title="フォルダ比較"><i data-i="folder-tree"></i>フォルダ比較</button>
   </div>
   <nav id="tabs" role="tablist" aria-label="表示の切り替え">
-    <button role="tab" data-tab="text" class="on" title="テキスト比較"><i data-i="file-diff"></i>テキスト</button>
-    <button role="tab" data-tab="page" title="ページ表示・注釈"><i data-i="book-open"></i>ページ・注釈</button>
-    <button role="tab" data-tab="overlay" title="重ね合わせ比較"><i data-i="layers"></i>重ね合わせ</button>
+    <button role="tab" data-tab="text" class="on" aria-selected="true" title="テキスト比較"><i data-i="file-diff"></i>テキスト</button>
+    <button role="tab" data-tab="page" aria-selected="false" tabindex="-1" title="ページ表示・注釈"><i data-i="book-open"></i>ページ・注釈</button>
+    <button role="tab" data-tab="overlay" aria-selected="false" tabindex="-1" title="重ね合わせ比較"><i data-i="layers"></i>重ね合わせ</button>
   </nav>
   <button id="btnBackFolder" class="hdr-btn" hidden title="フォルダ比較の一覧に戻る"><i data-i="arrow-left"></i>フォルダ一覧</button>
   <div id="hdrFiles">
@@ -71,7 +71,7 @@
       </details>
       <div class="sep"></div>
       <div class="grp">
-        <input type="text" id="searchBox" placeholder="検索 (Ctrl+F)">
+        <input type="text" id="searchBox" placeholder="検索 (Ctrl+F)" aria-label="検索する文字">
         <button id="tFind" title="次を検索 (Enter)"><i data-i="search"></i>検索</button>
       </div>
       <div class="grow"></div>
@@ -83,8 +83,8 @@
     </div>
     <div class="diffwrap" id="diffwrap">
       <canvas id="locmap" title="差分の位置（クリックで移動）"></canvas>
-      <div class="pane side0" id="paneL" tabindex="0"><div class="spacer"><div class="rows"></div></div></div>
-      <div class="pane side1" id="paneR" tabindex="0"><div class="spacer"><div class="rows"></div></div></div>
+      <div class="pane side0" id="paneL" tabindex="0" aria-label="左の文書（比較結果）"><div class="spacer"><div class="rows"></div></div></div>
+      <div class="pane side1" id="paneR" tabindex="0" aria-label="右の文書（比較結果）"><div class="spacer"><div class="rows"></div></div></div>
       <div class="wrapv" id="wrapView" tabindex="0" aria-label="比較結果（折り返し表示）"></div>
       <aside class="nt-panel" id="tvNotes" aria-label="変更点の一覧"></aside>
       <div class="empty-hint" id="textHint"><div class="big">⇆</div>
@@ -98,12 +98,12 @@
   <section id="tab-page" class="tab">
     <div class="toolbar">
       <div class="grp" id="toolGrp">
-        <button class="toolbtn on" data-tool="select" title="選択・移動／ドラッグでスクロール (Esc)"><i data-i="mouse-pointer-2"></i>選択</button>
-        <button class="toolbtn" data-tool="pen" title="ペン"><i data-i="pen-line"></i>ペン</button>
-        <button class="toolbtn" data-tool="marker" title="蛍光マーカー"><i data-i="highlighter"></i>マーカー</button>
-        <button class="toolbtn" data-tool="rect" title="四角枠"><i data-i="square"></i>枠</button>
-        <button class="toolbtn" data-tool="note" title="付箋（クリックした位置に貼る）"><i data-i="sticky-note"></i>付箋</button>
-        <button class="toolbtn" data-tool="eraser" title="消しゴム（クリックした注釈を削除）"><i data-i="eraser"></i>消去</button>
+        <button class="toolbtn on" data-tool="select" aria-pressed="true" title="選択・移動／ドラッグでスクロール (Esc)"><i data-i="mouse-pointer-2"></i>選択</button>
+        <button class="toolbtn" data-tool="pen" aria-pressed="false" title="ペン"><i data-i="pen-line"></i>ペン</button>
+        <button class="toolbtn" data-tool="marker" aria-pressed="false" title="蛍光マーカー"><i data-i="highlighter"></i>マーカー</button>
+        <button class="toolbtn" data-tool="rect" aria-pressed="false" title="四角枠"><i data-i="square"></i>枠</button>
+        <button class="toolbtn" data-tool="note" aria-pressed="false" title="付箋（クリックした位置に貼る）"><i data-i="sticky-note"></i>付箋</button>
+        <button class="toolbtn" data-tool="eraser" aria-pressed="false" title="消しゴム（クリックした注釈を削除）"><i data-i="eraser"></i>消去</button>
       </div>
       <button id="pvChanges" class="toolbtn" aria-pressed="false" title="重ね合わせで見つけた変更箇所を、番号付きの枠で表示（枠の番号をクリックすると、確認の状態とひとことを付けられます）"><i data-i="scan-search"></i>変更箇所</button>
       <div class="grp swatches" id="swatches"></div>
@@ -112,7 +112,7 @@
       <div class="sep"></div>
       <div class="grp">
         <button id="zOut" title="縮小"><i data-i="zoom-out"></i></button>
-        <select id="zSel">
+        <select id="zSel" aria-label="表示の倍率">
           <option value="fitw">幅に合わせる</option><option value="fitp">ページ全体</option>
           <option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option>
           <option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option>
@@ -122,7 +122,7 @@
       <div class="sep"></div>
       <div class="grp">
         <label><input type="checkbox" id="pvSync" checked>スクロール連動</label>
-        <select id="pvShow"><option value="both">左右に並べる</option><option value="0">左のみ</option><option value="1">右のみ</option></select>
+        <select id="pvShow" aria-label="表示する側"><option value="both">左右に並べる</option><option value="0">左のみ</option><option value="1">右のみ</option></select>
       </div>
       <div class="grow"></div>
       <div class="grp">
@@ -135,14 +135,14 @@
     <div class="pv-wrap" id="pvWrap" data-tool="select">
       <div class="pv-col" data-side="0">
         <div class="pv-head"><span class="nm">左</span>
-          <button class="pvPrev" title="前のページ"><i data-i="chevron-left"></i></button><input type="text" class="pvPage" value="1"><span class="pvTotal">/ 0</span><button class="pvNext" title="次のページ"><i data-i="chevron-right"></i></button>
+          <button class="pvPrev" title="前のページ"><i data-i="chevron-left"></i></button><input type="text" class="pvPage" value="1" aria-label="ページ番号"><span class="pvTotal">/ 0</span><button class="pvNext" title="次のページ"><i data-i="chevron-right"></i></button>
           <button class="pvRot" title="右に90°回転"><i data-i="rotate-cw"></i></button><button class="pvClearAnn" title="この文書の注釈をすべて削除"><i data-i="trash-2"></i>注釈消去</button>
         </div>
         <div class="pv-scroll"></div>
       </div>
       <div class="pv-col" data-side="1">
         <div class="pv-head"><span class="nm">右</span>
-          <button class="pvPrev" title="前のページ"><i data-i="chevron-left"></i></button><input type="text" class="pvPage" value="1"><span class="pvTotal">/ 0</span><button class="pvNext" title="次のページ"><i data-i="chevron-right"></i></button>
+          <button class="pvPrev" title="前のページ"><i data-i="chevron-left"></i></button><input type="text" class="pvPage" value="1" aria-label="ページ番号"><span class="pvTotal">/ 0</span><button class="pvNext" title="次のページ"><i data-i="chevron-right"></i></button>
           <button class="pvRot" title="右に90°回転"><i data-i="rotate-cw"></i></button><button class="pvClearAnn" title="この文書の注釈をすべて削除"><i data-i="trash-2"></i>注釈消去</button>
         </div>
         <div class="pv-scroll"></div>
@@ -154,22 +154,22 @@
   <section id="tab-overlay" class="tab">
     <div class="toolbar">
       <div class="grp">
-        <span class="badge-l">左</span><button id="ovLPrev" title="左の前のページ"><i data-i="chevron-left"></i></button><select id="ovLPage"></select><button id="ovLNext" title="左の次のページ"><i data-i="chevron-right"></i></button>
-        <span style="margin-left:8px">右</span><button id="ovRPrev" title="右の前のページ"><i data-i="chevron-left"></i></button><select id="ovRPage"></select><button id="ovRNext" title="右の次のページ"><i data-i="chevron-right"></i></button>
+        <span class="badge-l">左</span><button id="ovLPrev" title="左の前のページ"><i data-i="chevron-left"></i></button><select id="ovLPage" aria-label="左のページ"></select><button id="ovLNext" title="左の次のページ"><i data-i="chevron-right"></i></button>
+        <span style="margin-left:8px">右</span><button id="ovRPrev" title="右の前のページ"><i data-i="chevron-left"></i></button><select id="ovRPage" aria-label="右のページ"></select><button id="ovRNext" title="右の次のページ"><i data-i="chevron-right"></i></button>
         <label title="左右のページを一緒に送る"><input type="checkbox" id="ovLink" checked>連動</label>
       </div>
       <div class="sep"></div>
       <div class="grp" id="ovModes">
-        <button data-mode="diff" class="on"><i data-i="diff"></i>差分ハイライト</button>
-        <button data-mode="overlay"><i data-i="layers"></i>透かし重ね</button>
-        <button data-mode="swipe"><i data-i="square-split-horizontal"></i>スワイプ</button>
-        <button data-mode="blink"><i data-i="zap"></i>点滅</button>
-        <button data-mode="side"><i data-i="columns-2"></i>並べて表示</button>
+        <button data-mode="diff" class="on" aria-pressed="true"><i data-i="diff"></i>差分ハイライト</button>
+        <button data-mode="overlay" aria-pressed="false"><i data-i="layers"></i>透かし重ね</button>
+        <button data-mode="swipe" aria-pressed="false"><i data-i="square-split-horizontal"></i>スワイプ</button>
+        <button data-mode="blink" aria-pressed="false"><i data-i="zap"></i>点滅</button>
+        <button data-mode="side" aria-pressed="false"><i data-i="columns-2"></i>並べて表示</button>
       </div>
       <div class="sep"></div>
       <div class="grp" id="ovViewSw" role="group" aria-label="ページの表示方法">
-        <button data-v="single" class="on" title="1ページずつ表示（PageUp／PageDown でページ送り）" aria-label="1ページずつ表示"><i data-i="file"></i></button>
-        <button data-v="scroll" title="全ページを縦に並べてスクロールで表示" aria-label="全ページを縦に並べて表示"><i data-i="gallery-vertical-end"></i></button>
+        <button data-v="single" class="on" aria-pressed="true" title="1ページずつ表示（PageUp／PageDown でページ送り）" aria-label="1ページずつ表示"><i data-i="file"></i></button>
+        <button data-v="scroll" aria-pressed="false" title="全ページを縦に並べてスクロールで表示" aria-label="全ページを縦に並べて表示"><i data-i="gallery-vertical-end"></i></button>
       </div>
       <div class="sep"></div>
       <div class="grp">
@@ -183,13 +183,13 @@
       <div class="ov-view" id="ovView" tabindex="0" aria-label="重ね合わせの表示領域"><div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します</div></div>
       <div class="ov-side">
         <h4>結果</h4>
-        <div id="ovStats" class="muted">—</div>
+        <div id="ovStats" class="muted" role="status">—</div>
         <div data-modes="diff side" style="display:flex;gap:4px;margin-top:6px"><button id="ovRegPrev"><i data-i="chevron-left"></i>前の変更</button><button id="ovRegNext">次の変更<i data-i="chevron-right"></i></button></div>
         <div id="ovNotes" class="ov-notes" data-modes="diff side" aria-label="このページの変更箇所とコメント"></div>
         <h4 id="ovCtlTitle">表示の調整</h4>
         <div class="ov-ctl">
-          <div data-modes="overlay">右の濃さ <input type="range" id="ovOpacity" min="0" max="100" value="50"></div>
-          <div data-modes="swipe">境界位置 <input type="range" id="ovSwipe" min="0" max="100" value="50"></div>
+          <div data-modes="overlay">右の濃さ <input type="range" id="ovOpacity" min="0" max="100" value="50" aria-label="右の濃さ"></div>
+          <div data-modes="swipe">境界位置 <input type="range" id="ovSwipe" min="0" max="100" value="50" aria-label="境界位置"></div>
           <label data-modes="overlay swipe"><input type="checkbox" id="ovTint">色を付けて見分ける</label>
           <div data-modes="overlay swipe" class="ov-colors">左 <input type="color" id="ovColL" value="#e5322d" aria-label="左の色"> 右 <input type="color" id="ovColR" value="#1a73e8" aria-label="右の色"></div>
           <div data-modes="blink">切り替えの間隔 <b id="ovBlinkVal">0.65</b> 秒 <input type="range" id="ovBlinkMs" min="200" max="2000" step="50" value="650" aria-label="点滅の間隔（ミリ秒）"></div>
@@ -205,8 +205,8 @@
         </div>
         <h4>位置合わせ（右をずらす・回す）</h4>
         <div class="ov-ctl">
-          <div>X <input type="number" id="ovDx" value="0" step="1"> Y <input type="number" id="ovDy" value="0" step="1"> px</div>
-          <div>回転 <input type="number" id="ovRot" value="0" step="0.05"> °</div>
+          <div>X <input type="number" id="ovDx" value="0" step="1" aria-label="位置合わせ：横のずれ（px）"> Y <input type="number" id="ovDy" value="0" step="1" aria-label="位置合わせ：縦のずれ（px）"> px</div>
+          <div>回転 <input type="number" id="ovRot" value="0" step="0.05" aria-label="位置合わせ：回転（度）"> °</div>
           <div style="display:flex;gap:4px"><button id="ovAuto"><i data-i="crosshair"></i>自動位置合わせ</button><button id="ovReset"><i data-i="rotate-ccw"></i>リセット</button></div>
         </div>
         <h4 data-modes="diff side">凡例</h4>
@@ -232,7 +232,7 @@
   <section id="tab-folder" class="tab">
     <div class="fd-pick">
       <div class="fd-slot" data-side="0"><span class="badge" style="background:#c0504d;color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:700">左</span><span class="nm muted">フォルダをドロップ、または</span><button class="fdPick"><i data-i="folder-open"></i>フォルダを選択</button><input type="file" webkitdirectory multiple hidden></div>
-      <div class="fd-slot" data-side="1"><span class="badge" style="background:#3a8f4a;color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:700">右</span><span class="nm muted">フォルダをドロップ、または</span><button class="fdPick"><i data-i="folder-open"></i>フォルダを選択</button><input type="file" webkitdirectory multiple hidden></div>
+      <div class="fd-slot" data-side="1"><span class="badge" style="background:#2f7d3f;color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:700">右</span><span class="nm muted">フォルダをドロップ、または</span><button class="fdPick"><i data-i="folder-open"></i>フォルダを選択</button><input type="file" webkitdirectory multiple hidden></div>
     </div>
     <div class="toolbar">
       <label><input type="checkbox" class="fdFilter" value="same" checked>同一</label>
@@ -252,7 +252,7 @@
       <thead><tr><th data-k="path">ファイル</th><th data-k="st">状態</th><th data-k="ls" class="num">左サイズ</th><th data-k="rs" class="num">右サイズ</th><th data-k="lm">左 更新日時</th><th data-k="rm">右 更新日時</th></tr></thead>
       <tbody></tbody>
     </table></div>
-    <div class="statusbar" id="fdStatus">左右にフォルダを指定して「比較」を押してください</div>
+    <div class="statusbar" id="fdStatus" role="status">左右にフォルダを指定して「比較」を押してください</div>
   </section>
 </main>
 

@@ -200,7 +200,8 @@ async def main():
 
         # ---- ISO-2022-JP：濁点付きの半角カナ ----
         r = await t.js("(() => { const r = Enc.encode('ｶﾞｷﾞ ﾊﾟ ｳﾞ ｱﾞ ｱｲｳ', 'iso-2022-jp'); return [r.unmapped, new TextDecoder('iso-2022-jp').decode(r.bytes)]; })()")
-        ck('JIS で保存：濁点・半濁点付きの半角カナを1文字の全角にする（? にしない）', r == [0, 'ガギ パ ヴ ア゛ アイウ'], r)
+        # v1.5.14 から、半角カナは半角カナのまま書く（ESC ( I）。全角に直すと、編集していない行まで元のファイルと変わるため
+        ck('JIS で保存：濁点・半濁点付きの半角カナを、半角カナのまま書く（? にしない。読み直すと元に戻る）', r == [0, 'ｶﾞｷﾞ ﾊﾟ ｳﾞ ｱﾞ ｱｲｳ'], r)
 
         # ---- 読み上げ用の名前：文字のあるボタンは見えている文字のまま ----
         r = await t.js("['#ovHand', '#tPrev', '#btnSettings', '#tFirst', '#btnSwap'].map(s => document.querySelector(s).getAttribute('aria-label'))")
@@ -251,7 +252,7 @@ async def main():
         pairs = await t.js('PageMatch.ready().map(q => [q.l, q.r])')
         ck('見た目で対応を調べ直すと、削除されたページと挿入されたページを見つける', pairs == [[0, 0], [1, -1], [2, 1], [3, 2], [4, 3], [5, 4], [-1, 5], [6, 6], [7, 7]], pairs)
         info = await p.inner_text('#ovMatchInfo')
-        ck('結果を右のパネルに示し、ボタンは消える', '右で追加されたページ：6' in info and '左から削除されたページ：2' in info and not await p.is_visible('#ovRematch'), info)
+        ck('結果を右のパネルに示し、ボタンは消える', '右で追加されたページ：6' in info and '右で削除されたページ（左のページ番号）：2' in info and not await p.is_visible('#ovRematch'), info)
 
         # ---- フォルダ比較：↑↓ で行を選び、Enter で開く ----
         await t.load_folders(os.path.join(D, 'FD', 'L'), os.path.join(D, 'FD', 'R'))

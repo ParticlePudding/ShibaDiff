@@ -118,11 +118,18 @@ async def main():
         ck('絞り込みは全件が対象（表に出していない行の「相違」も出る）', r == ['sub3/d1/file_00007.txt=相違'], r[:3])
         await p.check('.fdFilter[value="same"]'); await p.wait_for_timeout(300)
         await p.focus('.fd-table-wrap')
-        for _ in range(3): await p.keyboard.press('End'); await p.wait_for_timeout(150)
-        sel = await t.js("(() => { const trs = [...document.querySelectorAll('#fdTable tbody tr[data-i]')]; return [trs.length, trs.findIndex(x => x.classList.contains('sel'))]; })()")
-        ck('End キーは表に出している最後の行へ移り、そこで続きの行が足される（3回で 900 行目）', sel == [1200, 899], sel)
+        idx = "[...document.querySelectorAll('#fdTable tbody tr[data-i]')].findIndex(x => x.classList.contains('sel'))"
+        await t.js("document.querySelectorAll('#fdTable tbody tr[data-i]')[299].click()"); await p.wait_for_timeout(100)
         await p.keyboard.press('ArrowDown'); await p.wait_for_timeout(150)
-        ck('↓ キーで、続きの行へそのまま進める', await t.js("[...document.querySelectorAll('#fdTable tbody tr[data-i]')].findIndex(x => x.classList.contains('sel'))") == 900)
+        ck('↓ キーで、表に出している最後の行から、続きの行へそのまま進める', await t.js(idx) == 300, await t.js(idx))
+        await p.keyboard.press('PageDown'); await p.wait_for_timeout(150)
+        ck('PageDown で 10 行進む', await t.js(idx) == 310, await t.js(idx))
+        # v1.5.14 から、End は一覧の本当の最後の行へ移る（以前は、表に出している 300 行ごとの最後の行で止まった）
+        await p.keyboard.press('End'); await p.wait_for_timeout(400)
+        sel = await t.js("(() => { const trs = [...document.querySelectorAll('#fdTable tbody tr[data-i]')]; return [trs.length, trs.findIndex(x => x.classList.contains('sel'))]; })()")
+        ck('End キーは、続きの行をすべて出して、一覧の最後の行へ移る', sel == [3000, 2999], sel)
+        await p.keyboard.press('PageUp'); await p.wait_for_timeout(150)
+        ck('PageUp で 10 行戻る', await t.js(idx) == 2989, await t.js(idx))
         # 上へ移動したとき、選んだ行が固定している見出しの行の下に隠れない
         clear = "(() => { const tr = document.querySelector('#fdTable tbody tr.sel'), th = document.querySelector('#fdTable thead th'); return Math.round(tr.getBoundingClientRect().top - th.getBoundingClientRect().bottom); })()"
         for _ in range(40): await p.keyboard.press('ArrowUp')

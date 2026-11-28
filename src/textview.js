@@ -42,7 +42,7 @@ const TV = (() => {
 
   function normalizer(o) {
     return s => {
-      if (o.zen) s = s.normalize('NFKC');
+      if (o.zen) s = foldWidth(s);
       if (o.ignoreCase) s = s.toLowerCase();
       if (o.ws === 'all') s = s.replace(/\s+/g, '');
       else if (o.ws === 'change') s = s.replace(/\s+/g, ' ').trim();
@@ -50,18 +50,30 @@ const TV = (() => {
     };
   }
 
+  // 比較用の行（表示の行と1対1。編集して中身が変わっているときは使わない）
+  const PAGE_SEP = /^===== ページ [0-9]+ =====$/;
+  function keysOf(side, lines) {
+    const s = S[side]; if (!s || s.dirty) return null;
+    if (s.cmpKeys && s.cmpKeys.length === lines.length) return s.cmpKeys;
+    if (s.kind === 'pdf') return s._sepKeys && s._sepKeys.src === lines ? s._sepKeys.keys : (s._sepKeys = { src: lines, keys: lines.map(l => PAGE_SEP.test(l) ? '===== ページ =====' : l) }).keys;
+    return null;
+  }
   function compare(keepPos = false) {
     st.dirty = false;
     const A = L(0), B = L(1), o = opts();
     const norm = normalizer(o), ids = new Map();
     const idOf = s => { s = norm(s); let v = ids.get(s); if (v === undefined) { v = ids.size; ids.set(s, v); } return v; };
     const ia = new Int32Array(A.length), ib = new Int32Array(B.length);
-    for (let i = 0; i < A.length; i++) ia[i] = idOf(A[i]);
-    for (let i = 0; i < B.length; i++) ib[i] = idOf(B[i]);
+    // Excel は、数式を相対位置の形にした行（cmpKeys）で比べる：行を足した・消したために参照の番号がずれただけの数式は、違いにしない。
+    // PDF の「===== ページ 3 =====」は、このツールが入れた区切りなので、ページが増減して番号がずれても違いにしない
+    const KA = keysOf(0, A), KB = keysOf(1, B);
+    for (let i = 0; i < A.length; i++) ia[i] = idOf(KA ? KA[i] : A[i]);
+    for (let i = 0; i < B.length; i++) ib[i] = idOf(KB ? KB[i] : B[i]);
+    st.keyed = [KA, KB];
     let rows, blocks;
-    if (!o.blank) ({ rows, blocks } = Diff.buildRows(Diff.seq(ia, ib), A, B, {}));
+    if (!o.blank) ({ rows, blocks } = Diff.buildRows(Diff.seq(ia, ib), A, B, { same: (i, j) => ia[i] === ib[j] }));
     else ({ rows, blocks } = diffIgnoringBlank(A, B, ia, ib));
-    st.rows = rows; st.blocks = blocks; st.hit = -1;
+    st.rows = rows; st.blocks = blocks; st.hit = -1; st.shifted = undefined;
     st.noteIds = S[0] && S[1] ? Notes.textIds(blocks, A, B) : []; noteClasses();
     if (!keepPos) st.expanded.clear();
     let mx = 0;
@@ -77,11 +89,13 @@ const TV = (() => {
       const keepTop = wrapEl.scrollTop;
       render(); if (!keepPos) { wrapEl.scrollTop = 0; if (st.cur >= 0) scrollToBlock(st.cur); } else wrapEl.scrollTop = keepTop;
     } else {
-      if (!keepPos) { panes[0].scrollTop = 0; panes[0].scrollLeft = 0; if (st.cur >= 0) scrollToBlock(st.cur); }
+      // 読み込んだ直後は、横には動かさない（最初の変更が長い行の右の方にあると、ほかの行が画面の外になり、空白ばかりに見える）
+      if (!keepPos) { panes[0].scrollTop = 0; panes[0].scrollLeft = 0; if (st.cur >= 0) scrollToBlock(st.cur, false); }
       render();
     }
     status();
     $('#textHint').style.display = (S[0] || S[1]) ? 'none' : '';
+    $('#diffwrap').classList.toggle('single', !!S[0] !== !!S[1]); // 片側だけ：差分の色を付けない（全部が削除・追加に見えないように）
     renderNotes();
   }
 
@@ -91,7 +105,7 @@ const TV = (() => {
     const ma = [], mb = [];
     A.forEach((s, i) => { if (!blank(s)) ma.push(i); }); B.forEach((s, i) => { if (!blank(s)) mb.push(i); });
     const A2 = ma.map(i => A[i]), B2 = mb.map(i => B[i]);
-    const r2 = Diff.buildRows(Diff.seq(Int32Array.from(ma, i => ia[i]), Int32Array.from(mb, i => ib[i])), A2, B2, {}).rows;
+    const r2 = Diff.buildRows(Diff.seq(Int32Array.from(ma, i => ia[i]), Int32Array.from(mb, i => ib[i])), A2, B2, { same: (i, j) => ia[ma[i]] === ib[mb[j]] }).rows;
     const rows = []; let na = 0, nb = 0;
     const flushBlanks = (ua, ub) => { // ua/ub: 次に出す元の行番号（ここより前の空行を出す）
       const ba = [], bb = [];
@@ -162,13 +176,66 @@ const TV = (() => {
 
   // CSV・TSV では、カンマを3桁区切りとみなさない
   const isCsv = () => [0, 1].some(i => S[i] && /\.(csv|tsv)$/i.test(S[i].name || ''));
-  const getCd = r => r.cd || (r.cd = Diff.chars(L(0)[r.a], L(1)[r.b], Settings.get('unit'), isCsv()));
+  const getCd = r => r.cd || (r.cd = keyedCd(r, Diff.chars(L(0)[r.a], L(1)[r.b], Settings.get('unit'), isCsv(), inlineFold())));
+  /* 変更行の中の印も、比較条件に合わせる（「全角・半角を区別しない」のときに、全角・半角だけが違う文字を塗らない。大文字・小文字、空白も同じ）。
+     1文字ごとの「比べるときの形」と、元の文字の位置（idx：始まり、end：終わり）を返す。無視する空白は、どの文字にも入れない */
+  function inlineFold() {
+    const o = opts();
+    if (!o.zen && !o.ignoreCase && o.ws === 'none') return null;
+    return arr => {
+      const k = [], idx = [], end = [];
+      let sp = false; // 直前が空白（「空白の量を無視」では、空白の連なりを1つの空白として比べる）
+      for (let i = 0; i < arr.length; i++) {
+        let c = arr[i];
+        if (o.ws !== 'none' && /^\s$/.test(c)) {
+          if (o.ws === 'change' && !sp && k.length) { sp = true; k.push(' '); idx.push(i); end.push(i + 1); }
+          continue;
+        }
+        sp = false;
+        if (o.zen) {
+          // 半角カナの濁点・半濁点は、前の文字と合わせて1文字（ｶﾞ ＝ ガ）
+          if ((c === '\uFF9E' || c === '\uFF9F') && k.length && end[end.length - 1] === i && /[\uFF66-\uFF9D]/.test(arr[i - 1])) {
+            k[k.length - 1] = foldWidth(arr[i - 1] + c); end[end.length - 1] = i + 1; continue;
+          }
+          c = foldWidth(c);
+        }
+        if (o.ignoreCase) c = c.toLowerCase();
+        k.push(c); idx.push(i); end.push(i + 1);
+      }
+      if (sp) { k.pop(); idx.pop(); end.pop(); } // 行末の空白
+      return { k, idx, end };
+    };
+  }
+  // Excel の変更行：比較用の行で同じとみなしたセル（番号がずれただけの数式、ROW() の通し番号）の中の違いには、印を付けない
+  function keyedCd(r, cd) {
+    const [KA, KB] = st.keyed || [];
+    if (!KA || !KB || !S[0].cmpKeys || !S[1].cmpKeys) return cd;
+    const ca = L(0)[r.a].split('\t'), cb = L(1)[r.b].split('\t'), ka = KA[r.a].split('\t'), kb = KB[r.b].split('\t');
+    if (ca.length !== cb.length || ka.length !== ca.length || kb.length !== cb.length) return cd;
+    const spans = (cells, mask) => { const out = []; let p = 0; cells.forEach((c, i) => { const n = Array.from(c).length; if (mask[i]) out.push([p, p + n]); p += n + 1; }); return out; };
+    const mask = ca.map((c, i) => c !== cb[i] && ka[i] === kb[i]);
+    if (!mask.some(Boolean)) return cd;
+    const cut = (ranges, sp) => { const out = []; for (let [s, e] of ranges) { for (const [a, b] of sp) { if (b <= s || a >= e) continue; if (a > s) out.push([s, Math.min(a, e)]); s = Math.max(s, b); if (s >= e) break; } if (s < e) out.push([s, e]); } return out; };
+    const sa = spans(ca, mask), sb = spans(cb, mask), inside = (q, sp) => sp.some(([a, b]) => q >= a && q <= b);
+    return { ...cd, a: cut(cd.a, sa), b: cut(cd.b, sb), pa: cd.pa.filter(q => !inside(q, sa)), pb: cd.pb.filter(q => !inside(q, sb)) };
+  }
+  // 比較用の行では同じだが、文字は違う行の数（＝数式の番号ずれだけの行）
+  function shifted() {
+    if (st.shifted !== undefined) return st.shifted;
+    let n = 0; const [KA, KB] = st.keyed || [];
+    if (KA && KB && S[0] && S[1] && S[0].cmpKeys && S[1].cmpKeys) { const A = L(0), B = L(1); for (const r of st.rows) if (r.t === 'e' && A[r.a] !== B[r.b]) n++; }
+    return (st.shifted = n);
+  }
   /* 文字列を HTML に（設定により空白・タブを記号で表示） */
-  function txt(str) {
-    const h = esc(str);
-    if (!Settings.get('showWs')) return h;
-    const WS = { '\t': '<span class="wsc wtab">\t</span>', ' ': '<span class="wsc wsp"> </span>', '\u3000': '<span class="wsc wzsp">\u3000</span>' };
-    return h.replace(/[\t \u3000]/g, c => WS[c]); // 1回の置換で行う（置換後のタグ内の空白を壊さない）
+  /* zw：幅のない見えない文字（ゼロ幅スペース・ゼロ幅接合子・向きの印など）も印で示す。空白の記号表示がオンのときと、
+     変わった文字の中（印がないと、何が違うのか画面から分からない）で使う */
+  const WS = { '\t': '<span class="wsc wtab">\t</span>', ' ': '<span class="wsc wsp"> </span>', '\u3000': '<span class="wsc wzsp">\u3000</span>' };
+  const zwHtml = c => `<span class="wzw" title="見えない文字（幅のない文字 U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}）">${c}</span>`;
+  function txt(str, zw = false) {
+    const h = esc(str), ws = Settings.get('showWs');
+    if (!ws && !zw) return h;
+    // 1回の置換で行う（置換後のタグ内の空白を壊さない）
+    return h.replace(ws ? /[\t \u3000\u200B-\u200F\u2060\uFEFF]/g : /[\u200B-\u200F\u2060\uFEFF]/g, c => WS[c] || zwHtml(c));
   }
   // 末尾の改行の有無が左右で違うか（テキストどうしで、どちらかに行があるとき）。違えば改行のない側（0／1）を返す
   function noNLSide() {
@@ -194,9 +261,11 @@ const TV = (() => {
     const ins = new Map();
     const add = (at, h) => ins.set(at, (ins.get(at) || '') + h);
     for (const q of pts) add(q, `<span class="ipt" title="${side ? 'ここにあった文字が削除されました' : 'ここに文字が追加されました'}"></span>`);
-    if (side === 1 && Settings.get('numDelta')) for (const d of Diff.numberDeltas(cd)) add(d.at, `<span class="dnum">${esc(d.text)}</span>`);
+    if (side === 1 && Settings.get('numDelta') && S[0].kind !== 'binary' && S[1].kind !== 'binary') for (const d of Diff.numberDeltas(cd)) add(d.at, `<span class="dnum">${esc(d.text)}</span>`);
     let out = '', buf = '', m = 0;
-    const flush = () => { if (buf) out += m ? `<span class="cd">${txt(buf)}</span>` : txt(buf); buf = ''; };
+    // 変わった文字は、del（左：変更前）・ins（右：変更後）の要素にする（色と線だけでなく、読み上げにも「削除」「挿入」と伝わる）
+    const tag = side ? 'ins' : 'del';
+    const flush = () => { if (buf) out += m ? `<${tag} class="cd">${txt(buf, true)}</${tag}>` : txt(buf); buf = ''; };
     for (let k = 0; k <= n; k++) {
       if (ins.has(k)) { flush(); out += ins.get(k); }
       if (k === n) break;
@@ -206,6 +275,8 @@ const TV = (() => {
     flush();
     return out;
   }
+  // 行頭の印（− +）。読み上げには、記号ではなく意味（変更前・変更後・左のみ・右のみ）を伝える
+  const mkHtml = (mk, name) => name ? `<span class="mk" role="img" aria-label="${name}">${mk}</span>` : `<span class="mk" aria-hidden="true">${mk}</span>`;
   const foldHtml = (v, e) => `<div class="row fold" data-v="${v}"><span class="ln">⋯</span><span class="tx">${fmtNum(e.to - e.from)} 行の一致部分を省略（クリックで展開）</span></div>`;
   const MK = { c: ['−', '+'], d: ['−', '+'], i: ['−', '+'] };
   /* 左右表示の1行（v: 表示上の行番号） */
@@ -225,7 +296,7 @@ const TV = (() => {
     let tx = '';
     if (li >= 0) tx = (r.t === 'c' ? inlineHtml(r, side) : txt(L(side)[li])) + eolMark(side, li);
     const mk = li >= 0 && MK[r.t] ? MK[r.t][side] : '';
-    return `<div class="${cls}" data-v="${v}" data-s="${side}"><span class="ln">${li >= 0 ? li + 1 : ''}</span><span class="tx"><span class="mk" aria-hidden="true">${mk}</span>${tx}</span></div>`;
+    return `<div class="${cls}" data-v="${v}" data-s="${side}"><span class="ln">${li >= 0 ? li + 1 : ''}</span><span class="tx">${mkHtml(mk, mk ? (r.t === 'c' ? (side ? '変更後' : '変更前') : side ? '右のみ' : '左のみ') : '')}${tx}</span></div>`;
   }
   /* 一列表示の1行（d: 一列表示での行番号） */
   function unifiedRowHtml(d, fd = -1, ld = -1) {
@@ -239,7 +310,7 @@ const TV = (() => {
     const side = u.k === 'b' ? 1 : 0;
     const tx = u.k === 'e' ? txt(A[r.a]) + (noNLSide() === 1 && r.b === L(1).length - 1 ? NONL.replace('改行なし', '右は改行なし') : eolMark(0, r.a)) : (r.t === 'c' ? inlineHtml(r, side) : txt((side ? B : A)[side ? r.b : r.a])) + eolMark(side, side ? r.b : r.a);
     const na = u.k !== 'b' && r.a >= 0 ? r.a + 1 : '', nb = u.k !== 'a' && r.b >= 0 ? r.b + 1 : '';
-    return `<div class="${cls}" data-v="${u.v}" data-s="${side}"><span class="ln"><i>${na}</i><i>${nb}</i></span><span class="tx"><span class="mk" aria-hidden="true">${u.k === 'a' ? '−' : u.k === 'b' ? '+' : ' '}</span>${tx}</span></div>`;
+    return `<div class="${cls}" data-v="${u.v}" data-s="${side}"><span class="ln"><i>${na}</i><i>${nb}</i></span><span class="tx">${mkHtml(u.k === 'a' ? '−' : u.k === 'b' ? '+' : ' ', u.k === 'a' ? '左（変更前）' : u.k === 'b' ? '右（変更後）' : '')}${tx}</span></div>`;
   }
   function curRange() {
     if (!(st.cur >= 0 && st.blocks[st.cur])) return [-1, -1];
@@ -348,12 +419,18 @@ const TV = (() => {
   map.addEventListener('pointermove', e => { if (e.buttons & 1) mapJump(e); });
 
   /* ---- scroll sync ---- */
+  // 動かしている側（driver）に、もう片方を合わせる。合わせられた側にも scroll イベントが届くが、そこから動かしている側へ
+  // 書き戻さない：キー操作（Ctrl+End・PageDown など）のなめらかなスクロールの途中で、少し前の位置を書き戻すと、
+  // スクロールが打ち切られて途中で止まる（30万行で Ctrl+End を押すと、半分のところで止まっていた）
+  let driver = -1, driverT = 0;
   panes.forEach((p, i) => {
     p.addEventListener('scroll', () => {
-      const o = panes[1 - i];
-      if (o.scrollTop !== p.scrollTop) o.scrollTop = p.scrollTop;
-      if (o.scrollLeft !== p.scrollLeft) o.scrollLeft = p.scrollLeft;
       renderSoon();
+      if (driver >= 0 && driver !== i) return;
+      driver = i; clearTimeout(driverT);
+      const o = panes[1 - i], sync = () => { if (o.scrollTop !== p.scrollTop) o.scrollTop = p.scrollTop; if (o.scrollLeft !== p.scrollLeft) o.scrollLeft = p.scrollLeft; };
+      sync();
+      driverT = setTimeout(() => { sync(); driver = -1; }, 150);
     }, { passive: true });
   });
   for (const el of [...panes, wrapEl]) {
@@ -416,7 +493,7 @@ const TV = (() => {
     const p = panes[0], y = D(v) * ROWH;
     if (y < p.scrollTop + 20 || y > p.scrollTop + p.clientHeight - ROWH * 3) p.scrollTop = Math.max(0, y - p.clientHeight / 3);
   }
-  function scrollToBlock(i) {
+  function scrollToBlock(i, horiz = true) {
     const b = st.blocks[i]; if (!b) return;
     if (wrapOn()) { scrollToV(st.rowToView[b.r0]); return; }
     const v = D(st.rowToView[b.r0]), p = panes[0];
@@ -425,9 +502,14 @@ const TV = (() => {
       p.scrollTop = Math.max(0, y - p.clientHeight / 3);
     // 変更行なら、最初に変わった文字の位置まで横スクロール
     const r0 = st.rows[b.r0];
+    if (!horiz) return;
     if (r0 && r0.t === 'c') {
-      const cd = getCd(r0), rg = cd.a[0] || cd.b[0];
-      if (rg) hscrollTo(cd.a[0] ? L(0)[r0.a] : L(1)[r0.b], rg[0]);
+      // 左右それぞれの最初の変更（範囲・挿入位置）のうち、行の先頭に近いほうへ（右にだけ文字が足された所が、左の次の変更より手前にあることがある）
+      const cd = getCd(r0), cand = [];
+      const push = (side, q) => { if (q !== undefined) cand.push([dispWidth(Array.from(side ? L(1)[r0.b] : L(0)[r0.a]).slice(0, q).join('')), side, q]); };
+      push(0, cd.a[0] && cd.a[0][0]); push(0, cd.pa[0]); push(1, cd.b[0] && cd.b[0][0]); push(1, cd.pb[0]);
+      cand.sort((x, y) => x[0] - y[0]);
+      if (cand.length) hscrollTo(cand[0][1] ? L(1)[r0.b] : L(0)[r0.a], cand[0][2]);
     } else p.scrollLeft = 0;
   }
   function go(i) {
@@ -546,15 +628,23 @@ const TV = (() => {
     let d = 0, i = 0, c = 0; for (let k = b.r0; k < b.r1; k++) { const t = st.rows[k].t; if (t === 'd') d++; else if (t === 'i') i++; else if (t === 'c') c++; }
     return c || (d && i) ? '変更' : d ? '左のみ' : i ? '右のみ' : '空白・空行';
   }
-  const lineRange = (a0, a1) => a1 <= a0 ? '—' : a1 - a0 === 1 ? `${a0 + 1}行` : `${a0 + 1}–${a1}行`;
-  function blockLabel(i) { const b = st.blocks[i]; return `#${i + 1} ${blockKind(b)} 左${lineRange(b.a0, b.a1)}・右${lineRange(b.b0, b.b1)}`; }
+  const lineRange = (a0, a1) => a1 <= a0 ? '—' : a1 - a0 === 1 ? `${a0 + 1}行目` : `${a0 + 1}–${a1}行目`;
+  function blockLabel(i) { const b = st.blocks[i]; return `#${i + 1} ${blockKind(b)} 左 ${lineRange(b.a0, b.a1)}・右 ${lineRange(b.b0, b.b1)}`; }
   const short = (s, n = 70) => s.length > n ? s.slice(0, n) + '…' : s;
   function noteItemHtml(i) {
     const b = st.blocks[i], A = L(0), B = L(1), id = st.noteIds[i];
-    const a = b.a1 > b.a0 ? A[b.a0] : '', bb = b.b1 > b.b0 ? B[b.b0] : '';
+    // 見本に出すのは、まとまりの中で最初の（空行でない）行。「変更」の行なら左右を組のまま出し、長い行は変わった所の前後を出す。
+    // 左の1行目と右の1行目を並べるだけだと、組になっていない行どうしが「変更前 → 変更後」に見える（行の追加＋別の行の変更、など）
+    let k = b.r0; while (k < b.r1 - 1 && !((st.rows[k].a >= 0 && A[st.rows[k].a].trim()) || (st.rows[k].b >= 0 && B[st.rows[k].b].trim()))) k++;
+    const r = st.rows[k], a = r.a >= 0 ? A[r.a] : null, bb = r.b >= 0 ? B[r.b] : null;
+    let from = 0;
+    if (a !== null && bb !== null) { while (from < a.length && from < bb.length && a[from] === bb[from]) from++; from = Math.max(0, from - 24); if (Math.max(a.length, bb.length) <= 70) from = 0; }
+    const ex = s => (from ? '…' : '') + short(s.slice(from));
+    let c = 0, d = 0, n = 0; for (let q = b.r0; q < b.r1; q++) { const t = st.rows[q].t; if (t === 'c') c++; else if (t === 'd') d++; else if (t === 'i') n++; }
+    const rest = b.r1 - b.r0 - 1, more = rest > 0 ? `<div class="more muted">ほか ${fmtNum(rest)} 行（このまとまり：${[c ? `変更 ${fmtNum(c)}` : '', d ? `左のみ ${fmtNum(d)}` : '', n ? `右のみ ${fmtNum(n)}` : ''].filter(Boolean).join('・')}）</div>` : '';
     return `<div class="nt-item${i === st.cur ? ' cur' : ''}${st.noteCls[i] || ''}" data-b="${i}" tabindex="-1">` +
-      `<div class="nt-h"><b>#${i + 1}</b> ${blockKind(b)} <span class="muted">左${lineRange(b.a0, b.a1)}・右${lineRange(b.b0, b.b1)}</span></div>` +
-      `<div class="nt-pv">${b.a1 > b.a0 ? `<div class="del">− ${esc(short(a))}</div>` : ''}${b.b1 > b.b0 ? `<div class="add">＋ ${esc(short(bb))}</div>` : ''}</div>` +
+      `<div class="nt-h"><b>#${i + 1}</b> ${blockKind(b)} <span class="muted">左 ${lineRange(b.a0, b.a1)}・右 ${lineRange(b.b0, b.b1)}</span></div>` +
+      `<div class="nt-pv">${a !== null ? `<div class="del">− ${esc(ex(a))}</div>` : ''}${bb !== null ? `<div class="add">＋ ${esc(ex(bb))}</div>` : ''}${more}</div>` +
       `<div class="nt-sum">${Notes.chip(id)}</div></div>`;
   }
   function noteCounts() {
@@ -648,13 +738,15 @@ const TV = (() => {
     if (s.kind === 'pdf') return s.noTextLayer ? `PDF ${s.pageCount}ページ・文字情報なし（スキャン）` : `PDF ${s.pageCount}ページ・抽出 ${fmtNum(s.lines.length)}行`;
     if (s.noText) return '画像';
     if (/^(docx|xlsx|pptx)$/.test(s.kind)) return `${s.kind.toUpperCase()}・抽出 ${fmtNum(s.lines.length)}行${s.tracked ? '・変更履歴あり（承諾した状態で比較）' : ''}`;
-    return `${fmtNum(s.lines.length)}行・${Enc.NAMES[s.enc] || s.enc}・${Enc.EOLNAME[s.eol] || ''}${s.mixed ? '(混在)' : ''}`;
+    // 改行が1つもないファイル（1行だけ・空）に「CRLF」と出さない
+    const noEol = s.lines.length <= 1 && !s.finalNL;
+    return `${fmtNum(s.lines.length)}行・${Enc.NAMES[s.enc] || s.enc}・${noEol ? '改行なし' : (Enc.EOLNAME[s.eol] || '') + (s.mixed ? '(混在)' : '')}`;
   }
   function status() {
     const n = st.blocks.length;
     let msg;
     const vis = [0, 1].filter(i => App.visualOnly(S[i]));
-    if (!S[0] || !S[1]) msg = '<span>左右にファイルを読み込むと比較します</span>';
+    if (!S[0] || !S[1]) msg = `<span>${S[0] || S[1] ? `${S[0] ? '右' : '左'}にもファイルを読み込むと比較します（いまは${S[0] ? '左' : '右'}だけを表示しています）` : '左右にファイルを読み込むと比較します'}</span>`;
     else if (vis.length) msg = `<b style="color:#b45309">⚠ ${vis.map(i => (i ? '右' : '左')).join('と')}は文字情報のない画像（スキャン）のため、テキストでは比較できません</b><button id="goOverlay" style="padding:1px 8px">重ね合わせ比較で確認</button>`;
     else if (!n) {
       const o = opts();
@@ -664,8 +756,9 @@ const TV = (() => {
         // バイナリの表示は先頭だけなので、表示上の差がなくても中身が違えば「同一」とは言わない
         msg = `<b style="color:#b45309">⚠ バイナリの内容が異なります</b><span>最初の違い：オフセット 0x${diffAt.toString(16).toUpperCase()}（${fmtNum(diffAt)}）。表示は先頭 ${fmtSize(Enc.DUMP_MAX)} のみです</span>`;
       } else {
-      msg = `<b style="color:#21752f">✓ ${same ? '完全に同一です' : (ignored ? '比較オプションの範囲で同一です' : 'テキスト内容は同一です')}</b>`;
-      if (!same && !ignored && S[0].kind === S[1].kind && S[0].kind === 'text' && (S[0].enc !== S[1].enc || S[0].eol !== S[1].eol)) msg += '<span>（文字コードまたは改行コードが異なります）</span>';
+      msg = `<b style="color:#21752f">✓ ${same ? '完全に同一です' : (ignored ? '比較条件の範囲で同一です' : 'テキスト内容は同一です')}</b>`;
+      if (!same && !ignored && S[0].kind === S[1].kind && S[0].kind === 'text' && (S[0].enc !== S[1].enc || S[0].eol !== S[1].eol || !!S[0].mixed !== !!S[1].mixed)) msg += `<span>（文字コードまたは改行コードが異なります${S[0].mixed || S[1].mixed ? `。${[0, 1].filter(i => S[i].mixed).map(i => i ? '右' : '左').join('・')}は改行コードが混在しています` : ''}）</span>`;
+      if (!same && shifted()) msg += `<span>（数式の参照の番号だけがずれている ${fmtNum(shifted())} 行は、同じとして扱っています）</span>`;
       const nn = noNLSide();
       if (!same && nn >= 0) msg += `<span>（末尾の改行の有無が異なります：${nn ? '右' : '左'}は改行なしで終わる）</span>`;
       // 差分をコピーした・編集した結果の「同一」は、元のファイルが同一という意味ではないことを示す
@@ -676,6 +769,7 @@ const TV = (() => {
       let dl = 0, il = 0, cl = 0;
       for (const r of st.rows) { if (r.t === 'c') cl++; else if (r.t === 'd') dl++; else if (r.t === 'i') il++; }
       msg = `差分 <b>${st.cur >= 0 ? st.cur + 1 : '-'} / ${n}</b> 箇所<span>変更 ${fmtNum(cl)}行・左のみ ${fmtNum(dl)}行・右のみ ${fmtNum(il)}行</span>`;
+      if (shifted()) msg += `<span title="行を足した・消したために、数式の参照の番号（=C5 → =C6 など）だけがずれている行です">（数式の番号ずれだけの ${fmtNum(shifted())} 行は、変更に数えていません）</span>`;
       const nn = noNLSide();
       if (nn >= 0) msg += `<span style="color:#b45309">（末尾の改行の有無も異なります：${nn ? '右' : '左'}は改行なしで終わる）</span>`;
       if ([0, 1].some(i => S[i].kind === 'binary' && S[i].bytes && S[i].bytes.length > Enc.DUMP_MAX)) msg += `<span>（バイナリは先頭 ${fmtSize(Enc.DUMP_MAX)} だけを表示・比較しています。それより後ろの違いは数に含みません）</span>`;
@@ -691,6 +785,15 @@ const TV = (() => {
     const ia = Int32Array.from(A, idOf), ib = Int32Array.from(B, idOf);
     return Diff.buildRows(Diff.seq(ia, ib), A, B).rows;
   }
+  /* パッチの見出しに書くファイル名。日本語など、ASCII の印字できる文字以外を含む名前は、git と同じ引用形式（"…" で囲み、UTF-8 のバイトを8進で書く）にする。
+     パッチの本文を Shift_JIS などで出すと、名前までその文字コードになり、git apply・patch が UTF-8 の名前のファイルを見つけられないため */
+  function gitName(p) {
+    if (!/[^\x20-\x7e]|["\\]/.test(p)) return p;
+    const ESC = { 7: 'a', 8: 'b', 9: 't', 10: 'n', 11: 'v', 12: 'f', 13: 'r', 34: '"', 92: '\\' };
+    let out = '"';
+    for (const b of new TextEncoder().encode(p)) out += ESC[b] ? '\\' + ESC[b] : b < 0x20 || b >= 0x7f ? '\\' + b.toString(8).padStart(3, '0') : String.fromCharCode(b);
+    return out + '"';
+  }
   /* unified diff（git形式）。各ファイルの改行コード・末尾改行の有無・文字コードを保つ */
   function unified() {
     const A = L(0), B = L(1), R = exactRows().slice(), ctx = 3;
@@ -704,8 +807,10 @@ const TV = (() => {
       const x = R[i];
       if (x.t === 'e' && noEolA(x.a) !== noEolB(x.b)) R[i] = { ...x, t: 'c' };
     }
-    const name = sa ? sa.name : 'file';
-    const out = [`diff --git a/${name} b/${name}`, `--- a/${name}`, `+++ b/${name}`].map(l => l + '\n');
+    // フォルダ比較の一覧から開いたファイルは、フォルダからの相対パスで書く（フォルダの直下で git apply / patch -p1 を実行すれば当たる）
+    const name = sa ? sa.rel || sa.name : 'file';
+    const na = gitName('a/' + name), nb = gitName('b/' + name), tab = na[0] !== '"' && name.includes(' ') ? '\t' : ''; // 空白を含む名前は、行末にタブを付ける（git と同じ。GNU patch が名前の終わりを読み違えない）
+    const out = [`diff --git ${na} ${nb}`, `--- ${na}${tab}`, `+++ ${nb}${tab}`].map(l => l + '\n');
     const NONL = '\\ No newline at end of file\n';
     const lineA = (pre, i) => pre + A[i] + (i === A.length - 1 && !nlA ? '\n' + NONL : eolA === '\n' ? '\n' : eolA);
     const lineB = (pre, i) => pre + B[i] + (i === B.length - 1 && !nlB ? '\n' + NONL : eolB === '\n' ? '\n' : eolB);
@@ -744,10 +849,15 @@ const TV = (() => {
     const p = unified(); if (!p) return toast('差分がないため出力するものはありません');
     // 両方が同じ日本語の文字コードなら、その文字コードで書き出す（元ファイルに当てられるように）
     const e0 = S[0].kind === 'text' ? S[0].enc : 'utf-8', e1 = S[1].kind === 'text' ? S[1].enc : 'utf-8';
-    let enc = e0 === e1 && /^(shift_jis|euc-jp)$/.test(e0) ? e0 : 'utf-8';
+    let enc = e0 === e1 && /^(shift_jis|euc-jp|iso-2022-jp)$/.test(e0) ? e0 : 'utf-8';
     let bytes = Enc.encode(p, enc).bytes;
     download(`${baseName(S[0].name)}.diff`, bytes, 'text/plain');
-    toast(`パッチを出力しました（git形式・${Enc.NAMES[enc]}）。適用: git apply / patch -p1`);
+    const extracted = S[0].kind !== 'text' || S[1].kind !== 'text';
+    // 元のファイルに当てられるのは、左右が同じ文字コード（UTF-8・Shift_JIS・EUC-JP・JIS）のテキストどうしのときだけ
+    const base = e => e === 'utf-8-bom' ? 'utf-8' : e, applicable = !extracted && base(e0) === base(e1) && /^(utf-8|shift_jis|euc-jp|iso-2022-jp)$/.test(base(e0));
+    toast(extracted ? '取り出した文字の差分を出力しました（差分の記録用です。Word・Excel・PDF などの元のファイルには当てられません）'
+      : !applicable ? `差分を UTF-8 で出力しました（差分の記録用です）。${/^utf-16/.test(e0) || /^utf-16/.test(e1) ? 'UTF-16 のファイルには' : '左右の文字コードが違うため、元のファイルには'}、そのままでは当てられません`
+        : `パッチを出力しました（git形式・${Enc.NAMES[enc]}）。適用: ${S[0].rel ? 'フォルダの直下で ' : ''}git apply / patch -p1`, false, applicable ? undefined : 9000);
   }
   async function exportReport() {
     if (!S[0] || !S[1]) return toast('左右にファイルを読み込んでください');
@@ -798,15 +908,24 @@ const TV = (() => {
     const co = opts();
     const cond = [co.ws === 'change' ? '空白の量を無視' : co.ws === 'all' ? '空白を無視' : '', co.ignoreCase ? '大小文字無視' : '', co.blank ? '空行無視' : '', co.zen ? '全角半角無視' : '', co.fold ? '差分のみ表示' : ''].filter(Boolean).join('、') || 'なし（完全一致で比較）';
     const [h0, h1] = o.files ? await Promise.all([Report.sha256(S[0].bytes), Report.sha256(S[1].bytes)]) : ['', ''];
+    // 画面の状態表示に出していることのうち、受け取った人が知らないと読み違えるもの
+    const extra = [];
+    for (const i of [0, 1]) if (S[i].tracked) extra.push(`${i ? '右' : '左'}の文書には変更履歴が残っています（挿入 ${S[i].tracked.ins}・削除 ${S[i].tracked.del}）。変更をすべて承諾した状態の文字で比較しています`);
+    if (!st.blocks.length) {
+      const sameBytes = firstByteDiff(S[0].bytes, S[1].bytes) < 0, t = i => `${i ? '右' : '左'} ${Enc.NAMES[S[i].enc] || S[i].enc}・${S[i].mixed ? '改行コード混在' : Enc.EOLNAME[S[i].eol] || ''}`;
+      extra.push(sameBytes ? '左右のファイルは完全に同一です' : '文字の内容は同じです' + (S[0].kind === 'text' && S[1].kind === 'text' && (S[0].enc !== S[1].enc || S[0].eol !== S[1].eol || !!S[0].mixed !== !!S[1].mixed) ? `（文字コードまたは改行コードが異なります：${t(0)}／${t(1)}）` : '（ファイルとしては同一ではありません）'));
+    }
+    if (shifted()) extra.push(`数式の参照の番号だけがずれている ${fmtNum(shifted())} 行は、変更に数えていません`);
+    const lnW = o.notes ? 96 : 62;
     const info = (s, h) => !o.files ? esc(s.name) : `${esc(s.name)}<br><span class="sub">${s.size ? fmtSize(s.size) + '・' : ''}更新 ${fmtDate(s.mtime)}${s.kind === 'text' ? '・' + (Enc.NAMES[s.enc] || s.enc) + '・' + (Enc.EOLNAME[s.eol] || '') : ''}${h ? `<br>SHA-256: ${h}` : ''}${s.dirty ? '<br><b style="color:#b42318">※ 未保存の編集を含む内容です（元のファイルとは異なります）</b>' : ''}</span>`;
     const css = `*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:"BIZ UDPGothic","Meiryo",sans-serif;margin:20px;color:#222}h1{font-size:18px;margin:0 0 8px}
 table{border-collapse:collapse;width:100%;table-layout:fixed;font-family:"BIZ UDGothic","MS Gothic",monospace;font-size:12.5px}
-td{white-space:pre-wrap;word-break:break-all;padding:1px 6px;vertical-align:top;border-bottom:1px solid #f0f0f0}
-td.ln{width:62px;text-align:right;color:#999;background:#f7f7f7}td.ln b{color:#444;margin-right:4px}th{background:#eee;padding:6px;text-align:left;vertical-align:top;font-family:"BIZ UDPGothic","Meiryo",sans-serif;font-weight:600}
+td{white-space:pre-wrap;overflow-wrap:anywhere;padding:1px 6px;vertical-align:top;border-bottom:1px solid #f0f0f0}
+td.ln{width:${lnW}px;text-align:right;color:#999;background:#f7f7f7;white-space:nowrap;overflow-wrap:normal}td.ln b{color:#444;margin-right:4px}th{background:#eee;padding:6px;text-align:left;vertical-align:top;font-family:"BIZ UDPGothic","Meiryo",sans-serif;font-weight:600}
 th .sub{font-weight:400;color:#666;font-size:11px;word-break:break-all}
 .t-c.s0,.t-d{background:#ffebe9}.t-c.s1,.t-i{background:#ddf4ff}.t-w{background:#f6f6f2}.pad{background:#eee}
-.s0 .cd{background:#ffb8b3;text-decoration:line-through;text-decoration-color:#b3261e}.s1 .cd{background:#a8d4ff;text-decoration:underline;text-decoration-color:#0550ae;text-underline-offset:2px}
+.s0 .cd{background:#ffb8b3;text-decoration:line-through;text-decoration-color:rgba(179,38,30,.55);text-decoration-thickness:1px}.wzw::before{content:"◊";color:#b45309;font-size:.75em}.s1 .cd{background:#a8d4ff;text-decoration:underline;text-decoration-color:#0550ae;text-underline-offset:2px}
 .ipt{display:inline-block;width:0;height:1em;border-left:2px solid #0550ae;margin:0 1px;vertical-align:-.15em}.s1 .ipt{border-left-color:#b3261e}
 .dnum{font-family:sans-serif;font-size:10.5px;color:#0550ae;border:1px solid #a8d4ff;border-radius:8px;padding:0 4px;margin:0 3px}
 .wsc,.weol{color:#9aa5b1}
@@ -823,21 +942,23 @@ tr.fold td{background:#eef3fb;color:#4c6a96;text-align:center;font-family:sans-s
     // 変更点の一覧（番号・場所・変更前→後・確認・コメント）
     const nrows = o.notes ? noteRows() : [];
     const nst = { ok: '<span class="ok">確認済</span>', ask: '<span class="ask">要確認</span>', '': '<span class="none">未確認</span>' };
-    const cut = (t, n = 160) => esc(t.length > n ? t.slice(0, n) + '…' : t).replace(/\n/g, '<br>');
+    // 長いまとまりは先頭の6行まで（1行は200文字まで）。省いたときは、残りの行数を示す（下の「比較結果」には全部載る）
+    const cut = t => { const ls = t.split('\n'), n = ls.length; return ls.slice(0, 6).map(l => esc(l.length > 200 ? l.slice(0, 200) + '…' : l)).join('<br>') + (n > 6 ? `<br><span style="color:#777">…（ほか ${n - 6} 行）</span>` : ''); };
     const nOk = nrows.filter(x => x.st === 'ok').length, nAsk = nrows.filter(x => x.st === 'ask').length;
     const noteTable = !nrows.length ? '' : `<h2>変更点の一覧</h2><div class="meta">確認済 ${nOk}・要確認 ${nAsk}・未確認 ${nrows.length - nOk - nAsk}（全 ${nrows.length} 箇所）</div>` +
       `<table class="nt"><colgroup><col style="width:42px"><col style="width:64px"><col style="width:110px"><col><col><col style="width:62px"><col style="width:24%"></colgroup><thead><tr><th>番号</th><th>種類</th><th>行（左・右）</th><th>変更前（左）</th><th>変更後（右）</th><th>確認</th><th>コメント</th></tr></thead><tbody>` +
       nrows.map(x => `<tr><td>#${x.no}</td><td>${x.kind}</td><td>${x.left}<br>${x.right}</td><td class="b">${cut(x.before)}</td><td class="a">${cut(x.after)}</td><td>${nst[x.st]}</td><td>${esc(x.text).replace(/\n/g, '<br>')}${x.text && (x.by || x.at) ? `<div class="by">${esc(x.by)}${x.by ? '・' : ''}${x.at ? fmtDate(x.at) : ''}</div>` : ''}</td></tr>`).join('') + '</tbody></table><h2>比較結果</h2>';
     const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>比較レポート - ${esc(S[0].name)} / ${esc(S[1].name)}</title><style>${css}</style></head><body>
 <h1>比較レポート</h1>
-<div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）${noNLSide() >= 0 ? `　<b style="color:#b45309">末尾の改行の有無も異なります（${noNLSide() ? '右' : '左'}は改行なしで終わる）</b>` : ''}${o.cond ? `　比較条件: ${esc(cond)}<br>
+<div class="meta">作成日時: ${fmtDate(Date.now())}　<b>差分 ${st.blocks.length} 箇所</b>（変更 ${cl} 行・左のみ ${dl} 行・右のみ ${il} 行）${noNLSide() >= 0 ? `　<b style="color:#b45309">末尾の改行の有無も異なります（${noNLSide() ? '右' : '左'}は改行なしで終わる）</b>` : ''}${extra.map(t => `<br>※ ${esc(t)}`).join('')}${o.cond ? `${extra.length ? '<br>' : '　'}比較条件: ${esc(cond)}<br>
 <span class="legend">${uni ? '<span>− 変更前・左だけにある行（赤）</span><span>＋ 変更後・右だけにある行（青）</span><span>変わった文字：変更前＝取り消し線、変更後＝下線</span>' : '<span>＊ 変更（変更前＝赤・取り消し線、変更後＝青・下線）</span><span>− 左だけにある行（赤）</span><span>＋ 右だけにある行（青）</span>'}</span>` : ''}</div>
 ${noteTable}
 ${uni ? `<table class="files"><tr><th>左</th><td>${info(S[0], h0)}</td></tr><tr><th>右</th><td>${info(S[1], h1)}</td></tr></table>
-<table><colgroup><col style="width:52px"><col style="width:52px"><col style="width:22px"><col></colgroup><thead><tr><th>左</th><th>右</th><th></th><th>内容</th></tr></thead><tbody>${body}</tbody></table>`
-: `<table><colgroup><col style="width:62px"><col><col style="width:62px"><col></colgroup>
+<table><colgroup><col style="width:${lnW - 10}px"><col style="width:52px"><col style="width:22px"><col></colgroup><thead><tr><th>左</th><th>右</th><th></th><th>内容</th></tr></thead><tbody>${body}</tbody></table>`
+: `<table><colgroup><col style="width:${lnW}px"><col><col style="width:${lnW}px"><col></colgroup>
 <thead><tr><th colspan="2">左: ${info(S[0], h0)}</th><th colspan="2">右: ${info(S[1], h1)}</th></tr></thead><tbody>${body}</tbody></table>`}</body></html>`;
     download(`比較レポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');
+    if (o.notes) Unsaved.clear(); // コメントを載せたレポートを出力したら、保存したものとして扱う
   }
 
   function activate() {

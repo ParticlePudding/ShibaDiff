@@ -33,6 +33,13 @@ for part in m.group(1).split(","):
     pairs.append(f"{exported}:{local}")
 lib = lib[: m.start()] + "globalThis.pdfjsLib={" + ",".join(pairs) + "};window.dispatchEvent(new Event('pdfjs-ready'));"
 check_script_safe("pdf.min.mjs", lib)
+# 比較用の描画では、描画の途中で requestAnimationFrame を待たない（待つと、そのあと描く文字の縁の濃さが変わり、
+# 同じページでも描くたびに画素が変わる）。src/pdf.js が globalThis.__sdExact を立てている間に始めた描画は、
+# 印刷用の描画と同じく、途中でブラウザに処理を返さずに続ける。pdf.js の版が変わって見つからなくなったら、ここで止める
+RAF = "useRequestAnimationFrame:!b,"
+if lib.count(RAF) != 1:
+    raise SystemExit("pdf.min.mjs: useRequestAnimationFrame の指定が見つかりません（pdf.js の版が変わった？ build.py の RAF を見直す）")
+lib = lib.replace(RAF, "useRequestAnimationFrame:!b&&!globalThis.__sdExact,")
 
 worker = read(os.path.join(PDFJS, "legacy", "build", "pdf.worker.min.mjs"))
 check_script_safe("pdf.worker.min.mjs", worker)

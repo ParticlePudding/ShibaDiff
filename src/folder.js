@@ -3,8 +3,9 @@ const FD = (() => {
   const st = { files: [null, null], names: ['', ''], rows: [], sort: { k: 'path', d: 1 }, running: false, sel: -1, gen: 0 };
   const slots = $$('.fd-slot');
 
-  function setFolder(side, name, map) {
-    st.files[side] = map; st.names[side] = name;
+  // limited：ブラウザが一部のファイルを挙げない読み方（ドロップしたフォルダのハンドル）で読んだ
+  function setFolder(side, name, map, limited = false) {
+    st.files[side] = map; st.names[side] = name; (st.limited || (st.limited = [false, false]))[side] = limited;
     const sl = slots[side]; sl.classList.add('loaded');
     $('.nm', sl).classList.remove('muted');
     $('.nm', sl).textContent = `${name}（${fmtNum(map.size)} ファイル）`;
@@ -68,11 +69,19 @@ const FD = (() => {
     await walk(entry, '');
     return map;
   }
+  /* ドロップされたフォルダの読み方は2つある。
+     - エントリ（webkitGetAsEntry）：フォルダの中の名前をすべて挙げる。ただし、HTML をファイルとして開いたとき（file://）は使えない
+     - ハンドル（getAsFileSystemHandle）：file:// でも使える。ただし、ブラウザが「安全でない」とみなす名前（ショートカット .lnk・.url、
+       desktop.ini、Thumbs.db、~$ で始まる一時ファイル、制御文字を含む名前など）を、何も言わずに一覧から外す
+     そこで、エントリで読めるならエントリで読み、読めないときだけハンドルで読んで、その旨を一覧に出す（ctl.limited）。
+     比較ツールで、ファイルが黙って一覧から外れると「差なし」に見えてしまうため */
   async function readDropped(src, ctl) {
-    if (src.handle) {
+    let entryOk = false;
+    try { await new Promise((res, rej) => src.entry.createReader().readEntries(res, rej)); entryOk = true; } catch (e) { }
+    if (!entryOk && src.handle) {
       try {
         const h = await src.handle;
-        if (h && h.kind === 'directory') return await fromHandle(h, ctl);
+        if (h && h.kind === 'directory') { const map = await fromHandle(h, ctl); ctl.limited = true; return map; }
       } catch (e) { if (e === CANCELLED) throw e; console.warn('フォルダのハンドルで読めないため、別の方式で読みます', e); }
     }
     return fromEntry(src.entry, ctl);
@@ -115,7 +124,7 @@ const FD = (() => {
         try { same = await sameContent(r.a, r.b); } catch (e) { same = null; r.err = (e && (e.name || e.message)) || String(e); }
         if (gen !== st.gen) return;
         r.st = same === null ? 'error' : same ? 'same' : 'diff'; paintRow(r); done++;
-        if (performance.now() - last > 100) { last = performance.now(); $('#fdStatus').textContent = `内容を比較中… ${fmtNum(done)} / ${fmtNum(todo.length)}`; await sleep(0); }
+        if (performance.now() - last > 100) { last = performance.now(); $('#fdStatus').setAttribute('aria-live', 'off'); $('#fdStatus').textContent = `内容を比較中… ${fmtNum(done)} / ${fmtNum(todo.length)}`; await sleep(0); }
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
@@ -169,17 +178,37 @@ const FD = (() => {
     const at = st.sel >= 0 ? view.findIndex(x => x.i === st.sel) : -1; if (at >= shown) shown = at + 1 + PAGE;
     drawRows();
     const c = count();
+    if (!st.running) $('#fdStatus').setAttribute('aria-live', 'polite'); // 途中の進み具合は読み上げない。結果だけを伝える
     if (!st.running) $('#fdStatus').innerHTML = st.rows.length
       ? `全 <b>${fmtNum(st.rows.length)}</b> ファイル　${c.error ? `<span class="st st-error">読み取りエラー ${c.error}</span> ` : ''}<span class="st st-diff">相違 ${c.diff}</span> <span class="st st-left">左のみ ${c.left}</span> <span class="st st-right">右のみ ${c.right}</span> <span class="st st-same">同一 ${c.same}</span>${c.size ? ` <span class="st st-size">サイズ同じ ${c.size}</span>` : ''}　<span class="muted">（更新日時が新しい方を太字で表示）</span>`
       : '左右にフォルダを指定して「比較」を押してください';
+    if (!st.running && st.rows.length) $('#fdStatus').insertAdjacentHTML('beforeend', hints());
     $$('#fdTable th').forEach(th => { th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.k === k ? (d > 0 ? ' ▲' : ' ▼') : ''); });
+  }
+  // 一覧の下に出す案内
+  function hints() {
+    const out = [];
+    // 左右とも中身があるのに、同じ場所・同じ名前のファイルが1つもない：フォルダの階層がずれている（zip を展開すると、同じ名前のフォルダが二重になる）
+    if (st.files[0] && st.files[1] && st.files[0].size && st.files[1].size && !st.rows.some(r => r.a && r.b)) {
+      const top = side => { const tops = new Set(); for (const p of st.files[side].keys()) { const k = p.indexOf('/'); tops.add(k < 0 ? '' : p.slice(0, k)); if (tops.size > 1) break; } return tops.size === 1 && !tops.has('') ? [...tops][0] : ''; };
+      const t = [top(0), top(1)];
+      out.push('左右で、同じ場所・同じ名前のファイルが1つもありません。フォルダの階層がずれていないか確かめてください' +
+        (t[0] || t[1] ? `（${[0, 1].filter(i => t[i]).map(i => `${i ? '右' : '左'}は、中のフォルダ「${esc(t[i])}」にすべてのファイルがあります`).join('。')}。その中のフォルダを渡すと、対応するようになります。zip を展開すると、同じ名前のフォルダが二重になることがあります）` : ''));
+    }
+    const lim = [0, 1].filter(i => st.limited && st.limited[i] && st.files[i]);
+    if (lim.length) out.push(`${lim.map(i => i ? '右' : '左').join('・')}はドロップで読み込みました。ブラウザの制限で、ショートカット（.lnk・.url）、desktop.ini、Thumbs.db、~$ で始まる一時ファイルなど、一部の名前のファイルは一覧に出ません。すべてのファイルを比べるときは「フォルダを選択」から指定してください`);
+    return out.map(t => `<div class="fd-hint">※ ${t}</div>`).join('');
   }
   async function openRow(i) {
     const r = st.rows[i]; if (!r) return;
     st.sel = i; render(true);
     const sides = [r.a, r.b];
-    await App.loadPair(sides);
+    const ok = await App.loadPair(sides, r.path); // フォルダからの相対パスも渡す（ファイル欄・パッチの見出しに使う）
+    // 開いたあとは、比較結果の枠にフォーカスを移す（キーボードで、続けて結果を読める・スクロールできる）
+    if (ok !== false && App.mode === 'file') requestAnimationFrame(() => { const el = ['#paneL', '#wrapView', '#ovView'].map(q => $(q)).find(e => e && e.offsetParent !== null); if (el) el.focus({ preventScroll: true }); });
   }
+  // 一覧に戻ったとき：一覧の枠にフォーカスを戻す（選んでいた行は選んだまま。続けて ↑↓・Enter で選べる）
+  function focusList() { const w = $('.fd-table-wrap'); if (w) w.focus({ preventScroll: true }); const tr = $('#fdTable tbody tr.sel'); if (tr) tr.scrollIntoView({ block: 'nearest' }); }
 
   slots.forEach((sl, side) => {
     const inp = $('input', sl);
@@ -208,12 +237,14 @@ const FD = (() => {
       await withBusy('フォルダを読み込み中…', async () => {
         for (const [sd, src] of targets) {
           ctl.tick = n => { $('#busyMsg').textContent = `フォルダを読み込み中…（${sd ? '右' : '左'}：${fmtNum(n)} ファイル）`; };
-          got.push([sd, src.name, await Promise.race([readDropped(src, ctl), stopped])]);
+          ctl.limited = false;
+          const map = await Promise.race([readDropped(src, ctl), stopped]);
+          got.push([sd, src.name, map, ctl.limited]);
         }
       }, { onCancel: () => cancel() });
     } catch (e) { failed = e; }
     // 読めた分は、あとの分が失敗・中止でも一覧に入れる
-    for (const [sd, name, map] of got) setFolder(sd, name, map);
+    for (const [sd, name, map, limited] of got) setFolder(sd, name, map, limited);
     if (failed === CANCELLED) return toast('フォルダの読み込みを中止しました');
     if (failed) {
       console.error(failed);
@@ -270,13 +301,14 @@ const FD = (() => {
   // キーボード：↑↓（Home・End）で、表示している順に行を選ぶ。Enter で中身を比較する
   document.addEventListener('keydown', e => {
     if (App.mode !== 'folder' || $('#modal').classList.contains('on') || e.target.matches('input,select,textarea')) return;
-    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (e.key === 'End') while (showMore()) { /* 最後の行まで表に出す */ }
       let trs = $$('#fdTable tbody tr[data-i]'); if (!trs.length) return;
-      const cur = trs.findIndex(x => +x.dataset.i === st.sel), down = e.key === 'ArrowDown';
+      const cur = trs.findIndex(x => +x.dataset.i === st.sel), down = e.key === 'ArrowDown', page = e.key === 'PageDown' ? 10 : e.key === 'PageUp' ? -10 : 0;
+      if (page > 0 && cur + page >= trs.length && showMore()) trs = $$('#fdTable tbody tr[data-i]');
       // 表に出している最後の行から ↓ で先へ進むときは、続きの行を足してから動く
-      // （End は、今、表に出している最後の行へ。そこまでスクロールすると続きが足される）
       if (down && cur === trs.length - 1 && showMore()) trs = $$('#fdTable tbody tr[data-i]');
-      const k = e.key === 'Home' ? 0 : e.key === 'End' ? trs.length - 1 : cur < 0 ? (down ? 0 : trs.length - 1) : Math.max(0, Math.min(trs.length - 1, cur + (down ? 1 : -1)));
+      const k = page ? Math.max(0, Math.min(trs.length - 1, Math.max(0, cur) + page)) : e.key === 'Home' ? 0 : e.key === 'End' ? trs.length - 1 : cur < 0 ? (down ? 0 : trs.length - 1) : Math.max(0, Math.min(trs.length - 1, cur + (down ? 1 : -1)));
       // 矢印で行を選んだら、フォーカスも一覧に移す（ボタンにフォーカスが残っていると、Enter がそのボタンを押してしまう）
       const wrap = $('.fd-table-wrap'); if (document.activeElement !== wrap) wrap.focus({ preventScroll: true });
       e.preventDefault(); selectRow(trs[k], true); return;
@@ -285,5 +317,5 @@ const FD = (() => {
     e.preventDefault(); openRow(st.sel);
   });
   $('#fdTable tbody').addEventListener('dblclick', e => { const tr = e.target.closest('tr[data-i]'); if (tr) openRow(+tr.dataset.i); });
-  return { dropFolders, st };
+  return { dropFolders, st, focusList };
 })();

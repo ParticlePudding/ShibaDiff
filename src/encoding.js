@@ -20,6 +20,22 @@ const Enc = (() => {
     if (nul > 0) {
       if (od > n * 0.25 && ev < n * 0.02) return 'utf-16le';
       if (ev > n * 0.25 && od < n * 0.02) return 'utf-16be';
+      // 日本語が中心の UTF-16 は NUL が少ない（改行・空白・英数字の分だけ）。両方の並びで読んでみて、
+      // 片方だけがほぼ「ふつうの文字」（英数字・かな・漢字・全角記号・改行）になるなら、その UTF-16 とみなす
+      if (L % 2 === 0) {
+        const m = Math.min(L, 65536) & ~1, score = le => {
+          let ok = 0, bad = 0;
+          for (let i = 0; i < m; i += 2) {
+            const c = le ? bytes[i] | (bytes[i + 1] << 8) : (bytes[i] << 8) | bytes[i + 1];
+            if (c === 9 || c === 10 || c === 13 || (c >= 0x20 && c < 0x7F) || (c >= 0x3000 && c <= 0x30FF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xFF00 && c <= 0xFFEF)) ok++;
+            else if (c < 0x20 || (c >= 0xD800 && c <= 0xF8FF) || c >= 0xFFF0) bad++;
+          }
+          return bad ? 0 : ok / (m / 2);
+        };
+        const sl = score(true), sb = score(false);
+        if (sb >= 0.9 && sl < 0.6) return 'utf-16be';
+        if (sl >= 0.9 && sb < 0.6) return 'utf-16le';
+      }
       return 'binary';
     }
     let ctrl = 0;
@@ -105,25 +121,22 @@ const Enc = (() => {
     }
     const t = table(enc), out = []; let unmapped = 0;
     if (enc === 'iso-2022-jp') {
-      let mode = 0; // 0 ascii, 1 jis0208
+      let mode = 0; // 0 ascii, 1 jis0208, 2 半角カナ（JIS X 0201 片仮名。ESC ( I）
       const cps = Array.from(str);
       for (let i = 0; i < cps.length; i++) {
         const ch = cps[i], cp = ch.codePointAt(0);
         if (cp < 0x80) { if (mode) { out.push(0x1B, 0x28, 0x42); mode = 0; } out.push(cp); continue; }
-        let v;
         if (cp >= 0xFF61 && cp <= 0xFF9F) {
-          // 半角カナは全角にして出す。濁点・半濁点が続くときは、合わせて1文字にする（ｶﾞ → ガ、ﾊﾟ → パ）。
-          // 1文字にならない組（ｱﾞ など）と、単独の濁点・半濁点は、全角の「゛」「゜」にする
-          const nx = cps[i + 1], pair = nx === '\uFF9E' || nx === '\uFF9F' ? (ch + nx).normalize('NFKC') : '';
-          let z;
-          if (pair && Array.from(pair).length === 1) { z = pair; i++; }
-          else z = cp === 0xFF9E ? '\u309B' : cp === 0xFF9F ? '\u309C' : ch.normalize('NFKC');
-          v = t.get(z.codePointAt(0));
-        } else v = t.get(cp);
+          // 半角カナは、半角カナのまま出す（ESC ( I に切り替えて 1 バイト）。メールやログで広く使われている書き方で、
+          // 読み込むときも同じ並びを半角カナとして読む。全角に直して保存すると、編集していない行まで元のファイルと変わってしまう
+          if (mode !== 2) { out.push(0x1B, 0x28, 0x49); mode = 2; }
+          out.push(cp - 0xFF61 + 0x21); continue;
+        }
+        const v = t.get(cp);
         if (v === undefined || v < 0x100 || (v >> 8) === 0x8E) { // unmappable or halfwidth kana
           unmapped++; if (mode) { out.push(0x1B, 0x28, 0x42); mode = 0; } out.push(0x3F); continue;
         }
-        if (!mode) { out.push(0x1B, 0x24, 0x42); mode = 1; }
+        if (mode !== 1) { out.push(0x1B, 0x24, 0x42); mode = 1; }
         out.push((v >> 8) & 0x7F, v & 0x7F);
       }
       if (mode) out.push(0x1B, 0x28, 0x42);

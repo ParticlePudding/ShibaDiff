@@ -32,7 +32,7 @@ const App = (() => {
     s._pages = null;
     if (sn === 'pdf') {
       s.kind = 'pdf';
-      s.pdf = await PDF.open(b);
+      s.pdf = await PDF.open(b, undefined, s.name);
       s.pageCount = s.pdf.numPages;
       setText(s, await PDF.text(s.pdf, (i, n) => { $('#busyMsg').textContent = `PDFのテキストを抽出中… ${i} / ${n}`; }));
       // 文字情報がない（スキャン画像だけの）PDFか
@@ -42,6 +42,8 @@ const App = (() => {
     }
     if (sn && sn.startsWith('image/')) {
       s.kind = 'image'; s.noText = true; s.mime = sn;
+      s.frames = animFrames(b, sn);
+      if (s.frames > 1) toast(`「${s.name}」は動く画像（${s.frames} コマ）です。比べるのは1コマ目だけです（2コマ目以降の違いは分かりません）`, true, 9000);
       s.lines = []; s.orig = ''; s.eol = '\r\n';
       s.getPages = async () => (s._pages || (s._pages = await Pages.fromImage(b, sn)));
       await s.getPages();
@@ -56,10 +58,14 @@ const App = (() => {
         // Word の変更履歴が残っている：比較は「すべて承諾した状態」の文字で行うので、削除された文字は比較に出ない。
         // 見落とさないよう、読み込みが終わったら知らせ（noticeTracked）、ファイル欄とテキスト比較の状態表示にも出す
         if (info.tracked) s.tracked = info.tracked;
+        // Excel：数式を相対位置の形にした比較用の行（番号がずれただけの数式を違いにしないため。テキスト比較で使う）
+        // （抽出した文字の最後の空行は、行に分けるときに落ちるので、その分は切りそろえる）
+        if (info.keys && info.keys.length >= s.lines.length && info.keys.length <= s.lines.length + 1) s.cmpKeys = info.keys.slice(0, s.lines.length);
         return;
       }
     }
     if (sn === 'tiff') toast('TIFF画像はブラウザで表示できないため、バイナリとして比較します。PNG/JPEG/PDFに変換すると重ね合わせ比較ができます', true);
+    else if (/^(zip|7z|lzh|rar|tar|gz|tgz|bz2|xz|cab)$/.test(ext)) toast(`「${s.name}」は圧縮ファイル（.${ext}）です。中身は比べられません。展開してから、中のファイルやフォルダを渡してください（いまは、バイナリとして表示しています）`, true, 9000);
     else if (/^(xdw|xbd)$/.test(ext)) toast('DocuWorks文書(.xdw)は直接読めないため、バイナリとして比較します。DocuWorksでPDFに変換してから読み込んでください', true);
     else if (sn === 'ole' && /^(doc|xls|ppt)$/.test(ext)) toast(`旧形式の .${ext} はテキストを取り出せないため、バイナリとして比較します。.${ext}x 形式で保存し直すと中身を比較できます`, true);
     s.kind = 'text';
@@ -70,6 +76,33 @@ const App = (() => {
     s.getPages = async () => (s._pages || (s._pages = Pages.fromText(s.lines, s.name)));
   }
 
+  /* 動く画像のコマ数（GIF・APNG・動く WebP）。動かない画像・分からないものは 1。ブラウザは1コマ目だけを描くので、
+     2コマ目以降だけが違う画像は「差異なし」になる。そのことを知らせるために数える */
+  function animFrames(b, mime) {
+    try {
+      if (/gif/.test(mime)) {
+        let p = 13 + ((b[10] & 0x80) ? 3 * (1 << ((b[10] & 7) + 1)) : 0), n = 0;
+        while (p < b.length) {
+          const c = b[p];
+          if (c === 0x2C) { n++; p += 9; if (b[p] & 0x80) p += 3 * (1 << ((b[p] & 7) + 1)); p += 2; while (p < b.length && b[p]) p += b[p] + 1; p++; }
+          else if (c === 0x21) { p += 2; while (p < b.length && b[p]) p += b[p] + 1; p++; }
+          else break;
+          if (n > 9999) break;
+        }
+        return Math.max(1, n);
+      }
+      if (/png/.test(mime)) {
+        for (let p = 8; p + 12 <= b.length;) {
+          const len = (b[p] << 24 | b[p + 1] << 16 | b[p + 2] << 8 | b[p + 3]) >>> 0, t = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+          if (t === 'acTL') return Math.max(1, (b[p + 8] << 24 | b[p + 9] << 16 | b[p + 10] << 8 | b[p + 11]) >>> 0);
+          if (t === 'IDAT' || t === 'IEND') break;
+          p += 12 + len;
+        }
+      }
+      if (/webp/.test(mime) && b.length > 30 && String.fromCharCode(b[12], b[13], b[14], b[15]) === 'VP8X' && (b[20] & 2)) return 2; // 動く WebP（コマ数は数えない）
+    } catch (e) { }
+    return 1;
+  }
   function errMsg(e) {
     const n = e && e.name, m = (e && e.message) || String(e);
     if (n === 'InvalidPDFException' || /Invalid PDF/i.test(m)) return 'PDFファイルが壊れているか、PDF形式ではありません。';
@@ -105,10 +138,11 @@ const App = (() => {
       noticeTracked([side]);
     } catch (e) {
       console.error(e);
-      toast(`「${file.name}」を読み込めませんでした。${errMsg(e)}${S[side] ? '（前のファイルはそのまま残っています）' : ''}`, true);
+      toast(`「${file.name}」を読み込めませんでした。${errMsg(e)}${S[side] ? '（前のファイルはそのまま残っています。画面の結果は前のファイルのものです）' : ''}`, true, 12000);
     }
   }
-  async function loadPair(files) {
+  // rel：フォルダ比較の一覧から開いたときの、フォルダからの相対パス（ファイル欄の説明と、パッチの見出しに使う）
+  async function loadPair(files, rel) {
     if (!await confirmDiscard([0, 1], '別のファイルを読み込む')) return false;
     let failed = false; // 読み込めなかったものがあれば、その通知を残す（変更履歴の通知で上書きしない）
     for (let i = 0; i < 2; i++) {
@@ -117,9 +151,10 @@ const App = (() => {
         await withBusy(`${files[i].name} を読み込み中…`, async () => {
           const f = files[i], bytes = new Uint8Array(await f.arrayBuffer());
           const s = { name: f.name, size: f.size, mtime: f.lastModified, bytes, key: `${f.name}|${f.size}|${f.lastModified}`, file: f };
+          if (rel && rel !== f.name) s.rel = rel;
           await prepare(s); disposeSide(S[i]); S[i] = s;
         });
-      } catch (e) { failed = true; toast(`「${files[i].name}」を読み込めませんでした。${errMsg(e)}`, true); }
+      } catch (e) { failed = true; toast(`「${files[i].name}」を読み込めませんでした。${errMsg(e)}`, true, 12000); }
     }
     for (let i = 0; i < 2; i++) if (!files[i]) { disposeSide(S[i]); S[i] = null; }
     // 先に各画面へ「文書が変わった」ことを知らせてから表示を切り替える（逆だと、古い比較結果を新しい文書で描こうとして失敗する）
@@ -148,7 +183,7 @@ const App = (() => {
     if (!(visualOnly(S[0]) || visualOnly(S[1]))) return;
     if (!S.every(s => s.kind === 'pdf' || s.kind === 'image')) return;
     setTab('overlay');
-    toast('文字情報のない画像（スキャン）が含まれるため、「重ね合わせ比較」に切り替えました', false, 4500);
+    toast(`${S.some(s => s && s.kind === 'pdf' && visualOnly(s)) ? '文字情報のない画像（スキャン）' : '画像ファイル'}が含まれるため、「重ね合わせ比較」に切り替えました`, false, 4500);
   }
 
   function newTextSide() {
@@ -227,14 +262,15 @@ const App = (() => {
     const hf = $(`#hdrFiles .hf[data-side="${side}"]`);
     hf.classList.toggle('empty', !s);
     hf.dataset.dirty = s && s.dirty ? '1' : '';
-    hf.title = s ? `${side ? '右' : '左'}：${s.name}（クリックでファイル欄を開く／たたむ）` : `${side ? '右' : '左'}のファイルを選択`;
+    hf.title = s ? `${side ? '右' : '左'}：${s.rel || s.name}（クリックでファイル欄を開く／たたむ）` : `${side ? '右' : '左'}のファイルを選択`;
     autoSlots(); fitHdrNames();
     el.classList.toggle('loaded', !!s);
     $('.fname', el).innerHTML = s ? `${s.dirty ? '<span class="dirty" title="未保存の変更があります">● </span>' : ''}${esc(s.name)}` : 'ファイルをドロップ、またはクリックして選択';
-    $('.fname', el).title = s ? s.name : '';
+    $('.fname', el).title = s ? s.rel || s.name : '';
     const info = $('.slot-info', el);
     if (!s) { info.innerHTML = `<span class="meta"></span><button data-act="edit" title="テキストを直接入力・貼り付け"><i data-i="type"></i>テキストを入力</button>`; return; }
     let meta = `${KIND[s.kind] || s.kind}`;
+    if (s.rel) meta = `<span title="フォルダの中の場所：${esc(s.rel)}">${esc(s.rel.slice(0, s.rel.lastIndexOf('/') + 1))}</span>・` + meta;
     if (s.size) meta += `・${fmtSize(s.size)}`;
     if (s.mtime && s.bytes) meta += `・${fmtDate(s.mtime)}`;
     if (s.kind === 'pdf') meta += `・${s.pageCount}ページ`;
@@ -271,6 +307,11 @@ const App = (() => {
         s.enc = enc; s.kind = enc === 'binary' ? 'binary' : 'text';
         const eol = s.eol; setText(s, Enc.decode(s.bytes, enc)); if (s.bytes.length === 0) s.eol = eol;
         s._pages = null; changed([side]);
+        // ここでの切り替えは「この文字コードとして読み直す」こと（別の文字コードへの変換ではない）。合わない文字コードを選ぶと文字化けし、
+        // そのまま保存すると元に戻せないので、読めない文字（U+FFFD）があれば知らせる
+        const bad = enc === 'binary' ? 0 : s.lines.reduce((n, l) => n + (l.split('\uFFFD').length - 1), 0);
+        if (bad) toast(`${Enc.NAMES[enc]} として読み直しましたが、読めない文字が ${fmtNum(bad)} 個あります（文字化けしています）。このまま保存すると元に戻せません。文字コードを選び直してください`, true, 9000);
+        else if (enc !== 'binary') toast(`${Enc.NAMES[enc]} として読み直しました`);
       } else if (act === 'eol') {
         s.eol = decodeURIComponent(e.target.value); s.dirty = true; updateSlot(side); TV.status();
       }
@@ -284,13 +325,28 @@ const App = (() => {
     });
   });
 
+  /* 注釈・コメントをブラウザに保存しない設定（既定）のとき、閉じたファイルに付けたものは消す（共用の PC に、人の書き込みを残さない）。
+     まだファイルに保存していない（レポート・印刷にも出していない）ものがあれば、消す前に確かめる。
+     別のファイルに替えただけのときは消さない（同じファイルを開き直すと戻る。フォルダ比較で順に見ていくときのため） */
+  async function confirmForget(sides, title) {
+    if (Settings.get('persist') === true) return true;
+    const keys = sides.filter(i => S[i]).map(i => S[i].key);
+    const n = PV.annCountOf(keys) + Notes.countOf(keys);
+    if (n && Unsaved.on) {
+      const ok = await modal({ title, html: `注釈・コメント ${n} 件は、まだファイルに保存していません。閉じると消えます。<br><span class="muted">残すときは、キャンセルして、［ページ・注釈］の「注釈を保存」でファイルにしてください。</span>`, buttons: [{ label: 'キャンセル', value: false }, { label: '閉じる', primary: true, value: true }] });
+      if (!ok) return false;
+    }
+    PV.forget(keys); Notes.forget(keys);
+    return true;
+  }
   async function closeSide(side) {
     const s = S[side]; if (!s) return;
     if (s.dirty) {
       const ok = await modal({ title: '閉じる', html: `「${esc(s.name)}」には保存していない変更があります。閉じてもよろしいですか？`, buttons: [{ label: 'キャンセル', value: false }, { label: '閉じる', primary: true, value: true }] });
       if (!ok) return;
     }
-    disposeSide(s); S[side] = null; changed([side]);
+    if (!await confirmForget([side], '閉じる')) return;
+    toast(''); disposeSide(s); S[side] = null; changed([side]);
   }
 
   async function openEditor(side, line) {
@@ -300,12 +356,15 @@ const App = (() => {
     const txt = s ? s.lines.join('\n') + (s.finalNL !== false && s.lines.length ? '\n' : '') : '';
     const res = await modal({
       title: `${side ? '右' : '左'}のテキストを${s ? '編集' : '入力'}${s ? ' — ' + s.name : ''}`, wide: true,
-      html: `<textarea id="edTa" spellcheck="false" wrap="off"></textarea><div class="muted" style="margin-top:6px">${s && s.kind !== 'text' ? '※ 抽出したテキストを編集します（元の文書は変更されません）。' : ''}「適用」で比較をやり直します。Tabキーでタブを入力できます。</div>`,
+      html: `<textarea id="edTa" spellcheck="false" wrap="off" aria-label="${side ? '右' : '左'}のテキスト" aria-describedby="edHint"></textarea><div class="muted" id="edHint" style="margin-top:6px">${s && s.kind !== 'text' ? '※ 抽出したテキストを編集します（元の文書は変更されません）。' : ''}「適用」（<kbd>Ctrl</kbd>+<kbd>Enter</kbd>）で比較をやり直します。Tabキーでタブを入力できます（ボタンへ移るときは <kbd>Shift</kbd>+<kbd>Tab</kbd>）。</div>`,
       buttons: [{ label: 'キャンセル', value: null }, { label: '適用', primary: true, value: m => $('#edTa', m).value }],
-      onOpen: m => {
+      // 入力した内容があるときは、Esc で捨てる前に確かめる
+      guard: m => $('#edTa', m).value === txt || modal({ title: '入力の破棄', html: '入力した内容を捨てて閉じますか？', buttons: [{ label: '入力に戻る', value: false }, { label: '捨てて閉じる', primary: true, value: true }] }),
+      onOpen: (m, close) => {
         const ta = $('#edTa', m); ta.value = txt; ta.focus();
         ta.addEventListener('keydown', e => {
           if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey) { e.preventDefault(); ta.setRangeText('\t', ta.selectionStart, ta.selectionEnd, 'end'); }
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); close(ta.value); }
         });
         if (line != null) {
           let pos = 0; for (let i = 0; i < line && pos >= 0; i++) pos = txt.indexOf('\n', pos) + 1;
@@ -347,6 +406,12 @@ const App = (() => {
       if (!ok) return;
       s.mixedOk = true;
     }
+    // 文字化けしたまま（読めなかった文字が「�」になったまま）保存しようとしている
+    const garbled = isText ? body.split('\uFFFD').length - 1 : 0;
+    if (garbled) {
+      const ok = await modal({ title: '文字化けの確認', html: `読めなかった文字（�）が ${fmtNum(garbled)} 個あります。合わない文字コードで読み込んでいる可能性があります。<br>このまま保存すると、文字化けしたままのファイルになり、元に戻せません。<br><span class="muted">ファイル欄の文字コードを選び直すと、読み直せます。</span>`, buttons: [{ label: '文字化けしたまま保存', value: true }, { label: 'キャンセル', primary: true, value: false }] });
+      if (!ok) return;
+    }
     let { bytes, unmapped } = Enc.encode(body, enc);
     if (unmapped) {
       const v = await modal({ title: '文字コードの確認', html: `${Enc.NAMES[enc]} で表せない文字が ${unmapped} 個あります（「?」に置き換わります）。<br>UTF-8 で保存しますか？`, buttons: [{ label: 'キャンセル', value: null }, { label: 'そのまま保存', value: 'keep' }, { label: 'UTF-8で保存', primary: true, value: 'utf8' }] });
@@ -382,7 +447,7 @@ const App = (() => {
     } else { setTab(app.tab); requestAnimationFrame(fitHdrNames); }
   }
   $$('#modeSw button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
-  $('#btnBackFolder').onclick = () => setMode('folder');
+  $('#btnBackFolder').onclick = () => { setMode('folder'); FD.focusList(); }; // 一覧に戻ったら、選んでいた行にフォーカスを戻す（続けて矢印キーで選べる）
 
   /* ---------- ファイル欄の開閉（左右とも読み込んだら自動でたたむ。どちらかが空なら開く） ---------- */
   let bothBefore = false;
@@ -455,6 +520,18 @@ const App = (() => {
       bar.classList.toggle('more-l', bar.scrollLeft > 2); bar.classList.toggle('more-r', max - bar.scrollLeft > 2);
     };
     bar.addEventListener('scroll', () => { sync(); $$('details.pop[open]', bar).forEach(d => { d.open = false; }); }, { passive: true });
+    // 端の目印（‹ ›）の所を押したら、その下に半分隠れているボタンを押すのではなく、ツールバーを送る（キーボードで押したときは e.detail が 0）
+    const edgeOf = e => { const r = bar.getBoundingClientRect(); return bar.classList.contains('more-r') && e.clientX > r.right - 30 ? 1 : bar.classList.contains('more-l') && e.clientX < r.left + 30 ? -1 : 0; };
+    bar.addEventListener('click', e => {
+      const dir = e.detail ? edgeOf(e) : 0; if (!dir) return;
+      e.preventDefault(); e.stopPropagation();
+      bar.scrollBy({ left: dir * Math.max(120, bar.clientWidth * 0.7), behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }, true);
+    // 横に送れるときは、縦のホイールでも送る（スクロールバーを出していないため）
+    bar.addEventListener('wheel', e => {
+      if (bar.scrollWidth - bar.clientWidth <= 2 || e.ctrlKey || e.shiftKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || e.target.closest('details.pop[open] .pop-body')) return;
+      bar.scrollLeft += e.deltaY; e.preventDefault();
+    }, { passive: false });
     new ResizeObserver(sync).observe(bar);
   });
   // 記号だけのボタン（文字のないボタン）に、読み上げ用の名前を付ける。文字のあるボタンには付けない：
@@ -474,7 +551,8 @@ const App = (() => {
       const ok = await modal({ title: 'すべて閉じる', html: '保存していない変更があります。閉じてもよろしいですか？', buttons: [{ label: 'キャンセル', value: false }, { label: '閉じる', primary: true, value: true }] });
       if (!ok) return;
     }
-    S.forEach(disposeSide); S = [null, null]; changed([0, 1]);
+    if (!await confirmForget([0, 1], 'すべて閉じる')) return;
+    toast(''); S.forEach(disposeSide); S = [null, null]; changed([0, 1]);
   };
 
   /* ---------- global drag & drop ---------- */
@@ -522,8 +600,8 @@ const App = (() => {
       else if (!inField && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); TV.redo(); }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); $('#searchBox').focus(); $('#searchBox').select(); }
       else if (e.key === 'F3') { e.preventDefault(); TV.find(); }
-      else if (!inField && (e.key === 'n' || e.key === 'j')) TV.next();
-      else if (!inField && (e.key === 'p' || e.key === 'k')) TV.prev();
+      else if (!inField && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'n' || e.key === 'j')) TV.next();
+      else if (!inField && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'p' || e.key === 'k')) TV.prev();
     } else if (app.tab === 'page') {
       if (!inField && PV.onKey(e)) e.preventDefault();
     } else if (app.tab === 'overlay') {
@@ -531,7 +609,15 @@ const App = (() => {
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); $('input[type=file]', slots[!S[0] ? 0 : !S[1] ? 1 : 0]).click(); }
   });
-  window.addEventListener('beforeunload', e => { if (S.some(s => s && s.dirty)) { e.preventDefault(); e.returnValue = ''; } });
+  // 保存していない編集、ファイルにもブラウザにも保存していない注釈・コメントがあるときは、ページを離れる前に確かめる
+  // ブラウザの印刷（Ctrl+P）は、［ページ・注釈］の「印刷 / PDF」で用意した内容だけを刷る。用意していないときは白紙になるので、
+  // どうすれば印刷できるかを紙面に出す
+  window.addEventListener('beforeprint', () => {
+    const area = $('#printArea'); if (area.children.length) return;
+    area.innerHTML = '<div class="print-note"><b>ShibaDiff</b><br>この画面は、ブラウザの印刷（Ctrl+P）ではそのまま印刷できません。<br>・テキスト比較：［レポート］で HTML を出力し、それをブラウザで開いて印刷してください<br>・ページ・注釈：［印刷 / PDF］を押してください（注釈入りで印刷できます）<br>・重ね合わせ・フォルダ比較：［レポート］で HTML を出力してください</div>';
+    window.addEventListener('afterprint', () => { const n = $('.print-note', area); if (n) n.remove(); }, { once: true });
+  });
+  window.addEventListener('beforeunload', e => { if (S.some(s => s && s.dirty) || (Unsaved.on && (PV.annCount() || Notes.count()))) { e.preventDefault(); e.returnValue = ''; } });
 
   /* ---------- help ---------- */
   $('#btnHelp').onclick = () => modal({
@@ -565,14 +651,14 @@ Word はヘッダー・フッター・脚注・コメントも、Excel は数式
 「変更箇所」をオンにすると、重ね合わせで見つけた変更箇所が番号付きの枠で出ます（番号をクリックしてコメント）。<br>
 付箋はクリックした位置に入力欄が出ます（<kbd>Ctrl</kbd>+<kbd>Enter</kbd> で貼る）。1枚貼ると選択ツールに戻ります。マーカーは黄色、枠は青が既定です（道具ごとに色を覚えます）。<br>
 選択ツールで注釈をクリック→ドラッグで移動、<kbd>Delete</kbd>で削除、付箋はダブルクリックで編集。<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> で注釈の取り消し・やり直し。注釈がないところをドラッグすると画面を動かせます。<kbd>Ctrl</kbd>+ホイールで拡大縮小。<br>
-注釈とコメントは、既定ではこのブラウザに保存しません（ファイルを閉じると消えます）。残すときは「注釈を保存」でファイルにするか、「設定」で自動保存をオンにしてください。「レポート」で注釈・変更箇所・コメントを HTML に、「印刷 / PDF」で注釈入りの印刷・PDF保存ができます。
+注釈とコメントは、既定ではこのブラウザに保存しません。ファイルを閉じる（×・すべて閉じる）か、このページを閉じる・再読み込みすると消えます（まだ保存していないものがあれば、消える前に確かめます）。残すときは「注釈を保存」でファイルにするか、「設定」で自動保存をオンにしてください。「レポート」で注釈・変更箇所・コメントを HTML に、「印刷 / PDF」で注釈入りの印刷・PDF保存ができます。
 <h4>重ね合わせ比較</h4>
 PDF・画像のページを重ねて、変わった部分を色分けします（赤＝左にだけある、青＝右にだけある、紫＝形は同じで色が変わった）。色の比較は「色の違いも検出」で切り替えられます（紙のスキャンでは最初はオフ）。変更箇所はオレンジの枠と番号で示します。右側のパネルには、選んだ表示方法で使う項目だけが出ます。<br>
 スキャン画像は開いたときに自動で位置と傾きを合わせます（「自動位置合わせ」で再実行）。細かなずれを差分にしたくないときは「ずれの許容」を増やしてください。A1・A0 などの大きな図面は「解像度」で軽量／精細を選べます。<br>
-途中でページが挿入・削除されていても、似ているページどうしを自動で組にします（ページ送り・一括チェック・ページ表示の連動に使います）。スキャンで左右のページ数が同じときは、同じページ番号どうしを組にします。ページの入れ替え・差し替えがあるときは、右のパネルの「見た目で対応を調べ直す」を押してください。「全ページの差分を調べる」で、どのページに変更があるか、追加・削除されたページを一覧できます。「レポート」で差分画像と一覧を HTML に出力できます。<br>
-操作：ホイール＝縦スクロール、<kbd>Shift</kbd>+ホイール＝横スクロール、<kbd>Ctrl</kbd>+ホイール＝拡大・縮小。「移動」（<kbd>H</kbd>）ではドラッグで表示位置を動かし、ホイールで拡大・縮小します。<kbd>PageUp</kbd><kbd>PageDown</kbd>（<kbd>←</kbd><kbd>→</kbd>）でページ送り、<kbd>N</kbd>で次の変更箇所、点滅の手動切り替えは画像のクリックか <kbd>Space</kbd>。<br>表示方法：ツールバーの「1ページ」ボタンは1組ずつ、「全ページ」ボタンは全ページを縦に並べてスクロールで見られます（見えているページだけを描くので、ページ数が多くても軽く動きます。全ページ表示でも <kbd>PageUp</kbd><kbd>PageDown</kbd> で前後のページへ移動し、右のパネルの結果・位置合わせは画面の上のほうにあるページが対象です）。
+途中でページが挿入・削除されていても、似ているページどうしを自動で組にします（ページ送り・一括チェック・ページ表示の連動に使います）。スキャンで左右のページ数が同じときは、同じページ番号どうしを組にします。ページの入れ替え・差し替えがあるときは、右のパネルの「見た目で対応を調べ直す」を押してください（このボタンは、ページ数が同じで、まだ見た目では調べていないときだけ出ます。調べたあとは、結果がその場所に出ます）。「全ページの差分を調べる」で、どのページに変更があるか、追加・削除されたページを一覧できます。「レポート」で差分画像と一覧を HTML に出力できます。<br>
+操作：ホイール＝縦スクロール、<kbd>Shift</kbd>+ホイール＝横スクロール、<kbd>Ctrl</kbd>+ホイール＝拡大・縮小。「移動」（<kbd>H</kbd>）ではドラッグで表示位置を動かし、ホイールで拡大・縮小します。<kbd>PageUp</kbd>・<kbd>PageDown</kbd>（<kbd>←</kbd><kbd>→</kbd>）でページ送り、<kbd>N</kbd>で次の変更箇所、点滅の手動切り替えは画像のクリックか <kbd>Space</kbd>。<br>表示方法：ツールバーの「1ページ」ボタンは1組ずつ、「全ページ」ボタンは全ページを縦に並べてスクロールで見られます（見えているページだけを描くので、ページ数が多くても軽く動きます。全ページ表示でも <kbd>PageUp</kbd>・<kbd>PageDown</kbd> で前後のページへ移動し、右のパネルの結果・位置合わせは画面の上のほうにあるページが対象です）。
 <h4>フォルダ比較</h4>
-ヘッダ左の「フォルダ比較」に切り替えて使います。2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリック（または <kbd>↑</kbd><kbd>↓</kbd> で選んで <kbd>Enter</kbd>）すると中身の比較に移り、「← フォルダ一覧」で一覧に戻れます。一覧は CSV・HTMLレポートに出力できます。
+ヘッダ左の「フォルダ比較」に切り替えて使います。2つのフォルダを指定すると、同じ名前のファイルどうしを比べて「同一・相違・左のみ・右のみ」を一覧します。行をダブルクリック（または <kbd>↑</kbd>・<kbd>↓</kbd> で選んで <kbd>Enter</kbd>）すると中身の比較に移り、「← フォルダ一覧」で一覧に戻れます。一覧は CSV・HTMLレポートに出力できます。
 <h4>プライバシー</h4>
 <span class="muted">すべての処理はこのブラウザの中だけで行われ、ファイルが外部に送信されることはありません（ネットワーク接続なしで動作します）。</span>`
   });

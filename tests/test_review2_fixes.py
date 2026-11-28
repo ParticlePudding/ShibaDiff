@@ -96,7 +96,8 @@ async def main():
         ck('画像：色の違いの検出は既定でオン', await t.js("$('#ovColor').checked"))
         ck('ボタンの色だけの変更に枠が付く（紫）', await btn() and await t.js("OV.st.cur.base.mask.includes(3)"))
         await t.click('#ovColor'); await t.page.wait_for_timeout(1500)
-        ck('「色の違いも検出」を外すと、色だけの変更は拾わない', not await btn())
+        # v1.5.14 から、ぴったり重なる画像ファイルどうしは濃さの違いも見る。水色→濃い青は明るさも違うので、色の検出を外しても枠は付く（紫の印は付かない）
+        ck('「色の違いも検出」を外すと、紫（色の違い）の印は付かない（明るさの違いとしては拾う）', await btn() and not await t.js("OV.st.cur.base.mask.includes(3)"))
         await t.load(os.path.join(D, 'R15', '決裁文書_起案時_スキャン.pdf'), os.path.join(D, 'R15', '決裁文書_決裁後_スキャン.pdf'))
         await t.page.wait_for_timeout(500)
         ck('紙のスキャン（文字のないPDF）では、色の比較は既定でオフ', not await t.js("$('#ovColor').checked"))

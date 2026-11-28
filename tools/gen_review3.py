@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_samples as G
 from PIL import Image, ImageDraw, ImageFilter
 import docx
-from docx.shared import Pt
+from docx.shared import Pt, Mm
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 import xlsxwriter
@@ -57,6 +57,7 @@ def rdocx(path, title, blocks, header=None, footer='page', author='先方 法務
     st = d.styles['Normal']; st.font.name = 'Yu Mincho'; st.font.size = Pt(size)
     st.element.rPr.rFonts.set(qn('w:eastAsia'), 'Noto Serif CJK JP')
     sec = d.sections[0]
+    sec.page_width, sec.page_height = Mm(210), Mm(297)  # A4（python-docx の既定は Letter。国内の実務の文書に合わせる）
     if header: sec.header.paragraphs[0].text = header
     if footer == 'page':
         p = sec.footer.paragraphs[0]; p.alignment = 1
@@ -415,9 +416,10 @@ def r03(d):
     def csv(ls):
         q = lambda v: '"' + str(v).replace('"', '""') + '"' if any(c in str(v) for c in ',"') else str(v)
         return '日付,伝票番号,借方科目,借方金額,貸方科目,貸方金額,摘要,部門\n' + ''.join(','.join(q(v) for v in l) + '\n' for l in ls)
+    lines[1877][6] = '出張旅費（大阪、2泊）'  # 正解に書く変更（2泊→3泊）の元になる摘要
     text(f'{d}/仕訳帳_第12期_会計ソフト出力_修正前.csv', csv(lines), enc='shift_jis', eol='\r\n')
     fixed = [list(l) for l in lines]
-    fixed[41][3] = fixed[41][5] = 128_700; fixed[1877][6] = '出張旅費（大阪、3泊）'; fixed[3020][2] = '会議費'; fixed[4444][7] = '管理部' if fixed[4444][7] != '管理部' else '開発部'
+    fixed[41][3] = fixed[41][5] = 128_700; fixed[1877][6] = '出張旅費（大阪、3泊）'; fixed[3020][2] = '会議費' if fixed[3020][2] != '会議費' else '交際費'; fixed[4444][7] = '管理部' if fixed[4444][7] != '管理部' else '開発部'
     del fixed[5100]
     fixed.insert(2500, ['2026/05/31', '102500A', '減価償却費', 401_000, '減価償却累計額', 401_000, '5月分 減価償却（計上漏れ）', '管理部'])
     fixed += [['2026/11/30', '106001', '貸倒引当金繰入額', 1_184_000, '貸倒引当金', 1_184_000, '決算整理 貸倒引当金', '管理部'], ['2026/11/30', '106002', '法人税、住民税及び事業税', 7_236_400, '未払法人税等', 7_236_400, '決算整理 法人税等', '管理部']]
@@ -426,7 +428,7 @@ def r03(d):
         '「6235 貸倒引当金繰入額」の行を追加（減価償却費の次）。以降の行は1行ずつ下がり、数式の参照も1行ずれる（＝ずれただけの数式は変更として扱われないのが望ましい）',
         '【仕込んだ誤り】整理後の合計行：当月借方・当月貸方の SUM の範囲が、行を足す前のまま（最終行が入っていない）。前月残高・当月残高の SUM は正しい。数式の違いとして見つけられること',
         'タイトル（決算整理前→決算整理後）、作成日（12月3日→12月8日）', '「前期比較」シート：値の変更と行の追加。増減・増減率は共有数式', '「科目マスタ」は非表示シート。整理後は 6235 の行が増えている（非表示シートの変更も出ること）',
-        '△表示（負の数）、％表示、日付の書式が、Excel で見たとおりに出ること', '仕訳帳CSV（Shift_JIS・CRLF・6,000行）：42行目の金額、1,878行目の摘要「2泊→3泊」、3,021行目の借方科目→会議費、4,445行目の部門、5,101行目を削除、2,501行目に1行挿入、末尾に決算整理の2行を追加',
+        '△表示（負の数）、％表示、日付の書式が、Excel で見たとおりに出ること', '仕訳帳CSV（Shift_JIS・CRLF・見出し＋6,000行）：伝票番号 100042 の金額（修正前の43行目）、101878 の摘要「2泊→3泊」（1,879行目）、103021 の借方科目（3,022行目）、104445 の部門（4,446行目）、105101 の行を削除（5,102行目）、102500 の次に 102500A の行を挿入、末尾に決算整理の2行を追加',
         '摘要に半角カナ（ｸﾗｳﾄﾞｻｰﾋﾞｽ利用料）、㈱・㈲、引用符（"特急"）、カンマを含む行がある')
 
 
@@ -724,7 +726,9 @@ def r07(d):
     def minjs(ver, n=5200):
         r = random.Random(3); parts = [f'/*! order-webapp v{ver} */(function(){{"use strict";']
         for i in range(n):
-            parts.append(f'function f{i}(a,b){{return a{"+-*"[i % 3]}b+{r.randrange(1000) if not (ver == "2.4.0" and i in (777, 3901)) else 4242}}}')
+            v = r.randrange(1000)  # 版によらず必ず引く（引かないと、以降の数値がすべてずれる）
+            if ver == '2.4.0' and i in (777, 3901): v = 4242
+            parts.append(f'function f{i}(a,b){{return a{"+-*"[i % 3]}b+{v}}}')
         parts.append(f'window.__APP_VERSION__="{ver}";}})();'); return ''.join(parts)
     F = {}
     for n in comps:
@@ -783,7 +787,7 @@ def r07(d):
         '外側のフォルダどうしを渡すと、内側のフォルダ名（-2.3.0 / -2.4.0）が違うため、何も対応しない（全部が「左のみ／右のみ」）ことに注意。内側どうしを渡すのが正しい',
         f'内容が違うファイル {len(changed)} 個：' + '、'.join(changed), f'改行コードだけが違う（LF→CRLF）{len(eol)} 個：' + '、'.join(eol), f'行末の空白だけが違う {len(ws_only)} 個：' + '、'.join(ws_only),
         f'左のみ {len(removed) + 1} 個：' + '、'.join(removed) + '、src/pages/ReportStock.tsx（名前の変更）', f'右のみ {len(added) + 1} 個：' + '、'.join(added) + '、src/pages/ReportInventory.tsx（名前の変更。中身は ReportStock.tsx と同じ）',
-        'dist/assets/app.min.js：1行だけで約24万文字。変わったのは版数と数値2か所', 'package-lock.json：約1万行。版数の行のほか、5パッケージの version・resolved・integrity が変わる', '画像（PNG）2個は中身が違う。ほかの画像66個は同じ', 'scripts/deploy.bat は Shift_JIS・CRLF（左のみ）',
+        'dist/assets/app.min.js：1行だけで約18万文字。変わったのは版数（2か所）と数値2か所（f777・f3901 の定数が 4242 に）', 'package-lock.json：約1万行。版数の行のほか、5パッケージの version・resolved・integrity が変わる', '画像（PNG）2個は中身が違う。ほかの画像66個は同じ', 'scripts/deploy.bat は Shift_JIS・CRLF（左のみ）',
         '受領したzip/ に元の zip も置いてある（zip をそのまま渡したときの案内を見るため）')
 
 
@@ -800,7 +804,7 @@ def r08(d):
         for i in range(1, 49):
             dp = depts[(i - 1) // 5 % len(depts)]; vid = vl[(i - 1) // 5 % 6][0]
             desc = f'{dp} {2 + (i - 1) // 12}F 島{chr(65 + i % 6)}-{i:02d}'
-            if v and i == 17: desc = '経理部 3F 島C-17（11/14 営業部から移設）'; vid = 130
+            if v and i == 17: desc = f'経理部 3F 島C-17（11/14 {dp}から移設）'; vid = 130
             L += [f'interface GigabitEthernet1/0/{i}', f' description {desc}', f' switchport access vlan {vid}', ' switchport mode access', ' switchport port-security maximum 2', ' spanning-tree portfast']
             if i in (41, 42) or (v and i == 33): L.append(' shutdown')
             L.append('!')
@@ -858,7 +862,7 @@ def r08(d):
     for i in dels: del r2[i]
     for j in range(5): r2.append([f'IT-{20001 + j:06d}', 'ノートPC', 'Lenovo', 'ThinkPad L13 Gen 5', f'PF5X{j}K2M9Q', '（未割当）', '情報システム部', '東京本社 5F', '2026/10/15', 168000, '2031/10/15', 'Windows 11 Pro 24H2', '', '予備'])
     text(f'{d}/IT資産台帳_2026下期（11月時点）.csv', tocsv(r2), enc='shift_jis', eol='\r\n')
-    key(d, '設定ファイル（Shift_JIS・CRLF、約390行）：先頭の最終変更の行、Gi1/0/17 の description と VLAN 110→130、Gi1/0/33 に shutdown 追加、Te1/1/1 の allowed vlan に 240 を追加、ACL から製造部（10.10.150.0）→ 10.10.200.41 の 3389 の行を削除（以降の行番号 seq がずれる）、来客無線の deny 行を追加、snmp community、ntp server 2台目、exec-timeout 30→10',
+    key(d, '設定ファイル（Shift_JIS・CRLF、約440行）：先頭の最終変更の行、Gi1/0/17 の description と VLAN 140→130、Gi1/0/33 に shutdown 追加、Te1/1/1 の allowed vlan に 240 を追加、ACL から製造部（10.10.150.0）→ 10.10.200.41 の 3389 の行を削除（以降の行番号 seq がずれる）、来客無線の deny 行を追加、snmp community、ntp server 2台目、exec-timeout 30→10',
         'hosts：EUC-JP・LF と UTF-8・CRLF。中身は同じ（差分なし。文字コード・改行コードだけ違うことが分かること）。「①」「Ｚａｂｂｉｘ」（全角英字）を含む', 'レジストリ（UTF-16LE・BOM・CRLF）：ScheduledInstallTime 3→12（dword:0000000c）、HomepageLocation、スクリーンセーバー待ち時間 600→300（258→12c）、App23 Enabled 1→0、Removable Storage Devices のキーを追加。キー名に日本語あり',
         'メール（ISO-2022-JP、7bit）：第1報→第2報。件名・日時、影響範囲の追記、原因、復旧見込み、お願いに2行追加（うち1行は半角カナ）', f'資産台帳CSV（Shift_JIS・CRLF、20,001行）：30行の値を変更（データ行の番号：{", ".join(str(i + 1) for i in sorted(log)[:10])} ほか）、3行を削除（IT-005121・IT-011004・IT-017778）、末尾に5行を追加（IT-020001〜020005）。利用者に「髙」「濵」「德」（Shift_JIS の機種依存文字）を含む')
 
@@ -1014,7 +1018,9 @@ def r11(d):
         wb.close(); share_formulas(path, 1, 'D', 3, 2 + len(data))
     make(f'{d}/診療報酬点数マスタ_令和6年度.xlsx', rows, '診療報酬点数マスタ（令和6年度改定）　みどり総合病院 医事課')
     r2 = [list(r) for r in rows]; ch = sorted(rnd.sample(range(1500), 40)); nd = datetime.datetime(2026, 6, 1)
-    for i in ch: r2[i][2] = int(r2[i][2] * rnd.choice([0.95, 1.03, 1.05, 1.1])) + 1; r2[i][6] = nd
+    for i in ch:
+        nv = int(r2[i][2] * rnd.choice([0.95, 1.03, 1.05, 1.1])) + 1
+        r2[i][2] = nv if nv != r2[i][2] else nv + 1; r2[i][6] = nd  # 点数は必ず変える（小さい点数で、計算の結果が元と同じになることがある）
     r2[ch[0]][7] = '経過措置：令和9年5月31日まで旧点数を算定可'; r2[300][1] = r2[300][1] + '（名称変更）'; r2[300][6] = nd
     gone = sorted(rnd.sample([i for i in range(1500) if i not in ch and i != 300], 5), reverse=True); gone_no = [r2[i][0] + ' ' + r2[i][1] for i in gone]
     for i in gone: del r2[i]

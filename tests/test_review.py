@@ -14,7 +14,8 @@ async def main():
         # v1.4.1 から日付には差を付けない（2回目のレビューで12人が「日付の増減率は不要」と指摘）。負号と誤認しないことも確かめる
         check('日付のハイフンを負号と誤認せず、日付には差を付けない', d == '[]', d)
         d = await t.js("JSON.stringify(Diff.numberDeltas(Diff.chars('品番 ABC-120','品番 ABC-125')))")
-        check('品番の差は +5', '"+5' in d, d)
+        # v1.5.14 から、型式・管理番号（英字-数字）には差を付けない（量ではない番号。「+5 / +4.2%」と出しても意味がなく、読み違える）。負号とも誤認しない
+        check('品番（ABC-120 → ABC-125）には差を付けない（ハイフンを負号と誤認しない）', d == '[]', d)
         d = await t.js("JSON.stringify(Diff.numberDeltas(Diff.chars('損益 -100','損益 -150')))")
         check('本物の負数は −50', '"−50' in d, d)
 

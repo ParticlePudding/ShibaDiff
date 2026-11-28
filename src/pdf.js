@@ -36,7 +36,7 @@ const PDF = (() => {
       return { cMapData: b64ToBytes(b), isCompressed: true };
     }
   }
-  async function open(bytes, password) {
+  async function open(bytes, password, name) {
     const L = await lib();
     // 文書ごとのワーカー（文書を閉じたら終了させる）
     let raw = null, worker = null;
@@ -50,7 +50,8 @@ const PDF = (() => {
       isEvalSupported: false, password, disableFontFace: false, useSystemFonts: true, ...(worker ? { worker } : {})
     });
     task.onPassword = async (updatePw, reason) => {
-      const pw = await askPassword(reason === 2 ? 'パスワードが違います。もう一度入力してください' : 'このPDFはパスワードで保護されています');
+      const nm = name ? `「${name}」` : 'このPDF';
+      const pw = await askPassword(reason === 2 ? `${nm}のパスワードが違います。もう一度入力してください` : `${nm}はパスワードで保護されています`);
       if (pw == null) { task.destroy(); } else updatePw(pw);
     };
     let doc;
@@ -59,21 +60,34 @@ const PDF = (() => {
     doc.destroy = async () => { try { await destroy(); } finally { stop(); } };
     return doc;
   }
+  const SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻', '(': '⁽', ')': '⁾', n: 'ⁿ', ' ': ' ' };
+  const SUB = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋', '(': '₍', ')': '₎', x: 'ₓ', ' ': ' ' };
   async function text(doc, onProgress) {
     const out = [];
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       const tc = await page.getTextContent({ disableNormalization: false });
       out.push(`===== ページ ${i} =====`);
-      let line = '', lastY = null, lastX = null;
+      // 行の判定は、その行の基準（本文の大きさの文字の位置 baseY・高さ baseH）で行う。上付き・下付き（小さい文字が上下に少しずれる）は
+      // 同じ行に入れる。前の文字との差だけで見ると、上付き文字のところで行が割れ、変わっていない文が別の行になって差分に出る
+      let line = '', baseY = null, baseH = 0, lastX = null;
+      const flush = () => { if (line.trim()) out.push(line.replace(/\s+$/, '')); line = ''; baseY = null; baseH = 0; lastX = null; };
       for (const it of tc.items) {
         if (typeof it.str !== 'string') continue;
         const y = it.transform[5], x = it.transform[4], h = Math.abs(it.transform[3]) || it.height || 10;
-        if (lastY !== null && line && Math.abs(y - lastY) > h * 0.6) { if (line.trim()) out.push(line.replace(/\s+$/, '')); line = ''; }
+        if (baseY !== null && line && Math.abs(y - baseY) > Math.max(h, baseH) * 0.6) flush();
         else if (lastX !== null && line && x - lastX > h * 1.2 && !/\s$/.test(line) && it.str && !/^\s/.test(it.str)) line += ' ';
-        line += normCJK(it.str);
-        lastY = y; lastX = x + (it.width || 0);
-        if (it.hasEOL) { if (line.trim()) out.push(line.replace(/\s+$/, '')); line = ''; lastY = null; lastX = null; }
+        let str = normCJK(it.str);
+        if (baseY !== null && line && h < baseH * 0.85 && str.trim()) {
+          // 本文より小さく、上か下にずれている：上付き（10⁵、Cu²⁺）・下付き（H₂O）。数字と符号だけなら、その文字に置き換える
+          // （そのままだと 10⁵ が「105」になり、105→106 のような別の数に読める）
+          const dy = y - baseY, map = dy > baseH * 0.18 ? SUP : dy < -baseH * 0.06 ? SUB : null;
+          if (map && [...str].every(c => map[c] !== undefined)) str = [...str].map(c => map[c]).join('');
+        }
+        line += str;
+        if (baseY === null || h >= baseH * 0.95) { baseY = y; baseH = h; }
+        lastX = x + (it.width || 0);
+        if (it.hasEOL) flush();
       }
       if (line.trim()) out.push(line.replace(/\s+$/, ''));
       page.cleanup();
@@ -83,20 +97,36 @@ const PDF = (() => {
   }
   async function pages(doc) {
     const res = [];
+    const ready = new Set(); // 描画の命令と部品（フォント・画像）がそろっているページ（下の exact の説明を参照）
     for (let i = 1; i <= doc.numPages; i++) {
       const p = await doc.getPage(i);
       const vp = p.getViewport({ scale: 1 });
       const n = i;
       res.push({
         w: vp.width, h: vp.height,
-        async draw(canvas, scale) {
+        /* opt.exact：比較に使う描画。描きはじめたら、ブラウザに処理を返さずに最後まで描く。
+           Chrome の canvas は、描画の途中で処理が一度ブラウザに戻ると、そのあとに描く図形の縁（アンチエイリアス）がわずかに変わる
+           （切り抜き＝クリップの掛かり方が変わるため）。pdf.js は、長い描画では requestAnimationFrame を待ち、フォントや命令が
+           届いていなければ届くまで待つので、同じページでも描くたびに画素が違うことがある。文字をパスで描く PDF（Chrome の印刷で
+           作った PDF の Type3 フォントなど）で目立ち、重ね合わせで「変わっていない文字に枠が出る・件数が操作のたびに変わる」原因になる。
+           そこで比較用の描画は、(1) 先にごく小さく1回描いて、そのページの命令と部品をそろえておき（初回だけ）、
+           (2) requestAnimationFrame を待たずに描く（build.py が pdf.js の該当箇所を globalThis.__sdExact で切り替えられるようにしている）。
+           画面に出すだけの描画（ページ表示）は、これまでどおり途中で処理を返す（大きなページでも操作が止まらないように） */
+        async draw(canvas, scale, opt) {
           if (canvas._task) { try { canvas._task.cancel(); } catch (e) { } canvas._task = null; }
           const pg = await doc.getPage(n);
+          if (opt && opt.exact && !ready.has(n)) {
+            const v0 = pg.getViewport({ scale: 0.02 }), c0 = document.createElement('canvas');
+            c0.width = Math.max(1, Math.round(v0.width)); c0.height = Math.max(1, Math.round(v0.height));
+            try { await pg.render({ canvasContext: c0.getContext('2d'), viewport: v0 }).promise; ready.add(n); } catch (e) { /* 本番の描画で同じ失敗が出る */ }
+          }
           const v = pg.getViewport({ scale });
           canvas.width = Math.max(1, Math.round(v.width)); canvas.height = Math.max(1, Math.round(v.height));
           const ctx = canvas.getContext('2d');
           ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-          const task = pg.render({ canvasContext: ctx, viewport: v, background: 'white' });
+          let task;
+          globalThis.__sdExact = !!(opt && opt.exact);
+          try { task = pg.render({ canvasContext: ctx, viewport: v, background: 'white' }); } finally { globalThis.__sdExact = false; }
           canvas._task = task;
           try { await task.promise; } catch (e) { if (e && e.name === 'RenderingCancelledException') return false; throw e; }
           finally { if (canvas._task === task) canvas._task = null; }

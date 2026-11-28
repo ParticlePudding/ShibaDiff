@@ -50,7 +50,7 @@ const PageMatch = (() => {
   const TW = 48, TH = 66;
   async function thumb(pg) {
     const c = document.createElement('canvas'), scale = Math.min(1, 160 / Math.max(pg.w, pg.h));
-    await pg.draw(c, scale);
+    await pg.draw(c, scale, { exact: true });
     const t = document.createElement('canvas'); t.width = TW; t.height = TH;
     const x = t.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high';
     x.fillStyle = '#fff'; x.fillRect(0, 0, TW, TH); x.drawImage(c, 0, 0, TW, TH);
@@ -179,10 +179,10 @@ const PageMatch = (() => {
     const add = pairs.filter(p => p.l < 0).map(p => p.r + 1), del = pairs.filter(p => p.r < 0).map(p => p.l + 1);
     const fmt = a => a.length > 6 ? a.slice(0, 6).join('・') + ` ほか ${a.length - 6}` : a.join('・');
     // 調べていないときは「ありません」とは言わない（スキャンでページ数が同じなら、同じページ番号どうしを組にしているだけ）
-    if (skipped()) return 'ページ数が同じスキャンのため、同じページ番号どうしを組にしています（ページの入れ替え・差し替えは調べていません）';
+    if (skipped()) return [0, 1].some(i => App.visualOnly(S[i])) ? 'ページ数が同じスキャンのため、同じページ番号どうしを組にしています（ページの入れ替え・差し替えは調べていません）' : 'ページ数が同じため、同じページ番号どうしを組にしています';
     if (st.big) return 'ページ数が多すぎるため、ページの対応は調べず、同じページ番号どうしを組にしています';
     if (!add.length && !del.length) return 'ページの挿入・削除はありません' + (st.visual ? '（見た目で確認）' : '');
-    return [add.length ? `右で追加されたページ：${fmt(add)}` : '', del.length ? `左から削除されたページ：${fmt(del)}` : ''].filter(Boolean).join('<br>');
+    return [add.length ? `右で追加されたページ：${fmt(add)}` : '', del.length ? `右で削除されたページ（左のページ番号）：${fmt(del)}` : ''].filter(Boolean).join('<br>');
   }
   return { compute, invalidate, ready, skipped, other, describe, enabled, _align: align };
 })();

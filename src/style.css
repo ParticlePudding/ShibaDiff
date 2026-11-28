@@ -1,5 +1,5 @@
 :root{
-  --bg:#eef1f5; --panel:#ffffff; --line:#d5dbe3; --line2:#c3cbd6; --text:#1f2933; --muted:#6b7785;
+  --bg:#eef1f5; --panel:#ffffff; --line:#d5dbe3; --line2:#c3cbd6; --text:#1f2933; --muted:#5f6b79;
   --accent:#1f6feb; --accent-weak:#e6efff;
   --mono:"BIZ UDGothic","BIZ UDゴシック","MS Gothic","ＭＳ ゴシック",Consolas,"Noto Sans Mono CJK JP",monospace;
   --ui:"BIZ UDPGothic","Yu Gothic UI","Meiryo UI","Meiryo","Hiragino Sans","Noto Sans CJK JP",sans-serif;
@@ -12,7 +12,7 @@
 html,body{margin:0;height:100%;}
 html[data-fs="s"]{--fs:12px}html[data-fs="l"]{--fs:15.5px}
 body{font-family:var(--ui);font-size:var(--fs);color:var(--text);background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
-button,select,input{font-family:inherit;font-size:12.5px;color:inherit}
+button,select,input{font-family:inherit;font-size:calc(var(--fs) - .5px);color:inherit}
 button{background:#fff;border:1px solid var(--line2);border-radius:5px;padding:4px 8px;cursor:pointer;white-space:nowrap;line-height:1.3}
 button:hover{background:#f3f6fa;border-color:#9fb0c5}
 button:active{background:#e8edf4}
@@ -47,10 +47,10 @@ kbd{font-family:var(--mono);background:#f3f4f6;border:1px solid #cfd5dc;border-b
 #top .seg button.on{background:#3b4a5c;color:#fff;font-weight:600}
 body[data-mode="folder"] #tabs,body[data-mode="folder"] #hdrFiles,body[data-mode="folder"] #slots{display:none!important}
 #hdrFiles{display:flex;align-items:center;gap:4px;min-width:0;flex:1 1 auto}
-#hdrFiles .hf{display:flex;align-items:center;gap:6px;min-width:min(7.5em,14vw);max-width:clamp(160px,24vw,360px);flex:0 1 auto;background:#2a3644;color:#e8edf3;border:1px solid #3d4b5b;padding:3px 8px;font-size:12.5px}
+#hdrFiles .hf{display:flex;align-items:center;gap:6px;min-width:min(11em,18vw);max-width:clamp(160px,24vw,360px);flex:0 1 auto;background:#2a3644;color:#e8edf3;border:1px solid #3d4b5b;padding:3px 8px;font-size:12.5px}
 #hdrFiles .hf:hover{background:#344356}
 #hdrFiles .hf .badge{flex:none;font-size:10.5px;font-weight:700;border-radius:4px;padding:0 6px;color:#fff;background:#c0504d}
-#hdrFiles .hf[data-side="1"] .badge{background:#3a8f4a}
+#hdrFiles .hf[data-side="1"] .badge{background:#2f7d3f}
 #hdrFiles .hf .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 #hdrFiles .hf.empty .nm{color:#9fb0c2}
 .hdr-btn{background:transparent;color:#d6dde6;border-color:#4a5868;padding:3px 8px}
@@ -85,7 +85,7 @@ body.fullview #top,body.fullview #slots{display:none!important}
 .slot-main{display:flex;align-items:center;gap:8px;min-width:0}
 .slot .badge{flex:none;font-size:11px;font-weight:700;border-radius:4px;padding:1px 7px;color:#fff;background:#6c7a89}
 .slot[data-side="0"] .badge{background:#c0504d}
-.slot[data-side="1"] .badge{background:#3a8f4a}
+.slot[data-side="1"] .badge{background:#2f7d3f}
 .slot .fname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .slot:not(.loaded) .fname{font-weight:400;color:var(--muted)}
 .slot-info{display:flex;align-items:center;gap:6px;min-height:24px;flex-wrap:wrap}
@@ -120,7 +120,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .row.t-w .ln{background:#ecece6}
 .row.pad{background:repeating-linear-gradient(135deg,#f2f3f5 0 6px,#e9ebee 6px 7px)}
 .row.pad .ln{background:#eceef1}
-.row.cur{box-shadow:inset 0 1px 0 var(--cur),inset 0 -1px 0 var(--cur)}
+.diffwrap.single .row,.diffwrap.single .row .ln{background:transparent!important;box-shadow:none!important}.diffwrap.single .row .ln{color:inherit!important}.diffwrap.single .row .mk{visibility:hidden}
 .row.cur.first{box-shadow:inset 0 2px 0 var(--cur)}
 .row.cur.last{box-shadow:inset 0 -2px 0 var(--cur)}
 .row.cur.first.last{box-shadow:inset 0 2px 0 var(--cur),inset 0 -2px 0 var(--cur)}
@@ -130,7 +130,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .row.fold:hover{background:#e0eafa}
 .row.fold .ln{background:#e4ebf6}
 /* 変わった文字：削除は赤＋取り消し線、追加は青＋下線（色が見分けにくくても線で分かる） */
-.row.t-d .cd,.row.t-c.side0 .cd{background:var(--del-ch);border-radius:2px;text-decoration:line-through;text-decoration-color:var(--del-strong);text-decoration-thickness:1.5px}
+.row.t-d .cd,.row.t-c.side0 .cd{background:var(--del-ch);border-radius:2px;text-decoration:line-through;text-decoration-color:rgba(179,38,30,.55);text-decoration-thickness:1px}
 .row.t-i .cd,.row.t-c.side1 .cd{background:var(--ins-ch);border-radius:2px;text-decoration:underline;text-decoration-color:var(--ins-strong);text-decoration-thickness:1.5px;text-underline-offset:2px}
 .ipt{display:inline-block;width:0;height:1.1em;vertical-align:-.18em;border-left:2px solid var(--del-strong);margin:0 1px}
 .row.t-c.side0 .ipt,.row.t-d .ipt{border-left-color:var(--ins-strong)}
@@ -140,11 +140,12 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}
 .wsp::before{content:"·";left:.15em}
 .wzsp::before{content:"□";left:.05em}
 .wtab::before{content:"→"}
+.wzw::before{content:"◊";color:#b45309;font-size:.75em;font-family:var(--ui)}
 .weol{color:#9aa5b1;font-size:.8em;margin-left:2px}
 .weol::before{content:none}
 .row .msg{font-family:var(--ui);color:var(--muted)}
 .ws-tab{color:#c4cad2}
-.empty-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted);pointer-events:none;font-size:14px;text-align:center;line-height:1.8}
+.empty-hint{position:absolute;inset:0;z-index:1;background:var(--panel);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted);pointer-events:none;font-size:14px;text-align:center;line-height:1.8}
 .empty-hint .big{font-size:40px;opacity:.35}
 #searchBox{width:120px}
 
@@ -197,7 +198,10 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 .scan-table td,.scan-table th{border-bottom:1px solid #eceff3;padding:3px 4px;text-align:left}
 .scan-table tr{cursor:pointer}
 .scan-table tr:hover td{background:#f2f6fc}
-.scan-table .bar{height:6px;background:#ff6b6b;border-radius:3px;min-width:1px}
+.scan-table .barw{display:flex;align-items:center;gap:6px}.scan-table .bt{flex:1;min-width:0}
+.scan-table .bar{display:block;height:6px;background:#ff6b6b;border-radius:3px;min-width:1px}
+.scan-table .pv{flex:none;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.scan-table tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ov-ctl{display:flex;flex-direction:column;gap:6px}
 .ov-ctl input[type=range]{width:100%}
 
@@ -212,9 +216,11 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 .fd-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .fd-table th{position:sticky;top:0;background:#f3f5f8;border-bottom:1px solid var(--line2);text-align:left;padding:5px 8px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
 .fd-table td{border-bottom:1px solid #eef0f3;padding:4px 8px;white-space:nowrap}
+.fd-hint{margin-top:4px;color:#8a5a00;font-size:12.5px;line-height:1.6;white-space:normal}
 .fd-table td.path{white-space:normal;word-break:break-all;font-family:var(--mono);font-size:12px}
 .fd-table tr:hover td{background:#f4f8fd}
 .fd-table tr.sel td{background:#dfeafc}
+.fd-table tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .fd-table tr.more td{color:var(--muted);text-align:center;padding:10px 8px;background:#f8f9fb;white-space:normal}
 .st{display:inline-block;border-radius:10px;padding:0 8px;font-size:11.5px;font-weight:600}
 .st-same{background:#eef1f4;color:#6b7785}
@@ -263,7 +269,11 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
   body{display:block;overflow:visible;background:#fff;height:auto}
   body>*{display:none!important}
   #printArea{display:block!important}
-  #printArea img{display:block;width:100%;page-break-after:always;break-after:page}
+  /* 1ページを1枚の用紙に収める。幅いっぱいにすると、用紙より少しでも縦長のページ（A4 の文書を A4 に刷るときの端数を含む）が
+     次の用紙にはみ出し、ページごとに白紙が挟まる。最後のページのあとでは改ページしない */
+  #printArea img{display:block;width:auto;max-width:100%;max-height:100vh;margin:0 auto;page-break-after:always;break-after:page}
+  #printArea img:last-child{page-break-after:auto;break-after:auto}
+  #printArea .print-note{margin:20mm;font:14px/2 sans-serif;color:#000}
 }
 
 /* ---------- 一列表示（統合ビュー） ---------- */
@@ -280,8 +290,10 @@ svg .selbox{fill:none;stroke:#1f6feb;stroke-dasharray:4 3;stroke-width:1}
 .wchunk{content-visibility:auto;contain-intrinsic-size:auto 6000px}
 .wrow{display:grid;grid-template-columns:1fr 1fr}
 .wrow .row+.row{border-left:2px solid var(--line2)}
-.wrapv .row{height:auto;min-height:var(--rowh);line-height:1.55;white-space:pre-wrap;word-break:break-all;min-width:0}
+.wrapv .row{height:auto;min-height:var(--rowh);line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
 .wrapv .row .ln{position:static;padding-top:1px}
+/* 行頭の印は浮かせる（印のあとで折り返せると、長い URL などが2行目から始まり、1行目が空に見えるため） */
+.wrapv .row .mk{float:left;min-height:1px}
 .wrapv .row .tx{padding-top:1px;padding-bottom:1px;min-width:0}
 /* 設定画面 */
 .settings h4{margin:14px 0 6px;padding-bottom:3px;border-bottom:1px solid var(--line)}
@@ -389,6 +401,7 @@ details.pop .pop-body{position:absolute;top:calc(100% + 4px);left:0;z-index:30;b
 .ov-view.panning,.ov-view.panning canvas{cursor:grabbing!important}
 .ov-view canvas.swipe{cursor:ew-resize}
 .ov-view:focus{outline:none}
+.ov-view:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ov-side [data-modes][hidden]{display:none!important}
 .ov-colors{display:flex;align-items:center;gap:6px}
 .ov-colors input[type=color]{width:34px;height:22px;padding:0;border:1px solid var(--line2);border-radius:4px;background:#fff}
@@ -503,3 +516,16 @@ button:has(>.ic),summary:has(>.ic){display:inline-flex;align-items:center;justif
 .datatbl th.num,.datatbl td.num{text-align:right;white-space:nowrap}
 
 .thr-row .rng{display:flex;align-items:center;gap:6px;width:100%}.thr-row .rng input{flex:1;min-width:0;width:auto}.thr-row .rng-end{font-size:11px;color:var(--muted);flex:none}
+
+/* ハイコントラスト（強制カラー）：地の色で示している「押した状態」「選んだ行」「今の差分」が消えるので、枠と記号で示す */
+@media (forced-colors: active){
+  button.on,.toolbtn.on,#tabs button.on,#modeSw button.on,.swatches button.on{forced-color-adjust:none;background:Highlight;color:HighlightText;border-color:Highlight}
+  button.on svg,.toolbtn.on svg{stroke:HighlightText}
+  .fd-table tr.sel td{border-top:2px solid Highlight;border-bottom:2px solid Highlight}
+  .row.cur .ln{forced-color-adjust:none;background:Highlight;color:HighlightText}
+  .row.t-d .mk,.row.t-i .mk,.row.t-c .mk{color:CanvasText}
+  .cd{forced-color-adjust:none;background:Canvas;color:CanvasText;outline:1px solid CanvasText}
+  .ipt{border-left-color:Highlight}
+  .scan-table .bar{forced-color-adjust:none;background:Highlight}
+  :focus-visible{outline:2px solid Highlight}
+}

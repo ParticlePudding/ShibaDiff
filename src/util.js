@@ -1,7 +1,12 @@
 'use strict';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
-const esc = s => s.replace(/[&<>"]/g, c => c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;');
+/* 文字の並ぶ向きを変える制御文字（RLO・LRO・埋め込み・分離：U+202A〜202E、U+2066〜2069）は、目に見えないまま、後ろの文字を逆順に見せる
+   （「報告書exe.txt」に見える名前が、実は「報告書txt.exe」など）。名前や本文が別物に見えないよう、画面・レポートに出すときは
+   見える形（[U+202E]）に置き換える。ファイルの中身・保存するときの名前・パッチには手を付けない */
+const BIDI_CTL = /[\u202A-\u202E\u2066-\u2069]/g;
+const showCtl = s => String(s).replace(BIDI_CTL, c => `[U+${c.charCodeAt(0).toString(16).toUpperCase()}]`);
+const esc = s => showCtl(s).replace(/[&<>"]/g, c => c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
 
@@ -21,8 +26,9 @@ function fmtNum(n) { return n.toLocaleString('ja-JP'); }
 let toastTimer = 0;
 function toast(msg, isErr = false, ms = 2600) {
   const t = $('#toast');
+  if (!msg) { clearTimeout(toastTimer); t.className = ''; t.textContent = ''; return; } // 空なら、出ている通知を消す（閉じたファイルについての通知を残さない）
   t.setAttribute('aria-live', isErr ? 'assertive' : 'polite'); // 読み上げ：誤りはすぐに、ふつうの通知は区切りのよいところで
-  t.textContent = msg; t.className = 'on' + (isErr ? ' err' : '');
+  t.textContent = showCtl(msg); t.className = 'on' + (isErr ? ' err' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.className = '', isErr ? Math.max(ms, 5000) : ms);
 }
@@ -54,13 +60,13 @@ async function withBusy(msg, fn, opt = {}) {
    ヘルプを開いたままファイルをドロップしたときのパスワード入力など）、下のダイアログの中身を、入力中の値や
    イベントごと退避して上に重ね、上を閉じたら元に戻す（下のダイアログの Promise とキー操作を置き去りにしない） */
 const modalStack = [];
-function modal({ title, html, buttons = [{ label: '閉じる', value: null }], onOpen, wide }) {
+function modal({ title, html, buttons = [{ label: '閉じる', value: null }], onOpen, wide, guard }) {
   return new Promise(resolve => {
     const m = $('#modal'), dlg = $('.dlg', m), h3 = $('h3', m), bodyEl = $('.body', m), foot = $('.foot', m);
     const prevFocus = document.activeElement;
     const under = modalStack[modalStack.length - 1];
     if (under) under.suspend();
-    const head = () => { dlg.style.width = wide ? 'min(1100px,96vw)' : ''; h3.textContent = title; };
+    const head = () => { dlg.style.width = wide ? 'min(1100px,96vw)' : ''; h3.textContent = showCtl(title); };
     dlg.setAttribute('role', 'dialog'); dlg.setAttribute('aria-modal', 'true');
     h3.id = 'dlgTitle'; dlg.setAttribute('aria-labelledby', 'dlgTitle');
     head();
@@ -100,7 +106,12 @@ function modal({ title, html, buttons = [{ label: '閉じる', value: null }], o
     }
     const focusables = () => $$('button,input,select,textarea,a[href],[tabindex]:not([tabindex="-1"])', dlg).filter(e => !e.disabled && e.offsetParent !== null);
     const onKey = e => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(null); return; }
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        // guard：Esc で閉じてよいかを返す関数（入力した内容があるときに確かめる）。確かめている間は、上に確認のダイアログが重なる
+        if (guard) Promise.resolve(guard(m)).then(ok => { if (ok) close(null); }); else close(null);
+        return;
+      }
       if (e.key === 'Tab') {
         const f = focusables(); if (!f.length) return;
         const i = f.indexOf(document.activeElement);
@@ -159,13 +170,38 @@ function b64ToBytes(b64) {
 // Unicode の EquivalentUnifiedIdeograph.txt から作った対応表で置き換える
 const RADICAL_SRC = '⺁⺂⺃⺄⺅⺆⺇⺈⺉⺊⺋⺌⺍⺎⺏⺐⺑⺒⺓⺔⺕⺖⺗⺘⺙⺛⺜⺝⺞⺟⺠⺡⺢⺣⺤⺥⺦⺧⺨⺩⺪⺫⺬⺭⺮⺯⺰⺱⺲⺳⺴⺵⺶⺷⺸⺹⺺⺻⺼⺽⺾⺿⻀⻁⻂⻃⻄⻅⻆⻇⻈⻉⻊⻋⻌⻍⻎⻏⻐⻑⻒⻓⻔⻕⻖⻗⻘⻙⻚⻛⻜⻝⻞⻟⻠⻡⻢⻣⻤⻥⻦⻧⻨⻩⻪⻫⻬⻭⻮⻯⻰⻱⻲⻳', RADICAL_DST = '厂乛乚乙亻冂𠘨刀刂卜㔾小小兀尣尢𡯂巳幺彑𫜹忄心扌攵旡日月歺母民氵氺灬爫爫丬牛犭王𤴔目示礻𥫗糹纟罓罒㓁冗𦉫羊𦍌𦍋耂肀聿肉𦥑艹艹艹虎衤覀西见角𧢲讠贝𧾷车辶辶辶邑钅長镸长门𨸏阝雨青韦页风飞食𩙿飠饣𩠐马骨鬼鱼鸟卤麦黄黾斉齐歯齿竜龙龜亀龟';
 const RADICAL_MAP = (() => { const m = new Map(), a = Array.from(RADICAL_SRC), b = Array.from(RADICAL_DST); a.forEach((c, i) => m.set(c, b[i])); return m; })();
+// 康熙部首（U+2F00–2FDF）は NFKC で漢字になるが、旧字体になるものがある（⼾ → 戶、⿊ → 黑）。日本語のフォントでは新字体の形で
+// 描かれており、Chrome の印刷で作った PDF は「戸」「黒」の文字情報としてこの部首の符号を持つので、日本の字体に直す
+const KANGXI_JP = { '\u2F3E': '戸', '\u2FC8': '黄', '\u2FCA': '黒', '\u2FD2': '歯', '\u2FAD': '青' };
 function normCJK(s) {
-  return s.replace(/[\u2E80-\u2FDF\uF900-\uFAFF\u2027]/g, c => (c === '\u2027' ? '・' : RADICAL_MAP.get(c) || c.normalize('NFKC')));
+  return s.replace(/[\u2E80-\u2FDF\uF900-\uFAFF\u2027]/g, c => (c === '\u2027' ? '・' : KANGXI_JP[c] || RADICAL_MAP.get(c) || c.normalize('NFKC')));
 }
+/* 「全角・半角を区別しない」：文字の幅の違いだけをそろえる（全角の英数字・記号 ↔ 半角、半角カナ ↔ 全角カナ、全角の空白 ↔ 半角の空白）。
+   NFKC を文字列全体にかけると、上付き・下付き（³ ₂）、丸数字（①）、組文字（㎛ ㈱）、ローマ数字（Ⅲ）まで同じ文字になり、
+   10³ と 103 のような値の違いを見落とすので、半角・全角形の範囲（U+FF00–FFEF）と全角の空白だけにかける */
+function foldWidth(s) { return s.replace(/[\uFF00-\uFFEF\u3000]+/g, m => m.normalize('NFKC')); }
+/* 注釈・コメントのうち、まだファイルに保存していない（ブラウザにも保存しない設定の）書き込みがあるかどうか。
+   ページを閉じる・再読み込みするときの確認に使う。注釈ファイルへの保存・レポート・印刷で出力したら消す */
+const Unsaved = {
+  on: false, told: false,
+  mark() {
+    this.on = true;
+    // 最初に書いたときに、保存されないことを一度だけ知らせる（ほかの通知が出ているときは、次の機会に回す）
+    if (!this.told) setTimeout(() => {
+      if (this.told || !this.on || $('#toast').classList.contains('on')) return;
+      this.told = true;
+      toast('注釈・コメントは、このブラウザには保存しません。残すときは、ページ表示の「注釈を保存」でファイルに保存してください（「設定」で、ブラウザに保存するようにもできます）', false, 8000);
+    }, 60);
+  },
+  clear() { this.on = false; }
+};
+// 押した状態を色（.on）で示すボタン：読み上げ用の状態（aria-pressed）も合わせる
+function setOn(b, on) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
 function extOf(name) { const m = /\.([^.\\/]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : ''; }
 function baseName(name) { return (name || '').replace(/\.[^.\\/]+$/, ''); }
 
-/* ツールバーのポップアップ（details.pop）は、外側をクリックするか Esc で閉じる */
+/* ツールバーのポップアップ（details.pop）は、外側をクリックするか Esc で閉じる。Tab でフォーカスが外へ出たときも閉じる（開いたまま残さない） */
+document.addEventListener('focusout', e => { const d = e.target.closest && e.target.closest('details.pop[open]'); if (d && e.relatedTarget && !d.contains(e.relatedTarget)) d.open = false; });
 document.addEventListener('click', e => { document.querySelectorAll('details.pop[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('details.pop[open]').forEach(d => { d.open = false; d.querySelector('summary').focus(); }); });
 // 狭い画面ではツールバーが横スクロールになり、その中に置いたポップアップは切り取られて見えない。
@@ -173,7 +209,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') document.que
 document.addEventListener('toggle', e => {
   const d = e.target; if (!d.matches || !d.matches('details.pop') || !d.open) return;
   const body = d.querySelector('.pop-body'), r = d.querySelector('summary').getBoundingClientRect();
-  if (getComputedStyle(body).position !== 'fixed') { body.style.left = body.style.top = ''; return; }
+  if (getComputedStyle(body).position !== 'fixed') {
+    // 画面の右端からはみ出すときは、はみ出した分だけ左へ寄せる（幅 1024px などで右が切れ、ページに横スクロールができていた）
+    body.style.left = body.style.top = '';
+    const over = body.getBoundingClientRect().right - (window.innerWidth - 6);
+    if (over > 0) body.style.left = -over + 'px';
+    return;
+  }
   body.style.top = (r.bottom + 4) + 'px';
   body.style.left = Math.max(6, Math.min(r.left, window.innerWidth - body.offsetWidth - 6)) + 'px';
 }, true);

@@ -234,9 +234,17 @@ const Office = (() => {
   function shiftFormula(f, dr, dc) {
     if (!dr && !dc) return f;
     const wrap = (v, max) => ((v % max) + max) % max; // 端を越えたら反対側へ回る（Excel と同じ）
+    return mapRefs(f, (abs, name) => abs + (abs ? name : colName(wrap(colIdx(name) + dc, MAX_COL))), (abs, n) => abs + (abs ? n : String(wrap(+n - 1 + dr, MAX_ROW) + 1)));
+  }
+  /* 数式を、そのセルから見た相対位置の形にする（=C5+D5-E5 が 6 行目・F 列にあれば =C[-3]R[0]+C[-2]R[0]-C[-1]R[0]）。比較にだけ使う。
+     行を1行足すと、その下の数式は参照の番号が1つずつずれる（=C5+D5-E5 → =C6+D6-E6）が、相対位置の形にすると同じになるので、
+     「番号がずれただけ」の数式を違いにしないで済む。範囲を広げ忘れた SUM などは、相対位置が変わるので違いとして残る */
+  function relFormula(f, r, c) {
+    return mapRefs(f, (abs, name) => abs ? '$' + name : 'C[' + (colIdx(name) - c) + ']', (abs, n) => abs ? '$' + n : 'R[' + (+n - 1 - r) + ']');
+  }
+  // 数式の中のセル参照（A1・$B$2・A:C・3:5）を、col(絶対の印, 列名)・row(絶対の印, 行番号) の結果で置き換える
+  function mapRefs(f, col, row) {
     const okCol = name => colIdx(name) < MAX_COL, okRow = n => +n >= 1 && +n <= MAX_ROW;
-    const col = (abs, name) => abs + (abs ? name : colName(wrap(colIdx(name) + dc, MAX_COL)));
-    const row = (abs, n) => abs + (abs ? n : String(wrap(+n - 1 + dr, MAX_ROW) + 1));
     const n = f.length; let out = '', i = 0;
     const quoted = q => { // 引用符で囲まれた部分（中の引用符は2つ重ねて書かれる）
       let j = i + 1;
@@ -259,8 +267,8 @@ const Office = (() => {
     }
     return out;
   }
-  async function xlsx(zip) {
-    const ss = [];
+  async function xlsx(zip, info) {
+    const ss = [], keys = []; let keyed = false; // keys：比較用の行（数式を相対位置の形にしたもの。out と同じ並び）
     const ssd = await xmlOf(zip, 'xl/sharedStrings.xml');
     if (ssd) for (const si of all(ssd, 'si')) ss.push(all(si, 't').filter(t => t.parentNode.localName !== 'rPh').map(t => t.textContent).join(''));
     // 日付の表示形式のセルを判定する（日付は内部では通し番号で保存されている）
@@ -303,7 +311,7 @@ const Office = (() => {
       const doc = await xmlOf(zip, path); if (!doc) continue;
       // 非表示のシートも比較の対象にする。見えていないシートの内容だと分かるよう、見出しに書く
       const hidden = /hidden/i.test(sh.getAttribute('state') || '');
-      out.push(`===== シート: ${name}${hidden ? '（非表示）' : ''} =====`);
+      out.push(`===== シート: ${name}${hidden ? '（非表示）' : ''} =====`); keys.push(out[out.length - 1]);
       // 共有数式の先頭のセル（本文のあるもの）を先に集める
       const shared = new Map();
       for (const f of all(doc, 'f')) {
@@ -312,7 +320,7 @@ const Office = (() => {
         if (pos) shared.set(f.getAttribute('si'), { text: f.textContent, r: pos.r, c: pos.c });
       }
       for (const row of all(doc, 'row')) {
-        const cells = [];
+        const cells = [], kcells = [];
         for (const c of kids(row, 'c')) {
           const r = c.getAttribute('r'); const ci = r ? colIdx(r) : cells.length;
           const t = c.getAttribute('t'); const v = kids(c, 'v')[0];
@@ -330,15 +338,24 @@ const Office = (() => {
             const mst = shared.get(f.getAttribute('si')), pos = cellPos(r);
             if (mst && pos) ftext = shiftFormula(mst.text, pos.r - mst.r, pos.c - mst.c);
           }
-          if (ftext) val = (val === '' ? '' : val + ' ') + '‹=' + ftext + '›';
-          while (cells.length < ci) cells.push('');
-          cells[ci] = val.replace(/\r?\n/g, '↵');
+          let kval = val;
+          if (ftext) {
+            const pos = cellPos(r), rel = pos ? relFormula(ftext, pos.r, pos.c) : ftext;
+            // ROW()・COLUMN() だけで決まる数式（通し番号の =ROW()-3 など）は、行を足すと値も変わる。位置で決まる値なので、比較では値を見ない
+            const byPos = /\b(ROW|COLUMN)\s*\(\s*\)/i.test(ftext) && rel === ftext;
+            kval = (byPos || val === '' ? '' : val + ' ') + '‹=' + rel + '›';
+            val = (val === '' ? '' : val + ' ') + '‹=' + ftext + '›';
+            if (kval !== val) keyed = true;
+          }
+          while (cells.length < ci) { cells.push(''); kcells.push(''); }
+          cells[ci] = val.replace(/\r?\n/g, '↵'); kcells[ci] = kval.replace(/\r?\n/g, '↵');
         }
-        while (cells.length && cells[cells.length - 1] === '') cells.pop();
-        if (cells.length) out.push(cells.join('\t'));
+        while (cells.length && cells[cells.length - 1] === '') { cells.pop(); kcells.pop(); }
+        if (cells.length) { out.push(cells.join('\t')); keys.push(kcells.join('\t')); }
       }
-      out.push('');
+      out.push(''); keys.push('');
     }
+    if (info && keyed) info.keys = keys;
     return out.join('\n');
   }
 
@@ -379,7 +396,7 @@ const Office = (() => {
   async function extract(kind, bytes, info) {
     const zip = Zip.open(bytes);
     if (kind === 'docx') return docx(zip, info);
-    if (kind === 'xlsx') return xlsx(zip);
+    if (kind === 'xlsx') return xlsx(zip, info);
     if (kind === 'pptx') return pptx(zip);
     throw new Error('unknown office kind');
   }
@@ -396,5 +413,5 @@ const Office = (() => {
     } catch (e) { }
     return null;
   }
-  return { extract, kindOf, shiftFormula };
+  return { extract, kindOf, shiftFormula, relFormula };
 })();

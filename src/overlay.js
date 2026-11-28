@@ -17,7 +17,7 @@ const OV = (() => {
     if (st.cache.has(key)) { const c = st.cache.get(key); st.cache.delete(key); st.cache.set(key, c); return c; }
     const pg = (await pages(side))[idx];
     const cv = document.createElement('canvas');
-    await pg.draw(cv, W / pg.w);
+    await pg.draw(cv, W / pg.w, { exact: true }); // 比較に使うので、描くたびに画素が変わらない描き方で（pdf.js の draw を参照）
     st.cache.set(key, cv);
     // 描画結果は10件まで、かつ合計 6000万画素（約240MB）までに抑える（大きな図面でメモリを使いすぎないように）
     const px = () => { let n = 0; for (const c of st.cache.values()) n += c.width * c.height; return n; };
@@ -30,9 +30,11 @@ const OV = (() => {
   const RES = { low: 1600, std: 2400, high: 4000 };
   function widthFor(pl, pr, max) {
     const w = Math.max(pl ? pl.w : 0, pr ? pr.w : 0);
-    return Math.round(Math.max(Math.min(900, max), Math.min(max, w * 2)));
+    return Math.round(Math.max(Math.min(900, max), Math.min(max, w * (max >= RES.high && !scanMode() ? 4 : 2))));
   }
   const renderWidth = (pl, pr) => widthFor(pl, pr, RES[Settings.get('ovRes')] || RES.std);
+  // （「精細」は、スキャン以外では 1pt を4画素まで細かく描く。A4・A3 でも、標準より細かい線・小さな文字の違いを拾える。
+  //  スキャンは元の画像より細かく描いても情報が増えないので、どの設定でも 1pt＝2画素まで）
   // 「標準」で描いた場合に対する倍率。許容幅や変更箇所のます目をこの倍率で換算し、解像度を変えても同じ実寸で判定する
   // （A4 などの小さなページは解像度の上限に届かないので、どの設定でも 1）
   const resFactor = (pl, pr) => renderWidth(pl, pr) / widthFor(pl, pr, RES.std);
@@ -83,6 +85,22 @@ const OV = (() => {
     return Math.max(0, k);
   }
 
+  /* 写真のような画像かどうか（白い紙に文字、ではないもの）。明るい画素（紙の白）が半分に満たなければ写真とみなす。
+     スキャン用の比べ方（白地に濃い文字があるかどうかの2段階のしきい値）と自動位置合わせは、紙の文書を前提にしている。
+     写真に使うと、明るい物が増えた・減ったことを見落とし（白 225 は「紙の白」230 に届かない）、位置合わせも合っている2枚をずらす */
+  function photoLike(cv) {
+    if (cv._photo !== undefined) return cv._photo;
+    const w = Math.min(160, cv.width), h = Math.max(1, Math.round(cv.height * w / cv.width)), c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(cv, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data; let light = 0;
+    for (let i = 0; i < d.length; i += 4) if ((d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8 >= 200) light++;
+    return (cv._photo = light < d.length / 4 * 0.5);
+  }
+  const photoPair = (cl, cr) => !!(cl && cr && photoLike(cl) && photoLike(cr));
+  // 劣化のない形式（PNG・BMP・GIF・WebP）の画像ファイルどうしで、大きさが同じ
+  const exactImages = (cl, cr) => S.every(s => s && s.kind === 'image' && /png|bmp|gif|webp/i.test(s.mime || '')) && cl.width === cr.width && cl.height === cr.height;
+  // ぴったり重なる（位置合わせの量が 0 の）劣化のない画像の組
+  const exactPair = (cl, cr, off) => !off[0] && !off[1] && !off[2] && exactImages(cl, cr);
   /* ---- pixel helpers ---- */
   /* 右画像を「中心で ang 度回転 → (dx,dy) 平行移動」して描く */
   function drawR(ctx, cv, dx, dy, ang) {
@@ -117,7 +135,12 @@ const OV = (() => {
     // スキャン画像は2段階のしきい値で比べる：片側に「はっきり濃い」画素（STRONG 未満）があり、
     // 反対側の近く（許容幅の中）に「薄くても」インク（WEAK 未満）が1つもないときだけ差分にする。
     // 縮小や回転で細い線が薄くなっても、消えたとは判定しない（大きな図面のスキャンで誤検出が多発するのを防ぐ）
-    const scan = scanMode() && tol, STRONG = 170, WEAK = Math.min(250, STRONG + thr);
+    const scan = scanMode() && tol && !photoPair(cl, cr) && !exactPair(cl, cr, [o.dx, o.dy, o.ang]), STRONG = 170, WEAK = Math.min(250, STRONG + thr);
+    // 両方にインクがある画素（相手側も INK より濃い）は、濃さの差が 1.5 倍を超えたときだけ差分にする。
+    // 同じ文字でも、細い線（明朝体の横線など、太さ1画素ほど）の縁の濃さは描くたびにわずかに揺れることがあり（差は 60〜70 ほど）、
+    // 既定のしきい値（60）をわずかに超えて「変わっていない文字に枠が出る」ため。片側にしかない線・文字は、これまでどおりのしきい値で拾う
+    // （画像ファイルどうしは、読むたびに画素が揺れることはないので、この緩和はしない。文字の色を濃くした、のような変更を拾うため）
+    const INK = 200, thr2 = S.every(s => s && s.kind === 'image') ? thr : Math.round(thr * 1.5);
     const mf = async g => { let o = g; for (let k = 0; k < rad; k++) { o = minFilter(o, W, H); await sleep(0); } return o; };
     const aMin = tol ? await mf(a) : a, bMin = tol ? await mf(b) : b;
     const img = new ImageData(W, H), d = img.data, mask = new Uint8Array(W * H); // mask: 1=左だけ 2=右だけ 3=色が変わった
@@ -126,7 +149,9 @@ const OV = (() => {
     let cm = null;
     if (col) {
       cm = new Uint8Array(W * H);
-      const da = ca.d, db = cb.d, T = Math.max(40, thr), T2 = T * T * 9;
+      // 色のしきい値は、明るさのしきい値の 0.6 倍（既定で 36）。同じにすると、紫 (165,77,202) → えんじ (171,62,103) のように、
+      // 明るさが近く色あいだけが変わった図形を、既定の感度で見落とす
+      const da = ca.d, db = cb.d, T = Math.max(24, thr * 0.6), T2 = T * T * 9;
       const cdist = (p, i, q, k) => { const dr = p[i] - q[k], dg = p[i + 1] - q[k + 1], dbb = p[i + 2] - q[k + 2]; return dr * dr * 2 + dg * dg * 4 + dbb * dbb * 3; };
       const near = (p, i, q, x, y) => {
         for (let yy = Math.max(0, y - rad); yy <= Math.min(H - 1, y + rad); yy++) for (let xx = Math.max(0, x - rad); xx <= Math.min(W - 1, x + rad); xx++) if (cdist(p, i, q, (yy * W + xx) * 4) <= T2) return true;
@@ -157,8 +182,8 @@ const OV = (() => {
       for (let x = 0; x < W; x++, j++) {
         const ga = a[j], gb = b[j], k = j * 4;
         if (ga < 200 || gb < 200) ink++;
-        if (scan ? (ga < STRONG && bMin[j] >= WEAK) : (ga + thr < bMin[j])) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; mask[j] = 1; changed++; grid[gy + (x / CELL | 0)]++; }
-        else if (scan ? (gb < STRONG && aMin[j] >= WEAK) : (gb + thr < aMin[j])) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; mask[j] = 2; changed++; grid[gy + (x / CELL | 0)]++; }
+        if (scan ? (ga < STRONG && bMin[j] >= WEAK) : (ga + (bMin[j] < INK ? thr2 : thr) < bMin[j])) { d[k] = 229; d[k + 1] = 50; d[k + 2] = 45; mask[j] = 1; changed++; grid[gy + (x / CELL | 0)]++; }
+        else if (scan ? (gb < STRONG && aMin[j] >= WEAK) : (gb + (aMin[j] < INK ? thr2 : thr) < aMin[j])) { d[k] = 26; d[k + 1] = 115; d[k + 2] = 232; mask[j] = 2; changed++; grid[gy + (x / CELL | 0)]++; }
         else if (cm && cm[j]) { d[k] = 156; d[k + 1] = 54; d[k + 2] = 181; mask[j] = 3; changed++; grid[gy + (x / CELL | 0)]++; }
         else { const m = Math.min(ga, gb), v = faint ? 255 - ((255 - m) * 0.32 | 0) : m; d[k] = d[k + 1] = d[k + 2] = v; }
         d[k + 3] = 255;
@@ -185,7 +210,7 @@ const OV = (() => {
       regions.push({ x: x0 * CELL - 6, y: y0 * CELL - 6, w: (x1 - x0 + 1) * CELL + 12, h: (y1 - y0 + 1) * CELL + 12 });
     }
     regions.sort((p, q) => (Math.abs(p.y - q.y) < 30 ? p.x - q.x : p.y - q.y));
-    return { img, mask, W, H, changed, ink, regions };
+    return { img, mask, W, H, changed, ink, regions, aw: cl.width, ah: cl.height, cw: cr.width, ch: cr.height, scan };
   }
 
   /* 3x3 minimum filter (= ink dilation by 1px) */
@@ -210,6 +235,7 @@ const OV = (() => {
   /* 自動位置合わせ：平行移動と回転（±1.2°）を推定して [dx, dy, ang] を返す */
   async function autoAlign(cl, cr) {
     const W2 = Math.max(cl.width, cr.width), H2 = Math.max(cl.height, cr.height);
+    if (W2 < 64 || H2 < 64) return [0, 0, 0];
     const ink = (cv, f, ang) => {
       const w = Math.ceil(W2 / f), h = Math.ceil(H2 / f);
       const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -369,8 +395,16 @@ const OV = (() => {
       if (boxes) drawBoxesOn(c, v.regions, v.regIdx, v.noteIds);
     });
   }
+  const pctText = p => p < 0.01 ? '0.01%未満' : (p >= 100 ? '100' : p >= 10 ? p.toFixed(1) : p.toFixed(2)) + '%';
   function resultHtml(res, autoMsg) {
-    const pct = res.ink ? res.changed / res.ink * 100 : 0;
+    const pct = res.ink ? Math.min(100, res.changed / res.ink * 100) : 0;
+    // 見落としやすい場合の注意：スキャンは、ずれを許す分だけ小さな文字の違いを拾えない。Word・Excel などは元の見た目ではない
+    const notes = [];
+    if (res.scan) notes.push('スキャンの比較では、小さな文字1字の違い（数字の 8 と 9 など）に枠が付かないことがあります。大事な数字は「並べて表示」「点滅」でも確かめてください');
+    const ex = [0, 1].filter(i => S[i] && !['pdf', 'image'].includes(S[i].kind));
+    if (ex.length) notes.push(`${ex.map(i => i ? '右' : '左').join('・')}は、文書から取り出した文字を並べた画像です（元の見た目ではありません）。中身の違いはテキスト比較で確かめてください`);
+    if (res.W && res.cw && res.ch && ((res.aw > res.ah * 1.15 && res.ch > res.cw * 1.15) || (res.ah > res.aw * 1.15 && res.cw > res.ch * 1.15))) notes.unshift('左右でページの向き（縦・横）が違います。90°回った文書は、重ね合わせでは合わせられません（向きをそろえた文書で比べてください）');
+    autoMsg += notes.map(t => `<br><span class="muted" style="color:#8a5a00">※ ${t}</span>`).join('');
     return (res.regions.length
       ? `<b style="color:#b42318">${res.regions.length} 箇所</b>の変更を検出<br><span class="muted">変化量: ${pct.toFixed(2)}%（文字・図の部分に対する割合）</span>`
       : (res.changed ? `<b>目立った変更はありません</b><br><span class="muted">わずかな差 ${pct.toFixed(3)}%（位置ずれや描画の違い）</span>` : '<b style="color:#21752f">✓ 差異は見つかりませんでした</b>')) + autoMsg;
@@ -390,11 +424,19 @@ const OV = (() => {
     const key = `${l}:${r}`;
     let off = [0, 0, 0], autoMsg = '';
     if (st.align.has(key)) off = st.align.get(key);
+    else if (cl && cr && scanMode() && photoPair(cl, cr)) {
+      st.align.set(key, off);
+      autoMsg = '<br><span class="muted">写真のような画像のため、自動の位置合わせはしていません（ずれているときは「自動位置合わせ」を押してください）</span>';
+    }
     else if (cl && cr && scanMode()) {
       off = st.slots ? await autoAlign(cl, cr) : await withBusy('スキャン画像の位置を合わせています…', () => autoAlign(cl, cr));
       if (stale()) return null;
       st.align.set(key, off);
-      autoMsg = `<br><span class="muted">スキャン画像のため自動で位置合わせしました（X ${off[0]} / Y ${off[1]}px${off[2] ? ` / 回転 ${off[2]}°` : ''}）</span>`;
+      autoMsg = `<br><span class="muted">${S.every(s => s && s.kind === 'image') ? '画像' : 'スキャン画像'}のため自動で位置合わせしました（X ${off[0]} / Y ${off[1]}px${off[2] ? ` / 回転 ${off[2]}°` : ''}）</span>`;
+      // 画面キャプチャや書き出した図など、同じ大きさでぴったり重なる画像ファイルどうしは、紙のスキャンではない。
+      // スキャン用の比べ方（文字や線が「あるか・ないか」だけを見る）だと、文字の色を濃くした、のような変更を見落とすので、
+      // 濃さの違いも見る、ふつうの比べ方にする（diffImage の exactPair。ずれの許容はそのまま：書き出し直した図の 1px のずれは拾わない）
+      if (exactPair(cl, cr, off)) autoMsg = '<br><span class="muted">同じ大きさでぴったり重なる画像なので、色の濃さの違いも拾う比べ方にしています</span>';
     }
     const [dx, dy, ang] = off;
     let res = null;
@@ -504,9 +546,12 @@ const OV = (() => {
   }
   const EMPTY = '<div class="pv-empty" style="color:#f2f4f6">左右にPDFまたは画像を読み込むと、ページを重ねて変更箇所を検出します<br><span style="font-size:12.5px">スキャン画像（PNG/JPEG）同士や、PDFとスキャン画像の比較にも使えます</span></div>';
 
+  const BINARY = '<div class="pv-empty" style="color:#f2f4f6">バイナリとして読み込んだファイルは、重ね合わせでは比べられません<br><span style="font-size:12.5px">「テキスト」タブで、中身（16進表示）の違いを確かめられます</span></div>';
+  const hasBinary = () => S.some(s => s && s.kind === 'binary');
   async function update() {
     st.dirty = false; stopBlink();
     const gen = ++st.gen;
+    if (hasBinary()) { dropSlots(); st.cur = null; view.innerHTML = BINARY; $('#ovStats').textContent = '—'; $('#ovMatchInfo') && ($('#ovMatchInfo').textContent = ''); return; }
     const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
     if (gen !== st.gen) return;
     selectPages(pl, pr);
@@ -541,7 +586,7 @@ const OV = (() => {
     st.slots = pairs.map((p, k) => {
       const el = document.createElement('div'); el.className = 'ov-page'; el.dataset.k = k;
       const head = document.createElement('div'); head.className = 'ov-pghead';
-      head.innerHTML = `<span>${pairLabel(p)}</span>` + (p.l < 0 ? '<span class="tag add">右で追加</span>' : p.r < 0 ? '<span class="tag del">左から削除</span>' : '');
+      head.innerHTML = `<span>${pairLabel(p)}</span>` + (p.l < 0 ? '<span class="tag add">右で追加</span>' : p.r < 0 ? '<span class="tag del">右で削除</span>' : '');
       const body = document.createElement('div'); body.className = 'pair';
       // まだ描いていないページは、ページの大きさの仮の枠で場所を取っておく
       const pgL = pl && p.l >= 0 ? pl[p.l] : null, pgR = pr && p.r >= 0 ? pr[p.r] : null, pg = pgL || pgR;
@@ -677,7 +722,7 @@ const OV = (() => {
   }
   function setScroll(on) {
     st.scroll = on; Settings.set('ovScroll', on);
-    $$('#ovViewSw button').forEach(b => b.classList.toggle('on', (b.dataset.v === 'scroll') === on));
+    $$('#ovViewSw button').forEach(b => setOn(b, (b.dataset.v === 'scroll') === on));
     update();
   }
   $$('#ovViewSw button').forEach(b => b.onclick = () => setScroll(b.dataset.v === 'scroll'));
@@ -714,7 +759,12 @@ const OV = (() => {
   function gotoRegion(d) {
     const v = st.cur;
     if ((st.mode !== 'diff' && st.mode !== 'side') || !v || !v.regions.length) return toast('このページに変更箇所はありません');
-    selectRegion(v, (v.regIdx + d + v.regions.length) % v.regions.length, true);
+    const n = v.regions.length, to = v.regIdx + d;
+    if (v.regIdx >= 0 && (to >= n || to < 0)) {
+      const more = Math.max($('#ovLPage').options.length, $('#ovRPage').options.length) > 2 ? '。ほかのページの変更は、ページを送るか「全ページの差分を調べる」で確かめてください' : '';
+      toast(d > 0 ? `このページの変更箇所はここまでです（最初の箇所に戻りました）${more}` : `このページの最初の変更箇所です（最後の箇所に移りました）${more}`, false, 5000);
+    }
+    selectRegion(v, (to + n) % n, true);
   }
 
   // 変更箇所を選ぶ（枠を太くし、右のパネルの入力欄をその箇所にする）。scroll なら表示位置も合わせる
@@ -773,7 +823,7 @@ const OV = (() => {
     const key = `${p.l}:${p.r}`;
     let off = st.align.get(key);
     if (!off) {
-      off = scanMode() ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null;
+      off = scanMode() && !photoPair(a, b) ? await autoAlign(a, b) : [0, 0, 0]; if (stop()) return null;
       if (fk !== fileKeys()) return null; // 途中でファイルが変わった：位置合わせの結果を、新しいファイルの組に残さない
       if (scanMode()) st.align.set(key, off);
     }
@@ -812,6 +862,7 @@ const OV = (() => {
   }
   async function scan() {
     if (st.scanning) { st.scanning = false; return; }
+    if (hasBinary()) return toast('バイナリとして読み込んだファイルは、重ね合わせでは比べられません');
     const pl = await pages(0).catch(() => null), pr = await pages(1).catch(() => null);
     if (!pl || !pr) return toast('左右に文書を読み込んでください');
     const res = $('#ovScanRes'), btn = $('#ovScan');
@@ -832,8 +883,16 @@ const OV = (() => {
       (adds ? `<br><span style="color:#1a5fb4">追加されたページ: <b>${adds}</b></span>` : '') + (dels ? `<br><span style="color:#b42318">削除されたページ: <b>${dels}</b></span>` : '') +
       (pl.length !== pr.length && !PageMatch.ready() ? `<br><span style="color:#b42318">ページ数が違います（左 ${pl.length} / 右 ${pr.length}）</span>` : '') + '</div>' +
       `<table class="scan-table"><tr><th>左</th><th>右</th><th>箇所</th><th style="width:45%">変化量</th></tr>` +
-      rows.map((r, k) => `<tr data-k="${k}"><td>${pg(r.l)}</td><td>${pg(r.r)}</td><td>${r.kind === 'add' ? '<b style="color:#1a5fb4">追加</b>' : r.kind === 'del' ? '<b style="color:#b42318">削除</b>' : r.regs ? `<b style="color:#b42318">${r.regs}</b>` : '<span class="muted">0</span>'}</td><td>${r.kind === 'pair' ? `<div class="bar" style="width:${r.regs ? Math.max(3, r.pct / mx * 100) : 0}%"></div>` : ''}</td></tr>`).join('') + '</table>';
-    $$('tr[data-k]', res).forEach(tr => tr.onclick = () => { const r = rows[+tr.dataset.k]; st.l = r.l; st.r = r.r; setMode('diff'); });
+      rows.map((r, k) => `<tr data-k="${k}"><td>${pg(r.l)}</td><td>${pg(r.r)}</td><td>${r.kind === 'add' ? '<b style="color:#1a5fb4">追加</b>' : r.kind === 'del' ? '<b style="color:#b42318">削除</b>' : r.regs ? `<b style="color:#b42318">${r.regs}</b>` : '<span class="muted">0</span>'}</td><td>${r.kind === 'pair' ? `<div class="barw"><span class="bt"><span class="bar" style="width:${r.regs ? Math.max(3, r.pct / mx * 100) : 0}%"></span></span>${r.regs ? `<span class="pv">${pctText(r.pct)}</span>` : ''}</div>` : ''}</td></tr>`).join('') + '</table>';
+    const open = tr => { const r = rows[+tr.dataset.k]; st.l = r.l; st.r = r.r; setMode('diff'); };
+    $$('tr[data-k]', res).forEach(tr => {
+      // 行は Tab で選べ、Enter・Space で開ける
+      tr.tabIndex = 0; tr.title = 'このページの組を表示'; tr.onclick = () => open(tr);
+      tr.onkeydown = e => { if ((e.key === 'Enter' || e.key === ' ') && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); e.stopPropagation(); open(tr); } };
+    });
+    // 結果は画面の下のほうに出るので、見える所まで送り、読み上げにも伝える
+    res.scrollIntoView({ block: 'nearest' });
+    $('#busyLive').textContent = `${stopped ? '途中で中止しました。' : '全ページを調べました。'}変更ありのページ ${changedPages} / ${rows.filter(r => r.kind === 'pair').length}${adds ? `、追加されたページ ${adds}` : ''}${dels ? `、削除されたページ ${dels}` : ''}`;
   }
 
   /* ---- レポート：全ページの差分画像（枠と番号付き）と変更箇所の一覧 ---- */
@@ -868,13 +927,15 @@ const OV = (() => {
     if (!o) return;
     const scope = o.scope, maxW = Report.width(o.quality), sideW = Math.round(maxW * 0.7);
     const nm = side => esc(S[side].name);
-    let html;
+    let html, stopped = false;
     await withBusy('レポートを作成しています…', async () => {
       const pairs = await pagePairs(pl, pr), rows = [], secs = [];
       const pg = v => v < 0 ? '—' : v + 1;
       for (let k = 0; k < pairs.length; k++) {
+        if (stopped) return;
         $('#busyMsg').textContent = `レポートを作成しています… ${k + 1} / ${pairs.length}`;
-        const r = await analyzePair(pl, pr, pairs[k], () => false);
+        const r = await analyzePair(pl, pr, pairs[k], () => stopped);
+        if (!r || stopped) return;
         rows.push(r);
         const title = `左 ${pg(r.l)} ページ ／ 右 ${pg(r.r)} ページ`;
         if (r.kind !== 'pair') {
@@ -883,7 +944,7 @@ const OV = (() => {
           const cap = r.kind === 'add' ? '右だけにあるページ（追加されたページ）' : '左だけにあるページ（削除されたページ）';
           const fig = `<figure><img src="${Report.jpeg(cv, o.layout === 'diff' ? maxW : sideW)}" alt=""><figcaption>${side ? '右' : '左'}：${nm(side)}　${idx + 1} ページ<br>${cap}</figcaption></figure>`;
           const body = o.layout === 'diff' ? fig : `<div class="pair">${side ? '<div class="none">（対応するページなし）</div>' + fig : fig + '<div class="none">（対応するページなし）</div>'}</div>`;
-          secs.push(`<h2 id="p${k}">${title}　<span class="tag ${r.kind}">${r.kind === 'add' ? '右で追加' : '左から削除'}</span></h2>${body}`);
+          secs.push(`<h2 id="p${k}">${title}　<span class="tag ${r.kind}">${r.kind === 'add' ? '右で追加' : '右で削除'}</span></h2>${body}`);
         } else if (scope === 'all' || r.regs) {
           const res = r.res, parts = [], ids = res.regions.map(g => Notes.ovId(r.l, r.r, g, res.W, res.H));
           const offTxt = r.off && (r.off[0] || r.off[1] || r.off[2]) ? `。右の位置合わせ：X ${r.off[0]} / Y ${r.off[1]}px${r.off[2] ? ` / 回転 ${r.off[2]}°` : ''}` : '';
@@ -902,10 +963,10 @@ const OV = (() => {
             ca.width = ca.height = cb.width = cb.height = 0;
           }
           const nst = v => !v || !v.st ? '<span class="nst none">未確認</span>' : v.st === 'ok' ? '<span class="nst ok">確認済</span>' : '<span class="nst ask">要確認</span>';
-          const list = o.regions ? res.regions.map((g, i) => { const v = Notes.get(ids[i]); return `<tr><td class="num">${i + 1}</td><td>横 ${Math.round(g.x / res.W * 100)}%・縦 ${Math.round(g.y / res.H * 100)}%</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td><td>${nst(v)}</td><td>${v && v.text ? esc(v.text).replace(/\n/g, '<br>') + (v.by || v.at ? `<div class="by">${esc(v.by)}${v.by ? '・' : ''}${v.at ? fmtDate(v.at) : ''}</div>` : '') : ''}</td></tr>`; }).join('') : '';
+          const list = o.regions ? res.regions.map((g, i) => { const v = Notes.get(ids[i]); return `<tr><td class="num">${i + 1}</td><td>${regionPos(g, res)}</td><td>${Math.round(g.w / res.W * 100)}% × ${Math.round(g.h / res.H * 100)}%</td><td>${nst(v)}</td><td>${v && v.text ? esc(v.text).replace(/\n/g, '<br>') + (v.by || v.at ? `<div class="by">${esc(v.by)}${v.by ? '・' : ''}${v.at ? fmtDate(v.at) : ''}</div>` : '') : ''}</td></tr>`; }).join('') : '';
           r.nOk = ids.filter(id => (Notes.get(id) || {}).st === 'ok').length; r.nAsk = ids.filter(id => (Notes.get(id) || {}).st === 'ask').length;
           secs.push(`<h2 id="p${k}">${title}　${r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}</h2>` + parts.join('') +
-            (list ? `<table class="list"><thead><tr><th style="width:50px">番号</th><th style="width:22%">位置（ページの左上から）</th><th style="width:18%">大きさ</th><th style="width:70px">確認</th><th>コメント</th></tr></thead><tbody>${list}</tbody></table>` : ''));
+            (list ? `<table class="list"><thead><tr><th style="width:50px">番号</th><th style="width:22%">位置（枠の中心。ページの左上から）</th><th style="width:18%">大きさ</th><th style="width:70px">確認</th><th>コメント</th></tr></thead><tbody>${list}</tbody></table>` : ''));
         }
         delete r.res;
         await sleep(0);
@@ -913,17 +974,18 @@ const OV = (() => {
       const nPair = rows.filter(r => r.kind === 'pair').length, nChg = rows.filter(r => r.regs).length;
       const nAdd = rows.filter(r => r.kind === 'add').length, nDel = rows.filter(r => r.kind === 'del').length;
       const summary = !o.summary ? '' : `<h2>ページの一覧</h2><table class="list"><thead><tr><th class="num">左</th><th class="num">右</th><th>結果</th><th class="num">変化量</th></tr></thead><tbody>` +
-        rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">左から削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}${r.nOk ? ` <span class="nst ok">確認済 ${r.nOk}</span>` : ''}${r.nAsk ? ` <span class="nst ask">要確認 ${r.nAsk}</span>` : ''}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
+        rows.map((r, k) => `<tr><td class="num">${pg(r.l)}</td><td class="num">${pg(r.r)}</td><td>${r.kind === 'add' ? '<span class="tag add">右で追加</span>' : r.kind === 'del' ? '<span class="tag del">右で削除</span>' : r.regs ? `<span class="tag diff">${r.regs} 箇所</span>` : '<span class="tag same">変更なし</span>'}${r.nOk ? ` <span class="nst ok">確認済 ${r.nOk}</span>` : ''}${r.nAsk ? ` <span class="nst ask">要確認 ${r.nAsk}</span>` : ''}</td><td class="num">${r.kind === 'pair' ? r.pct.toFixed(2) + '%' : ''}</td></tr>`).join('') + '</tbody></table>';
       const cond = [`差分の感度 ${$('#ovThr').value}（5〜160、大きいほど敏感）`, `ずれの許容 ${$('#ovTolPx').value}px`, colorCheck() ? '色の違いも検出' : '色の違いは検出しない', `解像度 ${$('#ovRes').selectedOptions[0].textContent}`, PageMatch.enabled() ? 'ページの挿入・削除を自動で対応付け' : '同じページ番号どうしで比較'].join('、');
       html = Report.page({
         title: `重ね合わせレポート - ${S[0].name} / ${S[1].name}`, heading: '重ね合わせ比較レポート',
-        meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　左から削除 ${nDel} ページ` : ''}` + (o.cond ? `<br>比較条件: ${esc(cond)}` : '') +
+        meta: `<b>変更のあるページ ${nChg} / ${nPair}</b>${nAdd ? `　右で追加 ${nAdd} ページ` : ''}${nDel ? `　右で削除 ${nDel} ページ` : ''}` + (o.cond ? `<br>比較条件: ${esc(cond)}` : '') +
           (o.files ? '' : `<br>左: ${nm(0)}　右: ${nm(1)}`),
         body: (o.files ? await Report.bothInfo() : '') + summary + secs.join(''),
         css: '.pair figure{margin:4px 0 14px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}.nst{font-weight:700;font-size:11.5px}.nst.ok{color:#1b5e20}.nst.ask{color:#c2410c}.nst.none{color:#999;font-weight:400}.by{color:#777;font-size:10.5px}'
       });
-    });
-    if (html) download(`重ね合わせレポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8');
+    }, { onCancel: () => { stopped = true; $('#busyMsg').textContent = '中止しています…'; } });
+    if (stopped) return toast('レポートの作成を中止しました');
+    if (html) { download(`重ね合わせレポート_${baseName(S[0].name)}.html`, html, 'text/html;charset=utf-8'); Unsaved.clear(); }
   }
   $('#ovReport').onclick = exportReport;
 
@@ -931,7 +993,7 @@ const OV = (() => {
   function showPanelFor(m) { $$('.ov-side [data-modes]').forEach(el => { el.hidden = !el.dataset.modes.split(' ').includes(m); }); }
   function setMode(m) {
     st.mode = m;
-    $$('#ovModes button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+    $$('#ovModes button').forEach(b => setOn(b, b.dataset.mode === m));
     showPanelFor(m);
     update();
   }
@@ -990,7 +1052,8 @@ const OV = (() => {
   };
   $('#ovOpacity').oninput = () => { if (st.mode === 'overlay') update(); };
   $('#ovSwipe').oninput = () => { if (st.mode === 'swipe') drawSwipes(); };
-  let thrT = 0; $('#ovThr').oninput = () => { clearTimeout(thrT); thrT = setTimeout(() => { if (st.mode === 'diff' || st.mode === 'side') update(); }, 150); };
+  const staleScan = () => { if (!st.scanning && $('#ovScanRes').innerHTML) $('#ovScanRes').innerHTML = '<span class="muted">設定を変えたので、前の結果を消しました。もう一度「全ページの差分を調べる」を押してください</span>'; };
+  let thrT = 0; $('#ovThr').oninput = () => { staleScan(); clearTimeout(thrT); thrT = setTimeout(() => { if (st.mode === 'diff' || st.mode === 'side') update(); }, 150); };
     // 並べて表示で差分を計算していなかったページがあれば計算し直す
   const sideNoRes = () => liveViews().some(v => v.side && !v.side.res);
   $('#ovBoxes').onchange = () => { if (st.mode === 'side' && sideNoRes()) update(); else drawBoxes(); };
@@ -999,13 +1062,17 @@ const OV = (() => {
   $('#ovBlinkMs').oninput = () => { $('#ovBlinkVal').textContent = (+$('#ovBlinkMs').value / 1000).toFixed(2); startBlink(); };
   $('#ovBlinkManual').onchange = () => { startBlink(); if (st.mode === 'blink') $('#ovStats').innerHTML = $('#ovBlinkManual').checked ? '画像をクリック（または Space）で左右を切り替えます' : '左右を交互に表示しています（変わった部分がちらつきます）。画像のクリックでも切り替えられます'; };
   $('#ovBlinkToggle').onclick = () => { if (st.blinkFrame) st.blinkFrame(); };
+  // OS の「動きを減らす」設定のときは、点滅を自動で始めない（手動の切り替えを初期値にする。チェックを外せば自動にできる）
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) $('#ovBlinkManual').checked = true;
   $('#ovFaint').onchange = () => update();
-  $('#ovColor').onchange = () => { st.cache && rcache.clear(); update(); };
+  $('#ovColor').onchange = () => { staleScan(); st.cache && rcache.clear(); update(); };
   let tolT = 0;
-  $('#ovTolPx').oninput = () => { $('#ovTolVal').textContent = $('#ovTolPx').value; clearTimeout(tolT); tolT = setTimeout(update, 150); };
+  $('#ovTolPx').oninput = () => { staleScan(); $('#ovTolVal').textContent = $('#ovTolPx').value; clearTimeout(tolT); tolT = setTimeout(update, 150); };
   const setOff = () => {
     st.dx = Math.round(+$('#ovDx').value || 0); st.dy = Math.round(+$('#ovDy').value || 0);
-    st.ang = Math.max(-10, Math.min(10, Math.round((+$('#ovRot').value || 0) * 100) / 100));
+    const angIn = +$('#ovRot').value || 0;
+    st.ang = Math.max(-10, Math.min(10, Math.round(angIn * 100) / 100));
+    if (Math.abs(angIn) > 10) { $('#ovRot').value = st.ang; toast('回転の補正は −10°〜10°の範囲です（傾きの補正用）。90°単位で向きが違う文書は、重ね合わせでは合わせられません', true, 7000); }
     st.align.set(pairKey(), [st.dx, st.dy, st.ang]);
     rcache.clear(); // ページ表示の変更箇所の枠（regionsFor）は位置合わせ量で変わる。覚えた結果を捨てて、次に開いたときに求め直す
     if (st.slots) { if (st.curSlot) redrawSlot(st.curSlot); } else update();
@@ -1049,7 +1116,7 @@ const OV = (() => {
 
   showPanelFor(st.mode);
   st.scroll = !!Settings.get('ovScroll');
-  $$('#ovViewSw button').forEach(b => b.classList.toggle('on', (b.dataset.v === 'scroll') === st.scroll));
+  $$('#ovViewSw button').forEach(b => setOn(b, (b.dataset.v === 'scroll') === st.scroll));
   // ページの対応付けを（必要なら裏で）調べ、終わったら、連動中なら右のページを左に対応するページへ合わせ直す
   async function refreshMatch() {
     const before = PageMatch.ready(), gen = st.gen;

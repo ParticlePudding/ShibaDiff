@@ -66,7 +66,7 @@ const PV = (() => {
     const a = st.ann[side];
     const any = Object.values(a).some(x => x && x.length);
     mem.set(annKey(side), a);
-    if (!persist()) return;
+    if (!persist()) { Unsaved.mark(); return; }
     if (any) store.set(annKey(side), a); else store.del(annKey(side));
   }
   const list = (side, i) => (st.ann[side][i] || (st.ann[side][i] = []));
@@ -150,7 +150,7 @@ const PV = (() => {
     if (observers[side]) observers[side].disconnect();
     sc.innerHTML = ''; st.sides[side] = null;
     if (st.sel && st.sel.side === side) st.sel = null;
-    $('.nm', col).textContent = S[side] ? S[side].name : (side ? '右' : '左') + '（未読込）';
+    $('.nm', col).textContent = S[side] ? showCtl(S[side].name) : (side ? '右' : '左') + '（未読込）';
     $('.pvTotal', col).textContent = '/ 0';
     if (!S[side]) { sc.innerHTML = `<div class="pv-empty">${side ? '右' : '左'}のファイルが読み込まれていません<br>上の欄にドロップしてください</div>`; return; }
     let pages;
@@ -208,6 +208,7 @@ const PV = (() => {
     try { const ok = await s.pg.draw(s.cv, scale); if (ok !== false) s.rendered = scale; }
     catch (e) { console.warn('render failed', e); }
     finally { s.busy = false; }
+    if (s.rendered && s.chgInfo && !s.chgSpot && s.chg.innerHTML && st.sides[side] === sd && st.showChg) { s.chg.innerHTML = chgSvg(s.chgInfo, side, sd.z, s.cv, s.pg); s.chgSpot = true; }
     if (s.pending) { s.pending = false; if (st.sides[side] === sd && s.visible) renderSlot(side, i); }
   }
 
@@ -233,15 +234,40 @@ const PV = (() => {
   // そのページの組（左右とも読み込み、反対側に対応するページがあるとき）
   function pairOf(side, i) { const p = pagePairs().find(q => (side ? q.r : q.l) === i); return p && p.l >= 0 && p.r >= 0 ? p : null; }
   const NCOL = { ok: '#2f9e44', ask: '#d9480f', '': '#f08c00' };
-  function chgSvg(info, side, z) {
+  const NLAB = { ok: '#237a35', ask: '#c9400c', '': '#b35f00' }; // 番号札の地の色（白い文字とのコントラスト比 4.5 以上）
+  /* 変更箇所の番号札を置く場所。枠の左上のすぐ上（既定）に置くと、上の行の文字を隠すことがあるので、ページの画像を見て、
+     文字や線のない場所を順に探す（枠の上 → 左 → 右 → 下 → 右上 → 右下）。どこも空いていなければ、いちばん空いている場所に置く。
+     cv：ページの画像、pw・ph：ページの大きさ（pt）、b：枠（pt）、lw・lh：札の大きさ（pt） */
+  function labelSpot(cv, pw, ph, b, lw, lh, gap) {
+    const def = [b.x, b.y - lh];
+    if (!cv || !cv.width || !cv.height) return def;
+    const cand = [def, [b.x - lw - gap, b.y], [b.x + b.w + gap, b.y], [b.x, b.y + b.h], [b.x + b.w - lw, b.y - lh], [b.x + b.w - lw, b.y + b.h]]
+      .filter(([x, y]) => x >= 0 && y >= 0 && x + lw <= pw && y + lh <= ph);
+    if (!cand.length) return def;
+    const k = cv.width / pw, ctx = cv.getContext('2d');
+    let best = def, bestInk = Infinity;
+    for (const c of cand) {
+      const x0 = Math.round(c[0] * k), y0 = Math.round(c[1] * k), w = Math.max(1, Math.min(cv.width - x0, Math.round(lw * k))), h = Math.max(1, Math.min(cv.height - y0, Math.round(lh * k)));
+      let d; try { d = ctx.getImageData(x0, y0, w, h).data; } catch (e) { return def; }
+      const step = Math.max(1, Math.floor(Math.min(w, h) / 24));
+      let ink = 0, n = 0;
+      for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) { const q = (y * w + x) * 4; n++; if (d[q] * 0.299 + d[q + 1] * 0.587 + d[q + 2] * 0.114 < 170) ink++; }
+      const r = n ? ink / n : 1;
+      if (r < 0.004) return c;
+      if (r < bestInk) { bestInk = r; best = c; }
+    }
+    return best;
+  }
+  function chgSvg(info, side, z, cv, pg) {
     const fs = 12 / z, sw = 2 / z, pad = 3 / z;
     return info.regions.map((g, k) => {
       const b = info.toPt(side, g), id = info.ids[k], nv = Notes.get(id), col = NCOL[nv ? nv.st : ''];
       const lab = `${k + 1}${nv && nv.st === 'ok' ? ' ✓' : nv && nv.st === 'ask' ? ' !' : ''}${nv && nv.text ? '  ' + (nv.text.length > 40 ? nv.text.slice(0, 40) + '…' : nv.text) : ''}`;
       const lw = Math.max(fs * 1.4, Array.from(lab).reduce((w, c) => w + (c.charCodeAt(0) > 255 ? fs : fs * 0.6), 0) + pad * 2), lh = fs * 1.45;
+      const [lx, ly] = pg ? labelSpot(cv, pg.w, pg.h, b, lw, lh, sw) : [b.x, b.y - lh];
       return `<g class="cb" data-k="${k}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-dasharray="${4 / z} ${2 / z}"/>` +
-        `<rect class="cb-lab" x="${b.x}" y="${b.y - lh}" width="${lw}" height="${lh}" rx="${pad}" fill="${col}"/>` +
-        `<text x="${b.x + pad}" y="${b.y - lh + fs * 1.1}" font-size="${fs}" fill="#fff" font-weight="700" font-family="BIZ UDPGothic,Meiryo,sans-serif">${esc(lab)}</text></g>`;
+        `<rect class="cb-lab" x="${lx}" y="${ly}" width="${lw}" height="${lh}" rx="${pad}" fill="${NLAB[nv ? nv.st : '']}"/>` +
+        `<text x="${lx + pad}" y="${ly + fs * 1.1}" font-size="${fs}" fill="#fff" font-weight="700" font-family="BIZ UDPGothic,Meiryo,sans-serif">${esc(lab)}</text></g>`;
     }).join('');
   }
   async function drawChanges(side, i) {
@@ -253,8 +279,8 @@ const PV = (() => {
     chgBusy++; chgBusySync();
     try { info = await OV.regionsFor(p.l, p.r); } finally { chgBusy--; chgBusySync(); }
     if (!info || st.sides[side] !== sd || !st.showChg) return;
-    s.chg.innerHTML = chgSvg(info, side, sd.z);
-    s.chgInfo = info;
+    s.chg.innerHTML = chgSvg(info, side, sd.z, s.rendered ? s.cv : null, s.pg);
+    s.chgInfo = info; s.chgSpot = !!s.rendered;
   }
   function redrawChanges() {
     for (const side of [0, 1]) { const sd = st.sides[side]; if (!sd) continue; sd.slots.forEach((s, i) => { if (!st.showChg) s.chg.innerHTML = ''; else if (s.visible) drawChanges(side, i); }); }
@@ -329,7 +355,10 @@ const PV = (() => {
     let drag = null;
     svg.addEventListener('pointerdown', async e => {
       if (e.button !== 0) return;
-      const tool = st.tool, p = pt(svg, e), target = e.target.closest('[data-i]');
+      // 注釈は svg の中の <g data-i>。svg の外側にあるページの枠（.pv-slot）も data-i（ページ番号）を持つので、closest('[data-i]') だと、
+      // 空白を押したときにページの枠に当たり、その番号の注釈を動かしたり消したりしてしまう
+      const hit = e.target.closest('g[data-i]'), target = hit && svg.contains(hit) ? hit : null;
+      const tool = st.tool, p = pt(svg, e);
       const arr = list(side, i);
       if (tool === 'select') {
         if (target) {
@@ -452,7 +481,13 @@ const PV = (() => {
     }, { passive: true });
     $('.pvPrev', col).onclick = () => goPage(side, currentPage(side).i - 1);
     $('.pvNext', col).onclick = () => goPage(side, currentPage(side).i + 1);
-    $('.pvPage', col).addEventListener('keydown', e => { if (e.key === 'Enter') { goPage(side, (parseInt(e.target.value, 10) || 1) - 1); e.target.blur(); } });
+    $('.pvPage', col).addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const sd = st.sides[side], v = e.target.value.normalize('NFKC').trim(), n = /^[0-9]+$/.test(v) ? +v : NaN;
+      if (sd && n >= 1 && n <= sd.slots.length) goPage(side, n - 1);
+      else if (sd) toast(`ページ番号は 1 〜 ${sd.slots.length} の数字で入れてください`);
+      e.target.blur(); if (sd) e.target.value = currentPage(side).i + 1;
+    });
     $('.pvRot', col).onclick = () => {
       if (!S[side]) return;
       const cp = currentPage(side).i;
@@ -480,14 +515,17 @@ const PV = (() => {
   [0, 1].forEach(side => ro.observe(scrollEl(side)));
   function relayoutKeep(side) {
     if (!st.sides[side]) return;
+    const sc = scrollEl(side), wide = sc.scrollWidth > sc.clientWidth + 1, fx = wide ? (sc.scrollLeft + sc.clientWidth / 2) / sc.scrollWidth : 0.5;
     const cp = currentPage(side); layout(side);
-    const s = st.sides[side].slots[cp.i].slot; scrollEl(side).scrollTop = s.offsetTop - PEEK + cp.f * (s.offsetHeight + 14);
+    const s = st.sides[side].slots[cp.i].slot; sc.scrollTop = s.offsetTop - PEEK + cp.f * (s.offsetHeight + 14);
+    // 横も、見ていた場所が中央に残るようにする（拡大・縮小で、見ていた所が画面の外へ行かないように）
+    if (sc.scrollWidth > sc.clientWidth + 1) sc.scrollLeft = Math.max(0, fx * sc.scrollWidth - sc.clientWidth / 2);
   }
 
   /* ---------- toolbar ---------- */
   function setTool(t) {
     st.tool = t; wrap.dataset.tool = t;
-    $$('#toolGrp .toolbtn').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    $$('#toolGrp .toolbtn').forEach(b => setOn(b, b.dataset.tool === t));
     if (st.toolColor[t]) { st.color = st.toolColor[t]; markSw(); }
     if (t !== 'select') select(null);
   }
@@ -546,6 +584,7 @@ const PV = (() => {
     const nn = Object.keys(notes).length;
     download(`注釈_${(withAnn.length ? withAnn : files).map(f => baseName(f.name)).join('_')}.json`, JSON.stringify({ app: 'shibadiff', version: 2, savedAt: new Date().toISOString(), author: Settings.get('author') || '', files, notes }, null, 1), 'application/json');
     if (nn) toast(`注釈と、変更点のコメント ${nn} 件を保存しました`);
+    Unsaved.clear();
   };
   $('#annImport').onclick = () => $('#annFile').click();
   $('#annFile').onchange = async e => {
@@ -553,7 +592,7 @@ const PV = (() => {
     try {
       const data = JSON.parse(await f.text());
       if (!data || !Array.isArray(data.files)) throw new Error('ShibaDiff の注釈ファイルの形式ではありません');
-      let applied = 0;
+      let applied = 0, dropped = 0; const wasUnsaved = Unsaved.on;
       const answered = [null, null]; // 文書が違う側に「読み込みますか」と聞いた答え（聞いていなければ null）
       for (const fe of data.files || []) {
         if (!fe || typeof fe !== 'object') continue;
@@ -569,6 +608,7 @@ const PV = (() => {
         }
         if (side === undefined) continue;
         pushHist(side); st.ann[side] = cleanAnnMap(fe.annotations); st.rot[side] = [0, 90, 180, 270].includes(fe.rot) ? fe.rot : 0; saveAnn(side); saveRot(side);
+        { const cnt = m => Object.values(m && typeof m === 'object' ? m : {}).reduce((n, x) => n + (Array.isArray(x) ? x.length : 0), 0); dropped += Math.max(0, cnt(fe.annotations) - cnt(st.ann[side])); }
         applied++; await build(side);
       }
       // 変更点のコメント：左右とも読み込んでいて、左右とも注釈ファイルを保存したときの文書と同じとき（名前で照合。左右の向きも同じ）は、
@@ -594,9 +634,10 @@ const PV = (() => {
         if (ok) nn = Notes.merge(data.notes);
       }
       const withAnn = (data.files || []).filter(fe => fe && fe.annotations && Object.values(fe.annotations).some(x => Array.isArray(x) && x.length)).length;
-      const skipped = nFile && !both ? `（変更点のコメント ${nFile} 件は、左右とも開いてから読み込んでください）` : '';
+      const skipped = (nFile && !both ? `（変更点のコメント ${nFile} 件は、左右とも開いてから読み込んでください）` : '') + (dropped ? `（注釈 ${fmtNum(dropped)} 個は、形式が正しくないか、1ページあたりの上限 5,000 個を超えたため読み込んでいません）` : '');
+      if (!wasUnsaved) Unsaved.clear(); // ファイルから読み込んだだけなら「保存していない書き込み」ではない
       toast(applied || nn ? `読み込みました：注釈 ${withAnn} ファイル分${nn ? `・変更点のコメント ${nn} 件` : ''}${skipped}` : '対応するファイルが見つかりませんでした（注釈ファイルの文書と、開いている文書が違います）' + skipped, !(applied || nn));
-    } catch (err) { toast('注釈ファイルを読み込めません: ' + err.message, true); }
+    } catch (err) { console.warn(err); toast('注釈ファイルを読み込めません。' + (/[ぁ-んァ-ヶ]/.test(err && err.message || '') ? err.message : 'ShibaDiff の注釈ファイル（JSON）ではないか、中身が壊れています'), true); }
   };
 
   function svgImage(pg, arr) {
@@ -643,7 +684,7 @@ const PV = (() => {
     const has = (side, i) => i >= 0 && ((st.ann[side][i] || []).length > 0 || hasNote(side, i));
     let html;
     await withBusy('レポートを作成しています…', async () => {
-      const secs = [], rows = [];
+      const secs = [], rows = []; let chgN = 0;
       // 1ページ分の画像（注釈込み）・注釈の数・付箋
       const one = async (side, i) => {
         const sd = st.sides[side], arr = st.ann[side][i] || [], pg = sd.pages[i];
@@ -658,10 +699,13 @@ const PV = (() => {
             const items = [];
             info.regions.forEach((g, n) => {
               const b = info.toPt(side, g), nv = Notes.get(info.ids[n]), colr = NCOL[nv ? nv.st : ''];
-              c.save(); c.strokeStyle = colr; c.lineWidth = Math.max(2, fs / 6); c.setLineDash([fs / 2, fs / 4]); c.strokeRect(b.x * k, b.y * k, b.w * k, b.h * k); c.restore();
               const lab = String(n + 1) + (nv && nv.st === 'ok' ? ' ✓' : nv && nv.st === 'ask' ? ' !' : '');
               c.font = `bold ${fs}px sans-serif`; const tw = c.measureText(lab).width + fs * 0.6;
-              c.fillStyle = colr; c.fillRect(b.x * k, b.y * k - fs * 1.4, tw, fs * 1.4); c.fillStyle = '#fff'; c.fillText(lab, b.x * k + fs * 0.3, b.y * k - fs * 0.35);
+              // 番号札は、文字のない場所に置く（枠を描く前に場所を決める。先に描いた枠・札とも重ならない）
+              const [lx, ly] = labelSpot(cv, pg.w, pg.h, b, tw / k, fs * 1.4 / k, Math.max(2, fs / 6) / k).map(v => v * k);
+              c.save(); c.strokeStyle = colr; c.lineWidth = Math.max(2, fs / 6); c.setLineDash([fs / 2, fs / 4]); c.strokeRect(b.x * k, b.y * k, b.w * k, b.h * k); c.restore();
+              c.fillStyle = NLAB[nv ? nv.st : '']; c.fillRect(lx, ly, tw, fs * 1.4); c.fillStyle = '#fff'; c.fillText(lab, lx + fs * 0.3, ly + fs * 1.05);
+              chgN++;
               if (nv) items.push(`<li><b>${n + 1}</b> ${nv.st === 'ok' ? '<span class="nst ok">確認済</span>' : nv.st === 'ask' ? '<span class="nst ask">要確認</span>' : ''} ${esc(nv.text || '').replace(/\n/g, '<br>')}${nv.by ? `<span class="by">（${esc(nv.by)}）</span>` : ''}</li>`);
             });
             if (items.length && side === 1) chgList = `<div class="notes"><b>変更箇所のコメント</b><ul class="chg">${items.join('')}</ul></div>`;
@@ -706,11 +750,13 @@ const PV = (() => {
       html = Report.page({
         title: `注釈レポート - ${avail.map(s => S[s].name).join(' / ')}`, heading: 'ページ表示・注釈レポート',
         meta: `<b>注釈 ${total} 件</b>（${avail.map(s => s ? '右' : '左').join('・')}の文書）` + (o.files ? '' : '<br>' + avail.map(s => `${s ? '右' : '左'}: ${esc(S[s].name)}`).join('　')),
-        body: (o.files ? await Report.bothInfo() : '') + list + (secs.length ? secs.join('') : '<p>載せるページはありません。</p>'),
-        css: '.pair figure{margin:4px 0 6px}.notes{font-size:12.5px;margin-bottom:12px}ul.chg{list-style:none;padding-left:4px;margin:4px 0}ul.chg b{display:inline-block;min-width:20px}.nst{font-weight:700}.nst.ok{color:#1b5e20}.nst.ask{color:#c2410c}.by{color:#777;font-size:11px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
+        body: (o.files ? await Report.bothInfo() : '') + list +
+          (chgN ? '<p class="chg-legend">破線の枠は、左右のページを重ねて比べたときに、見た目が違っていた所です（番号は、そのページの中の変更箇所の番号）。枠の色：<span style="color:#b35f00">■ 橙＝未確認</span>　<span style="color:#2f9e44">■ 緑（✓）＝確認済</span>　<span style="color:#d9480f">■ 赤橙（!）＝要確認</span></p>' : '') +
+          (secs.length ? secs.join('') : '<p>載せるページはありません。</p>'),
+        css: '.chg-legend{font-size:12.5px;margin:6px 0 10px}.pair figure{margin:4px 0 6px}.notes{font-size:12.5px;margin-bottom:12px}ul.chg{list-style:none;padding-left:4px;margin:4px 0}ul.chg b{display:inline-block;min-width:20px}.nst{font-weight:700}.nst.ok{color:#1b5e20}.nst.ask{color:#c2410c}.by{color:#777;font-size:11px}.none{border:1px dashed #bbb;color:#888;display:flex;align-items:center;justify-content:center;min-height:120px;margin:4px 0 14px}'
       });
     });
-    if (html) download(`注釈レポート_${baseName(S[avail[0]].name)}.html`, html, 'text/html;charset=utf-8');
+    if (html) { download(`注釈レポート_${baseName(S[avail[0]].name)}.html`, html, 'text/html;charset=utf-8'); Unsaved.clear(); }
   };
   $('#pvPrint').onclick = async () => {
     const avail = [0, 1].filter(s => st.sides[s]);
@@ -739,6 +785,7 @@ const PV = (() => {
     const cleanup = () => { area.innerHTML = ''; urls.forEach(u => URL.revokeObjectURL(u)); window.removeEventListener('afterprint', cleanup); };
     window.addEventListener('afterprint', cleanup);
     window.print();
+    Unsaved.clear();
   };
 
   function activate() {
@@ -765,5 +812,10 @@ const PV = (() => {
     if (e.key === 'Escape') { setTool('select'); select(null); return true; }
     return false;
   }
-  return { activate, invalidate, onKey, st, cleanAnnot };
+  // いま持っている注釈の数（閉じたファイルの分も含む。回転だけの記録は数えない）
+  const annCount = () => { let n = 0; for (const [k, a] of mem) if (!k.startsWith('rot:') && a && typeof a === 'object') for (const x of Object.values(a)) n += x ? x.length : 0; return n; };
+  // 閉じたファイルの注釈を忘れる（ブラウザに保存しない設定のとき。keys：ファイルの識別キー）
+  const forget = keys => { for (const k of keys) { mem.delete('ann:' + k); mem.delete('rot:' + k); } };
+  const annCountOf = keys => keys.reduce((n, k) => { const a = mem.get('ann:' + k); return n + (a ? Object.values(a).reduce((m, x) => m + (x ? x.length : 0), 0) : 0); }, 0);
+  return { activate, invalidate, onKey, st, cleanAnnot, annCount, annCountOf, forget };
 })();
