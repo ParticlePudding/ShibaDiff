@@ -126,6 +126,8 @@ const App = (() => {
   }
   async function loadFile(side, file) {
     if (!await confirmDiscard([side], '別のファイルを読み込む')) return;
+    if (!await confirmForget([side], '別のファイルを読み込む', false)) return;
+    toast(''); // 前のファイルについての通知を残さない（新しいファイルの案内と取り違えるため）
     try {
       await withBusy(`${file.name} を読み込み中…`, async () => {
         const bytes = new Uint8Array(await file.arrayBuffer());
@@ -144,6 +146,8 @@ const App = (() => {
   // rel：フォルダ比較の一覧から開いたときの、フォルダからの相対パス（ファイル欄の説明と、パッチの見出しに使う）
   async function loadPair(files, rel) {
     if (!await confirmDiscard([0, 1], '別のファイルを読み込む')) return false;
+    if (!await confirmForget([0, 1], '別のファイルを読み込む', false)) return false;
+    toast(''); // 前のファイルについての通知を残さない
     let failed = false; // 読み込めなかったものがあれば、その通知を残す（変更履歴の通知で上書きしない）
     for (let i = 0; i < 2; i++) {
       if (!files[i]) continue;
@@ -328,15 +332,18 @@ const App = (() => {
   /* 注釈・コメントをブラウザに保存しない設定（既定）のとき、閉じたファイルに付けたものは消す（共用の PC に、人の書き込みを残さない）。
      まだファイルに保存していない（レポート・印刷にも出していない）ものがあれば、消す前に確かめる。
      別のファイルに替えただけのときは消さない（同じファイルを開き直すと戻る。フォルダ比較で順に見ていくときのため） */
-  async function confirmForget(sides, title) {
+  /* 保存していない注釈・コメントがある側を手放す前に確かめる。
+     forget が true（閉じるとき）は、確認のあとメモリからも消す。
+     false（別のファイルを読み込むとき）は、画面から消えるだけで、同じファイルを開き直せば戻るので消さない */
+  async function confirmForget(sides, title, forget = true) {
     if (Settings.get('persist') === true) return true;
     const keys = sides.filter(i => S[i]).map(i => S[i].key);
     const n = PV.annCountOf(keys) + Notes.countOf(keys);
     if (n && Unsaved.on) {
-      const ok = await modal({ title, html: `注釈・コメント ${n} 件は、まだファイルに保存していません。閉じると消えます。<br><span class="muted">残すときは、キャンセルして、［ページ・注釈］の「注釈を保存」でファイルにしてください。</span>`, buttons: [{ label: 'キャンセル', value: false }, { label: '閉じる', primary: true, value: true }] });
+      const ok = await modal({ title, html: `注釈・コメント ${n} 件は、まだファイルに保存していません。${forget ? '閉じると消えます。' : '別のファイルを読み込むと画面から消えます（同じファイルを開き直すと戻ります）。'}<br><span class="muted">残すときは、キャンセルして、［ページ・注釈］の「注釈を保存」でファイルにしてください。</span>`, buttons: [{ label: 'キャンセル', value: false }, { label: '閉じる', primary: true, value: true }] });
       if (!ok) return false;
     }
-    PV.forget(keys); Notes.forget(keys);
+    if (forget) { PV.forget(keys); Notes.forget(keys); }
     return true;
   }
   async function closeSide(side) {
