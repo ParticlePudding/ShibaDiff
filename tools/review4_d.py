@@ -981,6 +981,188 @@ def r18(d):
 
 
 # ==========================================================================================
+# R19 情報システム部：性能・大容量（合計 400MB 以内。大きさに段階をつける。違いの数は、正解に正確に書く）
+# ==========================================================================================
+def r19(d):
+    rnd = random.Random(1919); sku = _sku16()[0]
+    c1, c2, c3, c4, c5, c6 = (f'{d}/{x}' for x in ('1_テキスト', '2_PDF', '3_画像', '4_Excel', '5_フォルダ', '6_同じ内容の大きなファイル'))
+    stores = [(f'S{101 + i}', n + '店') for i, n in enumerate(['緑が丘', '桜台', '北浜', 'みなと本町', '青葉台', '富士見', '旭ヶ丘', '日の出', '東都駅前', '丸山', '白樺', '大和', '新光', '共立', '三栄', '若葉', '泉', '松原', '柏木', '楠'])]
+    pays = ['現金', 'クレジット', '電子マネー', 'コード決済', '商品券']
+
+    # ---- 1) 30万行のテキスト（タブ区切り）
+    A = ['日時\t店舗コード\tレジ\t伝票番号\tJAN\t品名\t数量\t単価\t金額\t税率\t支払\t会員番号']; t = 9 * 3600; day = 1; slip = 2611000000
+    for i in range(299999):
+        t += rnd.randrange(4)
+        if t >= 21 * 3600: t = 9 * 3600; day += 1
+        s = stores[rnd.randrange(20)]; r = sku[rnd.randrange(1500)]; q = rnd.choice((1, 1, 1, 1, 2, 2, 3, 5)); slip += rnd.randrange(2)
+        A.append(f'2026-11-{day:02d} {t // 3600:02d}:{t // 60 % 60:02d}:{t % 60:02d}\t{s[0]}\tR{rnd.randrange(1, 13):02d}\t{slip}\t{r["jan"]}\t{r["name"]} {r["spec"]}\t{q}\t{r["price"]}\t{q * r["price"]}\t{r["tax"]}%\t{pays[rnd.randrange(5)]}\tM{rnd.randrange(10 ** 8):08d}')
+    assert day <= 30 and len(A) == 300000
+    pos = {150 + 300 * k + rnd.randrange(100): ('削除' if k % 50 == 10 else '追加' if k % 50 == 30 else '変更') for k in range(1000)}; B = []; log = []
+    for i, ln in enumerate(A):
+        kind = pos.get(i)
+        if kind == '削除': log.append(('削除（A だけにある行）', i + 1, '')); continue
+        if kind == '変更':
+            f = ln.split('\t')
+            if len(log) % 2: f[10] = pays[(pays.index(f[10]) + 1) % 5]
+            else: f[6] = str(int(f[6]) + 1); f[8] = str(int(f[6]) * int(f[7]))
+            ln2 = '\t'.join(f); assert ln2 != ln; B.append(ln2); log.append(('変更', i + 1, len(B))); continue
+        B.append(ln)
+        if kind == '追加':
+            f = ln.split('\t'); f[3] = str(int(f[3]) + 5000000); f[11] = 'M00000000'; B.append('\t'.join(f)); log.append(('追加（B だけにある行）', '', len(B)))
+    assert len(B) == 300000 and [x[0][:2] for x in log].count('変更') == 960 and len(log) == 1000 and _only(A, B) == (980, 980)
+    text(f'{c1}/販売明細_30万行_A.tsv', '\n'.join(A) + '\n'); text(f'{c1}/販売明細_30万行_B.tsv', '\n'.join(B) + '\n'); mb = lambda p: os.path.getsize(P(p)) / 1e6
+    text(f'{d}/正解_付録1_30万行の変更箇所.tsv', '種類\tA の行番号\tB の行番号\n' + ''.join(f'{a}\t{b}\t{c}\n' for a, b, c in log))
+    first = [x for x in log if x[0] == '変更'][:3]; dels = [x[1] for x in log if x[0].startswith('削除')]; inss = [x[2] for x in log if x[0].startswith('追加')]
+    key(d, '【このフォルダで確かめること】大きなファイルで、固まらない・途中で止められる・待ち時間が分かる・結果が正しい（違いの数が下の数と合う）。時間とメモリは、測った値を報告する',
+           f'1_テキスト/販売明細_30万行_A.tsv → _B.tsv（タブ区切り・UTF-8・LF。どちらも 300,000 行、各 約 {mb(f"{c1}/販売明細_30万行_A.tsv"):.0f}MB）：違いは **1,000 か所**＝変更 960 行＋A だけにある行 20＋B だけにある行 20。どれも隣り合っていない（200 行以上離れている）ので、'
+           f'差分のまとまりも 1,000 個になるはず。変更の中身は、数量と金額、または支払方法。B だけにある行は、直前の行の伝票番号と会員番号を変えたもの。最初の変更は A の {first[0][1]:,} 行目・{first[1][1]:,} 行目・{first[2][1]:,} 行目。'
+           f'A だけにある行（A の行番号）：{"、".join(f"{x:,}" for x in dels)}。B だけにある行（B の行番号）：{"、".join(f"{x:,}" for x in inss)}。1,000 か所すべての行番号は、このフォルダの「正解_付録1_30万行の変更箇所.tsv」にある')
+    del A, B
+
+    # ---- 2) 1行が 500万文字（改行のない JSON）
+    parts = []; n = 0
+    while n < 5000000 - 28:
+        r = sku[len(parts) % 1500]; s = f'{{"id":{len(parts) + 100001},"sku":"{r["jan"]}","name":"{r["name"]} {r["spec"]}","loc":"{"ABCDEFGH"[rnd.randrange(8)]}-{rnd.randrange(1, 40):02d}-{rnd.randrange(1, 9):02d}","qty":{rnd.randrange(100, 1000)},"upd":"2026-11-27T{rnd.randrange(24):02d}:{rnd.randrange(60):02d}:{rnd.randrange(60):02d}"}}'
+        parts.append(s); n += len(s) + 1
+    js = lambda ps: '{"store":"S101","items":[' + ','.join(ps) + ']}'; ja = js(parts); p2 = list(parts); m = len(parts)
+    p2[100] = re.sub(r'"qty":(\d+)', lambda x: f'"qty":{(int(x.group(1)) - 100 + 7) % 900 + 100}', p2[100]); p2[m // 2] = re.sub(r'"loc":"(.)', lambda x: '"loc":"' + ('B' if x.group(1) != 'B' else 'C'), p2[m // 2]); p2[-1] = re.sub(r'(\d)"}$', lambda x: str((int(x.group(1)) + 1) % 10) + '"}', p2[-1]); jb = js(p2)
+    assert len(ja) == len(jb) >= 5000000 and '\n' not in ja and json.loads(ja)['items'][100]['qty'] != json.loads(jb)['items'][100]['qty']
+    dp = [i + 1 for i in range(len(ja)) if ja[i] != jb[i]]; assert 3 <= len(dp) <= 5 and dp[0] < 20000 and dp[-1] > len(ja) - 10
+    text(f'{c1}/在庫一覧_1行500万文字_A.json', ja); text(f'{c1}/在庫一覧_1行500万文字_B.json', jb)
+    key(d, f'1_テキスト/在庫一覧_1行500万文字_A.json → _B.json（改行が1つもない JSON。末尾にも改行なし。どちらも {len(ja):,} 文字・{len(ja.encode("utf-8")):,} バイト、商品 {m:,} 件）：違いは 3 か所（{len(dp)} 文字）＝101 件目の qty（{dp[0]:,} 文字目のあたり）／'
+           f'{m // 2 + 1:,} 件目の loc の先頭の1文字（{[x for x in dp if 20000 < x < len(ja) - 10][0]:,} 文字目）／最後の商品の upd の秒の1文字（{dp[-1]:,} 文字目）。「1行だけが違う」で終わらず、行の中のどこが違うかが分かること')
+    del ja, jb, parts, p2
+
+    # ---- 3) 100列×5万行の CSV
+    pool = [f'{x / 10:.1f}' for x in range(150, 950)]; t0 = datetime.datetime(2026, 11, 20); hd = '日時,ライン,' + ','.join(f'CH{k:03d}' for k in range(1, 99))
+    rows = [f'{(t0 + datetime.timedelta(seconds=10 * i)):%Y-%m-%d %H:%M:%S},L{i % 4 + 1},' + ','.join(rnd.choices(pool, k=98)) for i in range(50000)]
+    pos = {100 + 160 * k + rnd.randrange(60): ('削除' if k % 62 == 20 else '追加' if k % 62 == 40 else '変更') for k in range(310)}; R2 = []; log = []
+    for i, ln in enumerate(rows):
+        kind = pos.get(i)
+        if kind == '削除': log.append(('削除（A だけにある行）', i + 2, '', '', '', '')); continue
+        if kind == '変更':
+            f = ln.split(','); c = rnd.randrange(2, 100); old = f[c]; f[c] = pool[(pool.index(old) + rnd.randrange(1, 400)) % 800]; assert f[c] != old; R2.append(','.join(f)); log.append(('変更', i + 2, len(R2) + 1, f'CH{c - 1:03d}（{c + 1} 列目）', old, f[c])); continue
+        R2.append(ln)
+        if kind == '追加': f = ln.split(','); f[1] = 'L9'; R2.append(','.join(f)); log.append(('追加（B だけにある行）', '', len(R2) + 1, '', '', ''))
+    assert len(R2) == 50000 and len(log) == 310 and sum(1 for x in log if x[0] == '変更') == 300 and len(hd.split(',')) == 100 and all(len(x.split(',')) == 100 for x in rows[:50])
+    text(f'{c1}/センサー計測_100列×5万行_A.csv', hd + '\n' + '\n'.join(rows) + '\n'); text(f'{c1}/センサー計測_100列×5万行_B.csv', hd + '\n' + '\n'.join(R2) + '\n')
+    text(f'{d}/正解_付録2_CSVの変更箇所.tsv', '種類\tA の行番号\tB の行番号\t列\tA の値\tB の値\n' + ''.join('\t'.join(str(v) for v in x) + '\n' for x in log))
+    ch = [x for x in log if x[0] == '変更']
+    key(d, f'1_テキスト/センサー計測_100列×5万行_A.csv → _B.csv（100 列。1行目が見出し、データ 50,000 行＝どちらも 50,001 行、各 約 {mb(f"{c1}/センサー計測_100列×5万行_A.csv"):.0f}MB）：違いは **310 か所**＝セル1つだけが違う行 300＋A だけにある行 5＋B だけにある行 5（隣り合っていない）。'
+           f'最初の3つ：A の {ch[0][1]:,} 行目 {ch[0][3]} {ch[0][4]}→{ch[0][5]}／{ch[1][1]:,} 行目 {ch[1][3]} {ch[1][4]}→{ch[1][5]}／{ch[2][1]:,} 行目 {ch[2][3]} {ch[2][4]}→{ch[2][5]}。'
+           f'A だけにある行（A の行番号）：{"、".join(f"{x[1]:,}" for x in log if x[0].startswith("削除"))}。B だけにある行（B の行番号。ライン名が L9）：{"、".join(f"{x[2]:,}" for x in log if x[0].startswith("追加"))}。すべては「正解_付録2_CSVの変更箇所.tsv」にある。'
+           '1行が 500 文字ほどあるので、違うセル（100 列のうち1つ）がすぐ分かること')
+    del rows, R2
+
+    # ---- 4) 500ページの PDF（文字の PDF。違いは 30 ページ）
+    cp = sorted(rnd.sample(range(2, 500), 28) + [1, 500]); ck = {p: rnd.randrange(30) for p in cp}
+    def pdf500(path, v):
+        c = rl_canvas.Canvas(P(path), pagesize=A4, invariant=1); W, H = A4
+        for i in range(1, 501):
+            c.setFont('IPAG', 13); c.drawString(50, H - 60, f'第{i}節　設備点検手順 {i:03d}'); c.setFont('IPAG', 10)
+            for k in range(30):
+                s = f'{i}.{k + 1}　点検 {i:03d}-{k + 1:02d}：対象の装置の圧力・温度・電流を確かめ、点検票の欄 {k + 1} に記入する。基準値は {((i * 31 + k * 7) % 900) / 10:.1f} とする。'
+                if v and ck.get(i) == k: s = s.replace('記入する。', '記入し、班長の確認を受ける。') if cp.index(i) % 2 else re.sub(r'基準値は [\d.]+', f'基準値は {((i * 31 + k * 7) % 900) / 10 + 2.5:.1f}', s)
+                c.drawString(50, H - 95 - k * 22, s)
+            c.setFont('IPAG', 8); c.drawString(50, 28, '北浜精機株式会社 設備保全課　設備点検手順書 第12版'); c.drawRightString(W - 50, 28, f'{i} / 500'); c.showPage()
+        c.save()
+    pdf500(f'{c2}/設備点検手順書_500ページ_A.pdf', 0); pdf500(f'{c2}/設備点検手順書_500ページ_B.pdf', 1)
+    key(d, f'2_PDF/設備点検手順書_500ページ_A.pdf → _B.pdf（文字の PDF。どちらも 500 ページ・1ページ 30 項目、各 約 {mb(f"{c2}/設備点検手順書_500ページ_A.pdf"):.1f}MB）：違いは **30 ページに 1 行ずつ**（ページの増減はない）。違うページと項目：'
+           + '、'.join(f'{p}ページ（項目 {p}.{ck[p] + 1}＝{"文言" if cp.index(p) % 2 else "基準値 +2.5"}）' for p in cp) + '。文言の変更は「記入する。」→「記入し、班長の確認を受ける。」（15 ページ）、数値の変更は基準値が 2.5 大きい（15 ページ）')
+
+    # ---- 5) 60ページのスキャン PDF（150dpi の画像だけ。違いは 5 ページ）
+    def sheet(n, v):
+        im = Image.new('RGB', (1240, 1754), 'white'); dr = ImageDraw.Draw(im); f = font(25); dr.text((120, 110), f'業務委託契約書（写し）　綴り {n:02d} / 60', fill=(20, 20, 20), font=font(34, True)); dr.line([120, 165, 1120, 165], fill=(20, 20, 20), width=3)
+        for k in range(36):
+            s = (f'第{(n - 1) * 3 + k // 12 + 1}条　' if k % 12 == 0 else '　　') + ['受託者は、委託者の指示に従い、別紙の仕様書に定める業務を誠実に行う。', f'委託料は、月額 {(n * 37 + k * 11) % 90 * 10000 + 180000:,} 円（消費税を別とする。）とする。', '委託者は、毎月末日までに、翌月分を受託者の口座に振り込む。',
+                                                                                       f'契約の期間は、2026年{(n + k) % 12 + 1}月1日から1年間とする。', '受託者は、業務の全部又は一部を、第三者に再委託してはならない。', '受託者は、業務で知った秘密を、第三者に漏らしてはならない。',
+                                                                                       f'検査は、納入の日から {(n + k) % 9 + 5} 日以内に行う。', '不合格のときは、受託者の負担で、すみやかに手直しを行う。', '損害の賠償の額は、委託料の12か月分を上限とする。',
+                                                                                       '本契約に定めのない事項は、甲乙が誠意をもって協議して定める。', f'管理番号 K-{n:02d}{k:02d}-{(n * 7919 + k * 104729) % 100000:05d}', '（以下余白なし）'][(k + n) % 12]
+            if v == 1 and k == 13: s = re.sub(r'月額 [\d,]+ 円', '月額 999,000 円', s) if '月額' in s else s.replace('1年間', '3年間') if '1年間' in s else s + '（改定）'
+            dr.text((120, 210 + k * 40), s, fill=(25, 25, 25), font=f)
+        if v == 2: stamp(im, 980, 1560, '訂正', r=58); dr.line([120, 210 + 20 * 40 + 14, 760, 210 + 20 * 40 + 14], fill=(210, 30, 30), width=4)
+        dr.text((590, 1680), f'- {n} -', fill=(40, 40, 40), font=font(22)); r2 = random.Random(190000 + n)
+        return _scan(im, r2, rot=[0.3, -0.4, 0.5, -0.2, 0.0][n % 5], offset=((n * 3) % 9 - 4, (n * 5) % 11 - 5), noise=2500)
+    sc = [7, 19, 33, 48, 60]; base = [sheet(n, 0) for n in range(1, 61)]; alt = [sheet(n, 2 if n in (33, 60) else 1) if n in sc else base[n - 1] for n in range(1, 61)]
+    assert [n + 1 for n in range(60) if base[n].tobytes() != alt[n].tobytes()] == sc
+    for nm, ims in (('A', base), ('B', alt)): ims[0].save(P(f'{c2}/契約書綴り_スキャン60ページ_{nm}.pdf'), save_all=True, append_images=ims[1:], resolution=150, quality=50)
+    key(d, f'2_PDF/契約書綴り_スキャン60ページ_A.pdf → _B.pdf（紙を取り込んだ形＝150dpi・1240×1754 の画像だけの PDF。文字の情報はない。傾き・ずれ・ごみあり。どちらも 60 ページ、各 約 {mb(f"{c2}/契約書綴り_スキャン60ページ_A.pdf"):.0f}MB）：'
+           '違いは **5 ページ**＝7・19・48 ページ（上から 14 行目の文字が違う）、33・60 ページ（右下に赤い「訂正」の丸い印と、21 行目に赤い下線）。残りの 55 ページは、画素まで同じ画像。重ね合わせの「全ページを調べる」で、5 ページだけが挙がること')
+    del base, alt
+
+    # ---- 6) 10000×7000 の画像
+    def plan(path, v):
+        W, H = 10000, 7000; im = Image.new('RGB', (W, H), 'white'); dr = ImageDraw.Draw(im); dr.rectangle([60, 60, W - 60, H - 60], outline=(0, 0, 0), width=14); dr.text((200, 150), '第2工場 1階　設備配置図　' + ('2026年12月 改訂' if v else '2026年6月'), fill=(0, 0, 0), font=font(200, True))
+        f = font(64)
+        for r in range(10):
+            for c in range(20):
+                x, y = 300 + c * 470, 700 + r * 600; dx = 90 if v and (r, c) == (6, 13) else 0; dr.rectangle([x + dx, y, x + dx + 330, y + 380], outline=(30, 30, 30), width=8, fill=(232, 238, 246) if (r + c) % 3 else (246, 240, 228))
+                dr.text((x + dx + 40, y + 150), f'M-{r + 1:02d}{c + 1:02d}' if not (v and (r, c) == (2, 4)) else f'M-{r + 1:02d}{c + 1:02d}R', fill=(0, 0, 0), font=f)
+            dr.line([200, 700 + r * 600 + 480, W - 200, 700 + r * 600 + 480], fill=(120, 160, 200), width=10)
+        if v: dr.ellipse([9200, 6300, 9500, 6600], outline=(214, 40, 40), width=24)
+        im.save(P(path), compress_level=3); del im
+    plan(f'{c3}/設備配置図_10000x7000_A.png', 0); plan(f'{c3}/設備配置図_10000x7000_B.png', 1)
+    key(d, '3_画像/設備配置図_10000x7000_A.png → _B.png（PNG 10,000×7,000＝7,000万画素。位置ずれなし。設備 200 台の枠と番号）：違いは **4 か所**＝題名の「2026年6月」→「2026年12月 改訂」（左上）／上から3段目・左から5台目の番号 M-0305→M-0305R／'
+           '上から7段目・左から14台目の枠が右へ 90 画素ずれる／右下に赤い丸を追加。大きすぎて縮小して比べるときは、その旨が知らされること、小さな違い（番号の1文字）を見落とさないこと')
+
+    # ---- 7) Excel 20万セル（1,000 行×200 列、数式あり）
+    from xlsxwriter.utility import xl_rowcol_to_cell as rc
+    vals = [[rnd.randrange(10000) for _ in range(200)] for _ in range(999)]; v2 = [list(r) for r in vals]; chg = []
+    for r in sorted(rnd.sample(range(999), 150)):
+        c = rnd.choice([x for x in range(1, 190) if x % 10]); v2[r][c] = (vals[r][c] + rnd.randrange(1, 5000)) % 10000; g = (c // 10 + 1) * 10
+        chg.append((rc(r + 1, c), vals[r][c], v2[r][c], rc(r + 1, g), sum(vals[r][g - 9:g]), sum(v2[r][g - 9:g])))
+    def big(path, vv):
+        wb = xlsxwriter.Workbook(P(path)); ws = wb.add_worksheet('月次集計'); ws.write_row(0, 0, ['店舗・部門コード'] + [f'小計{c // 10}' if c % 10 == 0 else f'品目{c:03d}' for c in range(1, 200)])
+        for r in range(999):
+            ws.write_string(r + 1, 0, f'S{101 + r % 20}-D{r // 20 + 1:02d}')
+            for c in range(1, 200):
+                if c % 10 == 0: ws.write_formula(r + 1, c, f'=SUM({rc(r + 1, c - 9)}:{rc(r + 1, c - 1)})', None, sum(vv[r][c - 9:c]))
+                else: ws.write_number(r + 1, c, vv[r][c])
+        ws.freeze_panes(1, 1); wb.close()
+    big(f'{c4}/月次集計_1000行×200列_A.xlsx', vals); big(f'{c4}/月次集計_1000行×200列_B.xlsx', v2); assert all(a[1] != a[2] and a[4] != a[5] for a in chg) and len(chg) == 150
+    text(f'{d}/正解_付録3_Excelの変更セル.tsv', '値を変えたセル\tA の値\tB の値\t結果が変わる小計のセル（数式は同じ）\tA の値\tB の値\n' + ''.join('\t'.join(str(v) for v in x) + '\n' for x in chg))
+    key(d, '4_Excel/月次集計_1000行×200列_A.xlsx → _B.xlsx（1,000 行（見出し 1＋データ 999）×200 列＝200,000 セル。10 列ごとに「小計」＝直前の 9 列の =SUM(…) の数式が 19 列）：値を変えたセルは **150**（すべて別の行）。'
+           'それぞれ、同じ行の小計の値も変わる（数式は同じ）ので、表示の違うセルは 300。行・列の増減はない。' + f'最初の3つ：{chg[0][0]} {chg[0][1]}→{chg[0][2]}（小計 {chg[0][3]} {chg[0][4]}→{chg[0][5]}）／{chg[1][0]} {chg[1][1]}→{chg[1][2]}／{chg[2][0]} {chg[2][1]}→{chg[2][2]}。'
+           'すべては「正解_付録3_Excelの変更セル.tsv」にある')
+
+    # ---- 8) 8,000 ファイルのフォルダ（階層 5 段）
+    leafs = [f'{a}地区/{s[1]}/{y}年度/{m:02d}月/{k}' for a, ss in zip('東西南北', (stores[0:5], stores[5:10], stores[10:15], stores[15:20])) for s in ss for y in (2025, 2026) for m in range(1, 6) for k in ('売上', '仕入')]
+    files = {}
+    for li, lf in enumerate(leafs):
+        for j in range(20): no = li * 20 + j + 1; files[f'{lf}/伝票_{no:05d}.txt'] = (no, (no * 7919) % 900000 + 1000)
+    assert len(files) == 8000 and len(leafs) == 400
+    body = lambda p, no, amt: f'伝票番号：{no:05d}\n場所：{os.path.dirname(p)}\n金額：{amt:,}円\n担当：{["佐伯", "三好", "岩田", "杉本", "堀内"][no % 5]}\n'
+    gone_leaf = leafs[rnd.randrange(400)]; names = sorted(files); rest = [p for p in names if not p.startswith(gone_leaf + '/')]; pick = rnd.sample(rest, 30 + 100); a_only = sorted([p for p in names if p.startswith(gone_leaf + '/')] + pick[:30]); diff = sorted(pick[30:])
+    new_leaf = leafs[0].replace('01月', '11月'); assert new_leaf not in leafs
+    b_only = {f'{new_leaf}/伝票_{90001 + j:05d}.txt': (90001 + j, 50000 + j * 111) for j in range(10)}; b_only.update({os.path.dirname(p) + f'/伝票_{80001 + j:05d}_追加.txt': (80001 + j, 30000 + j * 77) for j, p in enumerate(rnd.sample(rest, 40))})
+    assert len(a_only) == 50 and len(b_only) == 50 and len(diff) == 100 and not set(a_only) & set(diff)
+    ra, rb_ = os.path.dirname(P(f'{c5}/A/x')), os.path.dirname(P(f'{c5}/B/x')); made = set()
+    def put(root, p, s):
+        dn = os.path.join(root, os.path.dirname(p))
+        if dn not in made: os.makedirs(dn, exist_ok=True); made.add(dn)
+        with open(os.path.join(root, p), 'w', encoding='utf-8', newline='\n') as fh: fh.write(s)
+    gone = set(a_only); dset = set(diff); nA = nB = 0
+    for p, (no, amt) in files.items():
+        put(ra, p, body(p, no, amt)); nA += 1
+        if p not in gone: put(rb_, p, body(p, no, amt + 1000 if p in dset else amt)); nB += 1
+    for p, (no, amt) in b_only.items(): put(rb_, p, body(p, no, amt)); nB += 1
+    assert nA == 8000 and nB == 8000
+    text(f'{d}/正解_付録4_フォルダの違い.tsv', '種類\tパス\n' + ''.join(f'内容が違う\t{p}\n' for p in diff) + ''.join(f'A だけにある\t{p}\n' for p in a_only) + ''.join(f'B だけにある\t{p}\n' for p in sorted(b_only)))
+    key(d, '5_フォルダ/A ↔ 5_フォルダ/B（どちらも **8,000 ファイル**。階層は 5 段＝地区（4）/店舗（5）/年度（2）/月（5）/売上・仕入（2）で、末端のフォルダが 400、その中に小さなテキストが 20 個ずつ）：'
+           f'同じ内容 7,850／**内容が違う 100**（「金額」の行が 1,000円 多い）／**A だけにある 50**（うち 20 個は、フォルダ「{gone_leaf}」がまるごと B にない。残り 30 個はばらばら）／'
+           f'**B だけにある 50**（うち 10 個は、B だけにあるフォルダ「{new_leaf}」の中。残り 40 個は、名前の末尾が「_追加.txt」）。すべてのパスは「正解_付録4_フォルダの違い.tsv」にある')
+
+    # ---- 9) 50MB の同じ内容のファイル
+    blob = b'KITAHAMA-BACKUP\x00\x01' + rnd.randbytes(50000000 - 17); assert len(blob) == 50000000
+    wbytes(f'{c6}/バックアップ_20261127_原本.bin', blob); wbytes(f'{c6}/バックアップ_20261127_複製（完全に同じ）.bin', blob); wbytes(f'{c6}/バックアップ_20261127_複製（最後の1バイトだけ違う）.bin', blob[:-1] + bytes([blob[-1] ^ 0xFF]))
+    key(d, '6_同じ内容の大きなファイル（中身は乱数のバイナリ。3つとも 50,000,000 バイト）：「原本」と「複製（完全に同じ）」は1バイトも違わない／「複製（最後の1バイトだけ違う）」は、最後の1バイト（50,000,000 バイト目）だけが違う。'
+           '「同じ」「違う」が正しく出ること、違う場所（最後）が分かること、大きさが同じでも中身を見ていること。フォルダ比較でこのフォルダどうしを比べたときも同じ',
+           '「正解_付録1〜4」の4つの tsv は、正解の一部（比較の題材ではない）')
+    tot = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(os.path.dirname(P(f'{d}/x'))) for f in fs); assert tot < 400e6, tot
+    key(d, f'このフォルダのファイルの大きさの合計は、約 {tot / 1e6:.0f}MB（{sum(len(fs) for _, _, fs in os.walk(os.path.dirname(P(f"{d}/x")))):,} ファイル）')
+
+
+# ==========================================================================================
 # R20 品質保証部：異常系（壊れたファイル・拡張子違い・パスワード・変わった名前・変わった中身・仕掛けのある中身）
 #     ここで作る「壊れた・仕掛けのあるファイル」は、すべてこのフォルダの中だけに置く。外部のあて先は evil.example（実在しない）
 # ==========================================================================================
@@ -1249,6 +1431,20 @@ _B16 = {
         '`本部通達_第2026-118号.txt` と `本部通達_第2026-118号_訂正版.txt` を比べる。文字化けせずに読めるか（丸数字・㈱・㍑・℡・ローマ数字・半角カナ）。比較の条件の「全角半角を区別しない」をオンにしたとき、**「①」と「(1)」や「1」、「㍑」と「リットル」が同じ扱いになって見落とさないか**。逆に、半角カナと全角カナの違いだけの行は消えるか',
         'マニュアル・価格表・通達のそれぞれでレポートを出し、そのまま店長に渡せるかを見る（どこが変わったかが、ツールを知らない人にも分かるか）。画面・通知・レポートの言葉で、意味の分からなかったものをすべて書き出す'],
     'note': 'このレビュアーは専門用語が苦手、という前提で見る（「エンコーディング」「正規化」「バイナリ」などの言葉が、説明なしに出てこないか）。価格表は行数が多いので、読み込みと比較の秒数も測る。'}
+
+_B19 = {
+    'who': '情報システム部で、社内に配るソフトの評価を担当して8年。全社（約 400 人）への導入の前に、大きなファイルで固まらないか、どこまでの大きさなら使えるかを調べ、時間とメモリを測って報告する。'
+           '利用者から「止まった」「遅い」と問い合わせが来るのを減らしたいので、限界を超えたときの案内と、処理中であることの表示を重く見る。',
+    'tasks': [
+        '`1_テキスト` の3組（`販売明細_30万行_A.tsv` と `_B.tsv`＝約 40MB、`在庫一覧_1行500万文字_A.json` と `_B.json`、`センサー計測_100列×5万行_A.csv` と `_B.csv`）について、読み込み・比較・表示の切り替え（左右に並べる／1列）・スクロール（先頭・中ほど・末尾）・次の違いへの移動・検索・レポート出力の**秒数**を測る。違いの数が `正解.md` と合うかも確かめる',
+        '`2_PDF` の2組（`設備点検手順書_500ページ_A.pdf` と `_B.pdf`、`契約書綴り_スキャン60ページ_A.pdf` と `_B.pdf`）で、読み込み、テキスト比較、ページ表示（最後のページへ移動・拡大）、重ね合わせ（ページ送り、全ページを調べる一括チェック）の秒数。違いのあるページの数が合うか。スキャンの PDF で「文字がない」ことが知らされるか',
+        '`3_画像` の `設備配置図_10000x7000_A.png` と `_B.png`（7,000万画素）を重ね合わせで比べる。読み込めるか、縮小されるならその案内があるか、4 か所の違いが見つかるか。拡大・移動の操作が引っかからないか',
+        '`4_Excel` の `月次集計_1000行×200列_A.xlsx` と `_B.xlsx`（20万セル）の読み込みと比較の秒数、違うセルの数。横に 200 列ある行の表示（横スクロール、違うセルの見つけやすさ）',
+        '`5_フォルダ` の `A` と `B`（各 8,000 ファイル・5 段）をフォルダ比較する。読み込みと比較の秒数、進み具合の表示、内容が違う・片側だけの数、一覧のスクロールと絞り込み、行を開いて戻る操作。`6_同じ内容の大きなファイル` の3つ（各 50MB）を、ファイルとして2つずつ比べたとき、フォルダとして比べたとき',
+        'どの操作でも、画面が**2秒以上固まる所**（操作に反応しない時間）を探す（処理中に、ボタンのクリックやスクロールが効くかを試す。`requestAnimationFrame` の間隔を測る方法でもよい）。処理中の表示（何をしているか・どこまで進んだか）と、中止（途中でやめられるか、やめたあと元の状態に戻るか）',
+        'メモリ（`performance.memory.usedJSHeapSize`。読み込みの前後・比較のあと・ファイルを閉じたあと。閉じたら減るか、同じ操作を5回くり返して増え続けないか）。限界を超えたとき（読めない・比べられない・レポートに入りきらない）の案内が、次に何をすればよいか分かる言葉か'],
+    'note': 'データは合計で 300MB あまり（400MB 以内）。1つの Python の実行は数分までにし、重いものは1組ずつ別の実行に分ける（ブラウザを開き直すと、メモリの測り直しにもなる）。`t.load` は読み込みの完了を待って秒数を返す。待ちの上限（120秒）を超えるときは、'
+            '`t.page.set_input_files` のあと `t.wait_for(…, timeout=600)` を自分で呼ぶ。秒数は、この機械（4 コア・メモリ 15GB）での値として報告する。`正解_付録1〜4` の tsv は正解の一部で、比較の題材ではない。'}
 
 SPEC = [x for x in [
     (16, '店舗運営担当', 'スーパーマーケット本部', globals().get('r16'), globals().get('_B16')),
