@@ -22,13 +22,14 @@
 主なセレクタ:
   タブ: #tabs button[data-tab=text|page|overlay|folder]
   テキスト比較: #tFirst #tPrev #tNext #tLast #tToR #tToL #tAllToR #tAllToL #tUndo #tRedo
-                #oWs(select) #oCase #oBlank #oZen #oFold(checkbox) #searchBox #tFind #tLayout #tPatch #tReport
+                比較条件は details#oPop の中（先に '#oPop summary' を押して開く）：#oWs(select) #oCase #oBlank #oZen
+                #oFold(checkbox) #searchBox #tFind #tLayout #tPatch #tReport
                 ステータス #textStatus、行 .pane .row（.t-c 変更 .t-d 左のみ .t-i 右のみ .cd 文字差分）
   ファイル欄: .slot[data-side="0|1"]  中のボタン button[data-act=edit|save|close] select[data-act=enc|eol]
   ページ表示: ツール [data-tool=select|pen|marker|rect|note|eraser]  #zSel #zIn #zOut #pvShow #pvSync
               #annExport #annImport #pvPrint  列 .pv-col[data-side] 内 svg（注釈レイヤー）
   重ね合わせ: #ovModes button[data-mode=diff|overlay|swipe|blink|side] #ovLPage #ovRPage #ovLNext ...
-              #ovThr #ovTol #ovBoxes #ovFaint #ovDx #ovDy #ovAuto #ovScan #ovScanRes #ovStats #ovRegNext
+              #ovThr #ovTolPx(ずれの許容) #ovColor #ovBoxes #ovFaint #ovDx #ovDy #ovAuto #ovScan #ovScanRes #ovStats #ovRegNext
   フォルダ: .fd-slot[data-side] input（webkitdirectory）→ t.load_folders(left_dir, right_dir)  #fdTable #fdStatus
   モーダル: #modal.on  .dlg .foot button.primary（OK/適用） #askPw #edTa
   ヘルプ: #btnHelp

@@ -66,7 +66,10 @@ const PDF = (() => {
     const out = [];
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
-      const tc = await page.getTextContent({ disableNormalization: false });
+      /* disableNormalization: pdf.js は既定で、取り出した文字に NFKC をかける（µ U+00B5 → μ U+03BC、合字 ﬁ → fi、
+         ノーブレークスペース → 空白 など）。比較ツールでは、元のファイルにある文字をそのまま見せないと、
+         「µ を μ に直した」という改訂が差分に出ない（薬事・計測の文書では見落としになる）。そこで正規化を切る */
+      const tc = await page.getTextContent({ disableNormalization: true });
       out.push(`===== ページ ${i} =====`);
       // 行の判定は、その行の基準（本文の大きさの文字の位置 baseY・高さ baseH）で行う。上付き・下付き（小さい文字が上下に少しずれる）は
       // 同じ行に入れる。前の文字との差だけで見ると、上付き文字のところで行が割れ、変わっていない文が別の行になって差分に出る
