@@ -1,6 +1,6 @@
 {
   "name": "shibadiff",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "description": "WinMerge と DocuWorks Viewer の機能をまとめた単一HTMLの文書比較ツール",
   "scripts": {
     "build": "python3 build.py",

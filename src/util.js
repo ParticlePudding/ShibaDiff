@@ -31,9 +31,13 @@ function busy(on, msg) {
   if (msg) $('#busyMsg').textContent = msg;
   $('#busy').classList.toggle('on', busyCount > 0);
 }
-async function withBusy(msg, fn) {
-  busy(true, msg); await nextFrame(); await nextFrame();
-  try { return await fn(); } finally { busy(false); }
+// opt.onCancel を渡すと、「処理中」の表示に「中止」ボタンを出す（押すと onCancel を呼ぶ。止め方は呼び出し側で決める）
+async function withBusy(msg, fn, opt = {}) {
+  const btn = $('#busyCancel');
+  busy(true, msg);
+  if (opt.onCancel) { btn.hidden = false; btn.onclick = opt.onCancel; }
+  await nextFrame(); await nextFrame();
+  try { return await fn(); } finally { if (opt.onCancel) { btn.hidden = true; btn.onclick = null; } busy(false); }
 }
 
 /* modal: クリックしたボタンの value で解決する Promise を返す。
